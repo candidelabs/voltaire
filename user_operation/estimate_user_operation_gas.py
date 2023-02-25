@@ -142,7 +142,7 @@ async def simulate_validation(
         address=entrypoint_address, abi=entrypoint_abi
     )
     call_data = entrypoint_contract.encodeABI(
-        "simulateValidation", [user_operation.get_transaction_dict()]
+        "simulateValidation", [user_operation.get_user_operation_dict()]
     )
 
     params = [

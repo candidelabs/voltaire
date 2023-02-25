@@ -46,7 +46,7 @@ class UserOperation:
         )
         self.signature = verify_and_get_bytes(jsonRequestDict["signature"])
 
-    def get_transaction_dict(self) -> tuple:
+    def get_user_operation_dict(self) -> tuple:
         return {
             "sender": self.sender,
             "nonce": self.nonce,
