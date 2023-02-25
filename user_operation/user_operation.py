@@ -26,14 +26,18 @@ class UserOperation:
         self.nonce = verify_and_get_uint(jsonRequestDict["nonce"])
         self.init_code = verify_and_get_bytes(jsonRequestDict["initCode"])
         self.call_data = verify_and_get_bytes(jsonRequestDict["callData"])
-        self.call_gas_limit = verify_and_get_uint(jsonRequestDict["callGasLimit"])
+        self.call_gas_limit = verify_and_get_uint(
+            jsonRequestDict["callGasLimit"]
+        )
         self.verification_gas_limit = verify_and_get_uint(
             jsonRequestDict["verificationGasLimit"]
         )
         self.pre_verification_gas = verify_and_get_uint(
             jsonRequestDict["preVerificationGas"]
         )
-        self.max_fee_per_gas = verify_and_get_uint(jsonRequestDict["maxFeePerGas"])
+        self.max_fee_per_gas = verify_and_get_uint(
+            jsonRequestDict["maxFeePerGas"]
+        )
         self.max_priority_fee_per_gas = verify_and_get_uint(
             jsonRequestDict["maxPriorityFeePerGas"]
         )
@@ -56,19 +60,36 @@ class UserOperation:
             "paymasterAndData": self.paymaster_and_data,
             "signature": self.signature,
         }
-    
-    def to_list(self)->list:
-        return [self.sender,
-                self.nonce,
-                self.init_code,
-                self.call_data,
-                self.call_gas_limit,
-                self.verification_gas_limit,
-                self.pre_verification_gas,
-                self.max_fee_per_gas,
-                self.max_priority_fee_per_gas,
-                self.paymaster_and_data,
-                self.signature]
+
+    def get_user_operation_json(self):
+        return {
+            "sender": self.sender,
+            "nonce": hex(self.nonce),
+            "initCode": "0x" + self.init_code.hex(),
+            "callData": "0x" + self.call_data.hex(),
+            "callGasLimit": hex(self.call_gas_limit),
+            "verificationGasLimit": hex(self.verification_gas_limit),
+            "preVerificationGas": hex(self.pre_verification_gas),
+            "maxFeePerGas": hex(self.max_fee_per_gas),
+            "maxPriorityFeePerGas": hex(self.max_priority_fee_per_gas),
+            "paymasterAndData": "0x" + self.paymaster_and_data.hex(),
+            "signature": "0x" + self.signature.hex(),
+        }
+
+    def to_list(self) -> list:
+        return [
+            self.sender,
+            self.nonce,
+            self.init_code,
+            self.call_data,
+            self.call_gas_limit,
+            self.verification_gas_limit,
+            self.pre_verification_gas,
+            self.max_fee_per_gas,
+            self.max_priority_fee_per_gas,
+            self.paymaster_and_data,
+            self.signature,
+        ]
 
 
 def verify_and_get_address(value) -> str:
