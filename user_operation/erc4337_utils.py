@@ -19,7 +19,7 @@ async def get_user_operation_hash(
     )
 
     call_data = entrypoint_contract.encodeABI(
-        "getUserOpHash", [user_operation.get_transaction_dict()]
+        "getUserOpHash", [user_operation.get_user_operation_dict()]
     )
 
     params = [

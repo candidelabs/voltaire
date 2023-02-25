@@ -19,7 +19,7 @@ async def send_bundle(
 
     transactions_dict = []
     for transaction in transactions:
-        transactions_dict.append(transaction.get_transaction_dict())
+        transactions_dict.append(transaction.get_user_operation_dict())
 
     args = [transactions_dict, bundler_address]
     call_data = entrypoint_contract.encodeABI("handleOps", args)
