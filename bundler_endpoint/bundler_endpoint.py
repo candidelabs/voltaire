@@ -151,6 +151,20 @@ class BundlerEndpoint(Endpoint):
         self.mempools[index].clear_user_operations()
         return RPCCallResponseEvent(res["result"])
 
+    async def _event_debug_bundler_dumpMempool(
+        self, rpc_request: RPCCallRequestEvent
+    ) -> RPCCallResponseEvent:
+        entrypoint_address = rpc_request.req_arguments[0]
+
+        index = self.entrypoints.index(entrypoint_address)
+        user_operations = self.mempools[index].user_operations
+
+        user_operations_json = [
+            user_operation.get_user_operation_json()
+            for user_operation in user_operations
+        ]
+        return RPCCallResponseEvent(user_operations_json)
+
     async def _event_rpc_getUserOperationByHash(
         self, rpc_request: RPCCallRequestEvent
     ) -> RPCCallResponseEvent:

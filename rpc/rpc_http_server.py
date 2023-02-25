@@ -84,6 +84,16 @@ async def debug_bundler_sendBundleNow() -> Result:
 
 
 @method
+async def debug_bundler_dumpMempool(entrypoint) -> Result:
+    result = await _handle_rpc_request(
+        endpoint_id="bundler_endpoint",
+        request_type="debug_bundler_dumpMempool",
+        request_arguments=[entrypoint],
+    )
+    return result
+
+
+@method
 async def eth_getUserOperationReceipt(userOperationHash) -> Result:
     result = await _handle_rpc_request(
         endpoint_id="bundler_endpoint",
