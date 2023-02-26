@@ -151,6 +151,15 @@ class BundlerEndpoint(Endpoint):
         self.mempools[index].clear_user_operations()
         return RPCCallResponseEvent(res["result"])
 
+    async def _event_debug_bundler_clearState(
+        self, rpc_request: RPCCallRequestEvent
+    ) -> RPCCallResponseEvent:
+        for mempool in self.mempools:
+            mempool.clear_user_operations()
+
+        response = {"jsonrpc": "2.0", "id": 1, "result": "ok"}
+        return RPCCallResponseEvent(response)
+
     async def _event_debug_bundler_dumpMempool(
         self, rpc_request: RPCCallRequestEvent
     ) -> RPCCallResponseEvent:

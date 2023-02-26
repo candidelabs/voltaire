@@ -84,6 +84,16 @@ async def debug_bundler_sendBundleNow() -> Result:
 
 
 @method
+async def debug_bundler_clearState() -> Result:
+    result = await _handle_rpc_request(
+        endpoint_id="bundler_endpoint",
+        request_type="debug_bundler_clearState",
+        request_arguments="",
+    )
+    return result
+
+
+@method
 async def debug_bundler_dumpMempool(entrypoint) -> Result:
     result = await _handle_rpc_request(
         endpoint_id="bundler_endpoint",
@@ -116,7 +126,7 @@ async def eth_getUserOperationByHash(userOperationHash) -> Result:
 async def handle(request):
     # logging.info(await request.text())
     res = await request.text()
-    # logging.info(res)
+    logging.info(res)
     return web.Response(
         text=await async_dispatch(res), content_type="application/json"
     )
