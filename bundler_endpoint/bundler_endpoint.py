@@ -131,16 +131,17 @@ class BundlerEndpoint(Endpoint):
             self.bundler_address,
             entrypoint_abi,
         )
-        self.mempools[index].user_operations.append(user_operation)
+        mempool = self.mempools[index]
+        mempool.add_user_operation(user_operation)
         return RPCCallResponseEvent(user_operation_hash)
 
     async def _event_debug_bundler_sendBundleNow(
         self, rpc_request: RPCCallRequestEvent
     ) -> RPCCallResponseEvent:
         index = 0
-        transactions = self.mempools[index].user_operations
+        user_operations = self.mempools[index].create_bundle()
         res = await send_bundle(
-            transactions,
+            user_operations,
             self.entrypoints[index],
             self.entrypoints_abis[index],
             self.geth_rpc_url,
@@ -148,7 +149,6 @@ class BundlerEndpoint(Endpoint):
             self.bundler_address,
         )
 
-        self.mempools[index].clear_user_operations()
         return RPCCallResponseEvent(res["result"])
 
     async def _event_debug_bundler_clearState(
@@ -166,7 +166,8 @@ class BundlerEndpoint(Endpoint):
         entrypoint_address = rpc_request.req_arguments[0]
 
         index = self.entrypoints.index(entrypoint_address)
-        user_operations = self.mempools[index].user_operations
+        mempool: Mempool = self.mempools[index]
+        user_operations = mempool.get_user_operations()
 
         user_operations_json = [
             user_operation.get_user_operation_json()
