@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from user_operation.user_operation import UserOperation
 from .sender import Sender
 
+
 @dataclass
 class Mempool:
     entrypoint: str
@@ -10,7 +11,14 @@ class Mempool:
     def clear_user_operations(self):
         self.senders.clear()
 
-    def add_user_operation(self, new_user_operation: UserOperation):
+    async def add_user_operation(
+        self,
+        new_user_operation: UserOperation,
+        entrypoint_address,
+        entrypoint_abi,
+        bundler_address,
+        geth_rpc_url,
+    ):
         new_sender = None
         new_sender_address = new_user_operation.sender
         for sender in self.senders:
@@ -19,7 +27,13 @@ class Mempool:
         if new_sender is None:
             new_sender: Sender = Sender(new_sender_address)
             self.senders.append(new_sender)
-        new_sender.add_user_operation(new_user_operation)
+        await new_sender.add_user_operation(
+            new_user_operation,
+            entrypoint_address,
+            entrypoint_abi,
+            bundler_address,
+            geth_rpc_url,
+        )
 
     def create_bundle(self):
         bundle = []
@@ -28,8 +42,8 @@ class Mempool:
             if len(sender.user_operations) == 0:
                 self.senders.remove(sender)
         return bundle
-    
-    def get_user_operations(self)->list[UserOperation]:
+
+    def get_user_operations(self) -> list[UserOperation]:
         user_operations = [
             user_operation
             for sender in self.senders

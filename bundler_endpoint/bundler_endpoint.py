@@ -132,7 +132,13 @@ class BundlerEndpoint(Endpoint):
             entrypoint_abi,
         )
         mempool = self.mempools[index]
-        mempool.add_user_operation(user_operation)
+        await mempool.add_user_operation(
+            user_operation,
+            entrypoint_address,
+            entrypoint_abi,
+            self.bundler_address,
+            self.geth_rpc_url,
+        )
         return RPCCallResponseEvent(user_operation_hash)
 
     async def _event_debug_bundler_sendBundleNow(
