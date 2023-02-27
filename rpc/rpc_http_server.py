@@ -126,7 +126,7 @@ async def eth_getUserOperationByHash(userOperationHash) -> Result:
 async def handle(request):
     # logging.info(await request.text())
     res = await request.text()
-    logging.info(res)
+    # logging.info(res)
     return web.Response(
         text=await async_dispatch(res), content_type="application/json"
     )
