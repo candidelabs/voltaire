@@ -23,3 +23,12 @@ class FailedOpRevertData:
     opIndex: int | str
     paymaster: str
     reason: str
+
+
+@dataclass
+class DepositInfo:
+    deposit: int | str
+    staked: bool
+    stake: int | str
+    unstake_delay_sec: int | str
+    withdraw_time: int | str

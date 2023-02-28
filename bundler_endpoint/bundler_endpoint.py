@@ -131,16 +131,23 @@ class BundlerEndpoint(Endpoint):
             self.bundler_address,
             entrypoint_abi,
         )
-        self.mempools[index].user_operations.append(user_operation)
+        mempool = self.mempools[index]
+        await mempool.add_user_operation(
+            user_operation,
+            entrypoint_address,
+            entrypoint_abi,
+            self.bundler_address,
+            self.geth_rpc_url,
+        )
         return RPCCallResponseEvent(user_operation_hash)
 
     async def _event_debug_bundler_sendBundleNow(
         self, rpc_request: RPCCallRequestEvent
     ) -> RPCCallResponseEvent:
         index = 0
-        transactions = self.mempools[index].user_operations
+        user_operations = self.mempools[index].create_bundle()
         res = await send_bundle(
-            transactions,
+            user_operations,
             self.entrypoints[index],
             self.entrypoints_abis[index],
             self.geth_rpc_url,
@@ -148,8 +155,16 @@ class BundlerEndpoint(Endpoint):
             self.bundler_address,
         )
 
-        self.mempools[index].clear_user_operations()
         return RPCCallResponseEvent(res["result"])
+
+    async def _event_debug_bundler_clearState(
+        self, rpc_request: RPCCallRequestEvent
+    ) -> RPCCallResponseEvent:
+        for mempool in self.mempools:
+            mempool.clear_user_operations()
+
+        response = {"jsonrpc": "2.0", "id": 1, "result": "ok"}
+        return RPCCallResponseEvent(response)
 
     async def _event_debug_bundler_dumpMempool(
         self, rpc_request: RPCCallRequestEvent
@@ -157,7 +172,8 @@ class BundlerEndpoint(Endpoint):
         entrypoint_address = rpc_request.req_arguments[0]
 
         index = self.entrypoints.index(entrypoint_address)
-        user_operations = self.mempools[index].user_operations
+        mempool: Mempool = self.mempools[index]
+        user_operations = mempool.get_user_operations()
 
         user_operations_json = [
             user_operation.get_user_operation_json()
