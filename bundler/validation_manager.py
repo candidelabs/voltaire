@@ -8,7 +8,7 @@ from eth_abi import decode
 from user_operation.user_operation import UserOperation
 from user_operation.entrypoint_structs import ReturnInfo, StakeInfo, FailedOpRevertData
 from rpc.exceptions import BundlerException, ExceptionCode
-from bundler_endpoint.eth_client_utils import send_rpc_request_to_eth_client
+from bundler.eth_client_utils import send_rpc_request_to_eth_client
 
 
 async def simulate_validation_and_decode_result(

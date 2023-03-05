@@ -1,6 +1,6 @@
 from web3 import Web3
 
-from bundler_endpoint.eth_client_utils import send_rpc_request_to_eth_client
+from bundler.eth_client_utils import send_rpc_request_to_eth_client
 from .estimate_user_operation_gas import estimate_call_gas_limit
 
 

@@ -8,8 +8,8 @@ from eth_abi import decode
 from .user_operation import UserOperation
 from .erc4337_utils import pack_user_operation
 from rpc.exceptions import BundlerException, ExceptionCode
-from bundler_endpoint.eth_client_utils import send_rpc_request_to_eth_client
-from bundler_endpoint.validation_manager import simulate_validation_and_decode_result
+from bundler.eth_client_utils import send_rpc_request_to_eth_client
+from bundler.validation_manager import simulate_validation_and_decode_result
 
 async def estimate_user_operation_gas(
     user_operation: UserOperation,

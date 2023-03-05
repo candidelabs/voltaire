@@ -6,7 +6,7 @@ from signal import SIGINT, SIGTERM
 from boot import init
 from rpc.rpc_http_server import run_rpc_http_server
 from utils.helper import InitData
-from bundler_endpoint.bundler_endpoint import BundlerEndpoint
+from bundler.bundler_endpoint import BundlerEndpoint
 from erros.SignalHaltError import immediate_exit
 
 
