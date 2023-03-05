@@ -35,7 +35,7 @@ class Mempool:
             geth_rpc_url,
         )
 
-    def create_bundle(self):
+    def get_user_operations_to_bundle(self):
         bundle = []
         for sender in self.senders:
             bundle.append(sender.user_operations.pop(0))
@@ -43,7 +43,7 @@ class Mempool:
                 self.senders.remove(sender)
         return bundle
 
-    def get_user_operations(self) -> list[UserOperation]:
+    def get_all_user_operations(self) -> list[UserOperation]:
         user_operations = [
             user_operation
             for sender in self.senders

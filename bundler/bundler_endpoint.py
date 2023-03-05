@@ -145,7 +145,7 @@ class BundlerEndpoint(Endpoint):
         self, rpc_request: RPCCallRequestEvent
     ) -> RPCCallResponseEvent:
         index = 0
-        user_operations = self.mempools[index].create_bundle()
+        user_operations = self.mempools[index].get_user_operations_to_bundle()
         res = await send_bundle(
             user_operations,
             self.entrypoints[index],
@@ -173,7 +173,7 @@ class BundlerEndpoint(Endpoint):
 
         index = self.entrypoints.index(entrypoint_address)
         mempool: Mempool = self.mempools[index]
-        user_operations = mempool.get_user_operations()
+        user_operations = mempool.get_all_user_operations()
 
         user_operations_json = [
             user_operation.get_user_operation_json()
