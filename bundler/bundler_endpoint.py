@@ -22,7 +22,7 @@ from user_operation.get_user_operation import (
     get_user_operation_receipt,
     get_user_operation_by_hash,
 )
-from .mempool import Mempool
+from .mempool_manager import Mempool
 from user_operation.erc4337_utils import get_user_operation_hash
 from rpc.exceptions import BundlerException, ExceptionCode
 
