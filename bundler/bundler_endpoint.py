@@ -15,7 +15,7 @@ from user_operation.estimate_user_operation_gas import (
     estimate_user_operation_gas,
     simulate_validation_and_decode_result,
 )
-from user_operation.send_user_operation import send_bundle
+from .bundle_manager import send_bundle
 from .eth_client_utils import send_rpc_request_to_eth_client
 
 from user_operation.get_user_operation import (
