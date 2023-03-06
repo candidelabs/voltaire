@@ -34,7 +34,7 @@ async def get_user_operation_hash(
     result = await send_rpc_request_to_eth_client(
         geth_rpc_url, "eth_call", params
     )
-    return result
+    return result['result']
 
 
 def pack_user_operation(user_operation):
