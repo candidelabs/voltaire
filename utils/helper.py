@@ -6,8 +6,8 @@ from eth_account import Account
 
 @dataclass()
 class InitData:
-    entrypoints: list()
-    entrypoint_abis: list()
+    entrypoint: list()
+    entrypoint_abi: list()
     rpc_url: str
     rpc_port: int
     geth_url: str

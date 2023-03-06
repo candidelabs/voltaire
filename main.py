@@ -27,8 +27,8 @@ async def main():
             initData.geth_url,
             initData.bundler_pk,
             initData.bundler_address,
-            initData.entrypoints,
-            initData.entrypoint_abis,
+            initData.entrypoint,
+            initData.entrypoint_abi,
         )
         tg.create_task(gch.start_bundler_endpoint())
         tg.create_task(

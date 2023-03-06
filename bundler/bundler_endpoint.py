@@ -1,6 +1,4 @@
 import logging
-from dataclasses import field
-from functools import partial
 import re
 from eth_abi import decode
 from web3 import Web3
@@ -29,40 +27,34 @@ from rpc.exceptions import BundlerException, ExceptionCode
 
 class BundlerEndpoint(Endpoint):
     geth_rpc_url: str
-    bundler_private_key: str = field()
-    bundler_address: str = field()
-    entrypoints: list = field(default_factory=list)
-    entrypoints_abis: list = field(default_factory=list)
-    mempools: list = field(default_factory=list)
+    bundler_private_key: str
+    bundler_address: str
+    entrypoint: str
+    entrypoint_abi: str
+    mempool: Mempool
 
     def __init__(
         self,
         geth_rpc_url,
         bundler_private_key,
         bundler_address,
-        entrypoints,
-        entrypoints_abis,
+        entrypoint,
+        entrypoint_abi,
     ):
         super().__init__("bundler_endpoint")
 
         self.geth_rpc_url = geth_rpc_url
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
-        self.entrypoints = entrypoints
-        self.entrypoints_abis = entrypoints_abis
-        self.mempools = []
-        for entrypoint in entrypoints:
-            self.mempools.append(Mempool(entrypoint))
+        self.entrypoint = entrypoint
+        self.entrypoint_abi = entrypoint_abi
+        self.mempool = Mempool(entrypoint)
 
     async def start_bundler_endpoint(self) -> None:
         self.add_events_and_response_functions_by_prefix(
             prefix="_event_", decorator_func=exception_handler_decorator
         )
         await self.start_server()
-
-    def _get_entrypoint_abi(self, entrypoint_addr) -> str:
-        index = self.entrypoints.index(entrypoint_addr)
-        return self.entrypoints_abis[index]
 
     async def _event_rpc_chainId(
         self, rpc_request: RPCCallRequestEvent
@@ -75,7 +67,7 @@ class BundlerEndpoint(Endpoint):
     async def _event_rpc_supportedEntryPoints(
         self, rpc_request: RPCCallRequestEvent
     ) -> RPCCallResponseEvent:
-        return RPCCallResponseEvent(self.entrypoints)
+        return RPCCallResponseEvent([self.entrypoint])
 
     async def _event_rpc_estimateUserOperationGas(
         self, rpc_request: RPCCallRequestEvent
@@ -91,7 +83,7 @@ class BundlerEndpoint(Endpoint):
         ) = await estimate_user_operation_gas(
             user_operation,
             entrypoint,
-            self._get_entrypoint_abi(entrypoint),
+            self.entrypoint_abi,
             self.geth_rpc_url,
             self.bundler_address,
         )
@@ -111,14 +103,10 @@ class BundlerEndpoint(Endpoint):
         user_operation: UserOperation = rpc_request.req_arguments[0]
         entrypoint_address = rpc_request.req_arguments[1]
 
-        index = self.entrypoints.index(entrypoint_address)
-
-        entrypoint_abi = self.entrypoints_abis[index]
-
         user_operation_hash_json = await get_user_operation_hash(
             user_operation,
             entrypoint_address,
-            entrypoint_abi,
+            self.entrypoint_abi,
             self.geth_rpc_url,
             self.bundler_address,
         )
@@ -129,13 +117,12 @@ class BundlerEndpoint(Endpoint):
             entrypoint_address,
             self.geth_rpc_url,
             self.bundler_address,
-            entrypoint_abi,
+            self.entrypoint_abi,
         )
-        mempool = self.mempools[index]
-        await mempool.add_user_operation(
+        await self.mempool.add_user_operation(
             user_operation,
             entrypoint_address,
-            entrypoint_abi,
+            self.entrypoint_abi,
             self.bundler_address,
             self.geth_rpc_url,
         )
@@ -144,12 +131,11 @@ class BundlerEndpoint(Endpoint):
     async def _event_debug_bundler_sendBundleNow(
         self, rpc_request: RPCCallRequestEvent
     ) -> RPCCallResponseEvent:
-        index = 0
-        user_operations = self.mempools[index].get_user_operations_to_bundle()
+        user_operations = self.mempool.get_user_operations_to_bundle()
         res = await send_bundle(
             user_operations,
-            self.entrypoints[index],
-            self.entrypoints_abis[index],
+            self.entrypoint,
+            self.entrypoint_abi,
             self.geth_rpc_url,
             self.bundler_private_key,
             self.bundler_address,
@@ -160,7 +146,7 @@ class BundlerEndpoint(Endpoint):
     async def _event_debug_bundler_clearState(
         self, rpc_request: RPCCallRequestEvent
     ) -> RPCCallResponseEvent:
-        for mempool in self.mempools:
+        for mempool in self.mempool:
             mempool.clear_user_operations()
 
         response = {"jsonrpc": "2.0", "id": 1, "result": "ok"}
@@ -171,9 +157,7 @@ class BundlerEndpoint(Endpoint):
     ) -> RPCCallResponseEvent:
         entrypoint_address = rpc_request.req_arguments[0]
 
-        index = self.entrypoints.index(entrypoint_address)
-        mempool: Mempool = self.mempools[index]
-        user_operations = mempool.get_all_user_operations()
+        user_operations = self.mempool.get_all_user_operations()
 
         user_operations_json = [
             user_operation.get_user_operation_json()
@@ -193,15 +177,13 @@ class BundlerEndpoint(Endpoint):
                 "",
             )
 
-        entrypoint_add = self.entrypoints[0]
-
         (
             handle_op_input,
             block_number,
             block_hash,
             transaction_hash,
         ) = await get_user_operation_by_hash(
-            self.geth_rpc_url, entrypoint_add, user_operation_hash
+            self.geth_rpc_url, self.entrypoint, user_operation_hash
         )
 
         user_operation = decode_handle_op_input(handle_op_input)
@@ -221,7 +203,7 @@ class BundlerEndpoint(Endpoint):
         }
         user_operation_by_hash_json = {
             "userOperation": user_operation_json,
-            "entryPoint": entrypoint_add,
+            "entryPoint": self.entrypoint,
             "blockNumber": block_number,
             "blockHash": block_hash,
             "transactionHash": transaction_hash,
@@ -240,13 +222,11 @@ class BundlerEndpoint(Endpoint):
                 "",
             )
 
-        entrypoint_add = self.entrypoints[0]
-
         (
             receipt_info,
             user_operation_receipt_info,
         ) = await get_user_operation_receipt(
-            self.geth_rpc_url, entrypoint_add, user_operation_hash
+            self.geth_rpc_url, self.entrypoint, user_operation_hash
         )
 
         receipt_info_json = {
@@ -263,7 +243,7 @@ class BundlerEndpoint(Endpoint):
         }
         user_operation_receipt_info_json = {
             "userOpHash": user_operation_receipt_info.userOpHash,
-            "entryPoint": entrypoint_add,
+            "entryPoint": self.entrypoint,
             "sender": user_operation_receipt_info.sender,
             "nonce": hex(user_operation_receipt_info.nonce),
             "paymaster": user_operation_receipt_info.paymaster,

@@ -31,10 +31,9 @@ def init() -> InitData:
         epilog="Candide Labs : http://candidewallet.com - Github : https://github.com/candidelabs",
     )
     parser.add_argument(
-        "entrypoints",
-        metavar="--entrypoints",
+        "entrypoint",
+        metavar="--entrypoint",
         type=entrypoint,
-        nargs="+",
         help="supported entrypoints addresses",
     )
 
@@ -108,8 +107,8 @@ def init() -> InitData:
     entrypoint_abi = data["abi"]
 
     ret = InitData(
-        args.entrypoints,
-        [entrypoint_abi],
+        args.entrypoint,
+        entrypoint_abi,
         args.rpc_url,
         args.rpc_port,
         args.geth_url,
