@@ -1,8 +1,8 @@
 from web3 import Web3
 
-from bundler.eth_client_utils import send_rpc_request_to_eth_client
-from user_operation.estimate_user_operation_gas import estimate_call_gas_limit
-from .mempool_manager import Mempool
+from utils.eth_client_utils import send_rpc_request_to_eth_client
+from user_operation.user_operation_handler import UserOperationHandler
+from .mempool_manager import MempoolManager
 
 class BundlerManager():
     geth_rpc_url: str
@@ -10,30 +10,29 @@ class BundlerManager():
     bundler_address: str
     entrypoint: str
     entrypoint_abi: str
-    mempool: Mempool
+    mempool_manager: MempoolManager
+    user_operation_handler: UserOperationHandler
 
     def __init__(
         self,
+        mempool_manager,
+        user_operation_handler,
         geth_rpc_url,
         bundler_private_key,
         bundler_address,
         entrypoint,
         entrypoint_abi,
     ):
+        self.mempool_manager = mempool_manager
+        self.user_operation_handler = user_operation_handler
         self.geth_rpc_url = geth_rpc_url
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
         self.entrypoint_abi = entrypoint_abi
-        self.mempool = Mempool(
-            geth_rpc_url,
-            bundler_private_key,
-            bundler_address,
-            entrypoint,
-            entrypoint_abi)
 
     async def send_next_bundle(self):
-        user_operations = self.mempool.get_user_operations_to_bundle()
+        user_operations = self.mempool_manager.get_user_operations_to_bundle()
         return await self.send_bundle(user_operations)
 
     async def send_bundle(self, user_operations):
@@ -48,11 +47,10 @@ class BundlerManager():
 
         args = [transactions_dict, self.bundler_address]
         call_data = entrypoint_contract.encodeABI("handleOps", args)
-        gasEstimation = await estimate_call_gas_limit(
+        gasEstimation = await self.user_operation_handler.estimate_call_gas_limit(
             call_data,
             _from=self.bundler_address,
             to=self.entrypoint,
-            geth_rpc_url=self.geth_rpc_url,
         )
 
         gasPrice = await send_rpc_request_to_eth_client(

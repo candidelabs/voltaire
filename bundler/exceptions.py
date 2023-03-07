@@ -3,7 +3,7 @@ from enum import Enum
 from dataclasses import dataclass, field
 
 
-class ExceptionCode(Enum):
+class BundlerExceptionCode(Enum):
     REJECTED_BY_EP_OR_ACCOUNT = -32500
     REJECTED_BY_PAYMASTER = -32501
     BANNED_OPCODE = -32502
@@ -20,13 +20,6 @@ class ExceptionCode(Enum):
 
 @dataclass
 class BundlerException(Exception):
-    exception_code: ExceptionCode
-    message: str
-    data: bytes
-
-
-@dataclass
-class SanityCheckException(Exception):
-    error_code: ExceptionCode
+    exception_code: BundlerExceptionCode
     message: str
     data: bytes

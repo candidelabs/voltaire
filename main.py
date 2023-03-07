@@ -3,15 +3,15 @@ import uvloop
 from functools import partial
 from signal import SIGINT, SIGTERM
 
-from boot import init
+from init import initialize
 from rpc.rpc_http_server import run_rpc_http_server
-from utils.helper import InitData
-from bundler.bundler_endpoint import BundlerEndpoint
+from init import InitData
+from bundler.execution_endpoint import ExecutionEndpoint
 from erros.SignalHaltError import immediate_exit
 
 
 async def main():
-    initData: InitData = init()
+    initData: InitData = initialize()
 
     loop = asyncio.get_running_loop()
 
@@ -22,16 +22,16 @@ async def main():
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
     # loop.set_debug(True)
-    async with asyncio.TaskGroup() as tg:
-        gch: BundlerEndpoint = BundlerEndpoint(
+    async with asyncio.TaskGroup() as task_group:
+        execution_endpoint: ExecutionEndpoint = ExecutionEndpoint(
             initData.geth_url,
             initData.bundler_pk,
             initData.bundler_address,
             initData.entrypoint,
             initData.entrypoint_abi,
         )
-        tg.create_task(gch.start_bundler_endpoint())
-        tg.create_task(
+        task_group.create_task(execution_endpoint.start_execution_endpoint())
+        task_group.create_task(
             run_rpc_http_server(host=initData.rpc_url, port=initData.rpc_port)
         )
 

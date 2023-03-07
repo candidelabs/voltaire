@@ -2,9 +2,9 @@ import logging
 import argparse
 import re
 import json
+from dataclasses import dataclass
 
-from utils.helper import InitData
-from utils.helper import get_account
+from utils.import_key import import_bundler_account
 
 VOLTAIRE_HEADER = "\n".join(
     (
@@ -16,6 +16,15 @@ VOLTAIRE_HEADER = "\n".join(
     )
 )
 
+@dataclass()
+class InitData:
+    entrypoint: list()
+    entrypoint_abi: list()
+    rpc_url: str
+    rpc_port: int
+    geth_url: str
+    bundler_pk: str
+    bundler_address: str
 
 def entrypoint(ep):
     address_pattern = "^0x[0-9,a-f,A-F]{40}$"
@@ -24,7 +33,7 @@ def entrypoint(ep):
     return ep
 
 
-def init() -> InitData:
+def initialize() -> InitData:
     parser = argparse.ArgumentParser(
         prog="Voltaire",
         description="EIP-4337 python Bundler",
@@ -98,7 +107,7 @@ def init() -> InitData:
 
     args = parser.parse_args()
 
-    bundler_address, bundler_pk = get_account(
+    bundler_address, bundler_pk = import_bundler_account(
         args.keystoreFilePaassword, args.keystoreFilePath
     )
 

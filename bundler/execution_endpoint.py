@@ -9,29 +9,26 @@ from aiohttp import ClientSession
 from event_bus_manager.endpoint import Endpoint
 from rpc.events import RPCCallRequestEvent, RPCCallResponseEvent
 from user_operation.user_operation import UserOperation
-from user_operation.estimate_user_operation_gas import (
-    estimate_user_operation_gas,
-)
 
-from .eth_client_utils import send_rpc_request_to_eth_client
+from utils.eth_client_utils import send_rpc_request_to_eth_client
 
-from user_operation.get_user_operation import (
-    get_user_operation_receipt,
-    get_user_operation_by_hash,
-)
-from .mempool_manager import Mempool
-from user_operation.erc4337_utils import get_user_operation_hash
-from rpc.exceptions import BundlerException, ExceptionCode
+from .mempool_manager import MempoolManager
+from user_operation.user_operation_handler import UserOperationHandler
+from bundler.exceptions import BundlerException, BundlerExceptionCode
 from .bundle_manager import BundlerManager
+from .validation_manager import ValidationManager
 
 
-class BundlerEndpoint(Endpoint):
+class ExecutionEndpoint(Endpoint):
     geth_rpc_url: str
     bundler_private_key: str
     bundler_address: str
     entrypoint: str
     entrypoint_abi: str
     bundle_manager: BundlerManager
+    mempool_manager: MempoolManager
+    validation_manager: ValidationManager
+    user_operation_handler: UserOperationHandler
 
     def __init__(
         self,
@@ -48,14 +45,42 @@ class BundlerEndpoint(Endpoint):
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
         self.entrypoint_abi = entrypoint_abi
-        self.bundle_manager = BundlerManager(
+        
+        self.validation_manager = ValidationManager(
             geth_rpc_url,
             bundler_private_key,
             bundler_address,
             entrypoint,
             entrypoint_abi)
+        
+        self.user_operation_handler = UserOperationHandler(
+            self.validation_manager,
+            geth_rpc_url,
+            bundler_private_key,
+            bundler_address,
+            entrypoint,
+            entrypoint_abi)
+        
+        self.mempool_manager = MempoolManager(
+            self.validation_manager,
+            self.user_operation_handler,
+            geth_rpc_url,
+            bundler_private_key,
+            bundler_address,
+            entrypoint,
+            entrypoint_abi)
+        
+        self.bundle_manager = BundlerManager(
+            self.mempool_manager,
+            self.user_operation_handler,
+            geth_rpc_url,
+            bundler_private_key,
+            bundler_address,
+            entrypoint,
+            entrypoint_abi)
+        
 
-    async def start_bundler_endpoint(self) -> None:
+    async def start_execution_endpoint(self) -> None:
         self.add_events_and_response_functions_by_prefix(
             prefix="_event_", decorator_func=exception_handler_decorator
         )
@@ -80,27 +105,11 @@ class BundlerEndpoint(Endpoint):
         user_operation: UserOperation = rpc_request.req_arguments[0]
         entrypoint = rpc_request.req_arguments[1]
 
-        (
-            call_gas_limit,
-            preverification_gas,
-            pre_operation_gas,
-            deadline,
-        ) = await estimate_user_operation_gas(
-            user_operation,
-            entrypoint,
-            self.entrypoint_abi,
-            self.geth_rpc_url,
-            self.bundler_address,
+        estimated_gas_json = await self.user_operation_handler.estimate_user_operation_gas_rpc(
+            user_operation
         )
 
-        response_params = {
-            "callGasLimit": call_gas_limit,
-            "preVerificationGas": preverification_gas,
-            "verificationGas": pre_operation_gas,
-            "deadline": deadline,
-        }
-
-        return RPCCallResponseEvent(response_params)
+        return RPCCallResponseEvent(estimated_gas_json)
 
     async def _event_rpc_sendUserOperation(
         self, rpc_request: RPCCallRequestEvent
@@ -108,7 +117,7 @@ class BundlerEndpoint(Endpoint):
         user_operation: UserOperation = rpc_request.req_arguments[0]
         entrypoint_address = rpc_request.req_arguments[1]
 
-        user_operation_hash = await self.bundle_manager.mempool.add_user_operation(
+        user_operation_hash = await self.mempool_manager.add_user_operation(
             user_operation)
         return RPCCallResponseEvent(user_operation_hash)
 
@@ -122,7 +131,7 @@ class BundlerEndpoint(Endpoint):
     async def _event_debug_bundler_clearState(
         self, rpc_request: RPCCallRequestEvent
     ) -> RPCCallResponseEvent:
-        self.bundle_manager.mempool.clear_user_operations()
+        self.mempool_manager.clear_user_operations()
 
         return RPCCallResponseEvent("ok")
 
@@ -131,7 +140,7 @@ class BundlerEndpoint(Endpoint):
     ) -> RPCCallResponseEvent:
         entrypoint_address = rpc_request.req_arguments[0]
 
-        user_operations = self.bundle_manager.mempool.get_all_user_operations()
+        user_operations = self.mempool_manager.get_all_user_operations()
 
         user_operations_json = [
             user_operation.get_user_operation_json()
@@ -146,42 +155,13 @@ class BundlerEndpoint(Endpoint):
 
         if not is_hash(user_operation_hash):
             raise BundlerException(
-                ExceptionCode.INVALID_USEROPHASH,
+                BundlerExceptionCode.INVALID_USEROPHASH,
                 "Missing/invalid userOpHash",
                 "",
             )
 
-        (
-            handle_op_input,
-            block_number,
-            block_hash,
-            transaction_hash,
-        ) = await get_user_operation_by_hash(
-            self.geth_rpc_url, self.entrypoint, user_operation_hash
-        )
+        user_operation_by_hash_json = await self.user_operation_handler.get_user_operation_by_hash_rpc(user_operation_hash)
 
-        user_operation = decode_handle_op_input(handle_op_input)
-
-        user_operation_json = {
-            "sender": Web3.to_checksum_address(user_operation[0]),
-            "nonce": hex(user_operation[1]),
-            "initCode": "0x" + user_operation[2].hex(),
-            "callData": "0x" + user_operation[3].hex(),
-            "callGasLimit": hex(user_operation[4]),
-            "verificationGasLimit": hex(user_operation[5]),
-            "preVerificationGas": hex(user_operation[6]),
-            "maxFeePerGas": hex(user_operation[7]),
-            "maxPriorityFeePerGas": hex(user_operation[8]),
-            "paymasterAndData": "0x" + user_operation[9].hex(),
-            "signature": "0x" + user_operation[10].hex(),
-        }
-        user_operation_by_hash_json = {
-            "userOperation": user_operation_json,
-            "entryPoint": self.entrypoint,
-            "blockNumber": block_number,
-            "blockHash": block_hash,
-            "transactionHash": transaction_hash,
-        }
         return RPCCallResponseEvent(user_operation_by_hash_json)
 
     async def _event_rpc_getUserOperationReceipt(
@@ -191,42 +171,14 @@ class BundlerEndpoint(Endpoint):
 
         if not is_hash(user_operation_hash):
             raise BundlerException(
-                ExceptionCode.INVALID_USEROPHASH,
+                BundlerExceptionCode.INVALID_USEROPHASH,
                 "Missing/invalid userOpHash",
                 "",
             )
 
-        (
-            receipt_info,
-            user_operation_receipt_info,
-        ) = await get_user_operation_receipt(
-            self.geth_rpc_url, self.entrypoint, user_operation_hash
+        user_operation_receipt_info_json = await self.user_operation_handler.get_user_operation_receipt_rpc(
+            user_operation_hash
         )
-
-        receipt_info_json = {
-            "blockHash": receipt_info.blockHash,
-            "blockNumber": receipt_info.blockNumber,
-            "from": receipt_info._from,
-            "cumulativeGasUsed": receipt_info.cumulativeGasUsed,
-            "gasUsed": receipt_info.gasUsed,
-            "logs": receipt_info.logs,
-            "logsBloom": receipt_info.logsBloom,
-            "transactionHash": receipt_info.transactionHash,
-            "transactionIndex": receipt_info.transactionIndex,
-            "effectiveGasPrice": receipt_info.effectiveGasPrice,
-        }
-        user_operation_receipt_info_json = {
-            "userOpHash": user_operation_receipt_info.userOpHash,
-            "entryPoint": self.entrypoint,
-            "sender": user_operation_receipt_info.sender,
-            "nonce": hex(user_operation_receipt_info.nonce),
-            "paymaster": user_operation_receipt_info.paymaster,
-            "actualGasCost": user_operation_receipt_info.actualGasCost,
-            "actualGasUsed": user_operation_receipt_info.actualGasUsed,
-            "success": user_operation_receipt_info.success,
-            "logs": user_operation_receipt_info.logs,
-            "receipt": receipt_info_json,
-        }
 
         return RPCCallResponseEvent(user_operation_receipt_info_json)
 
@@ -249,12 +201,3 @@ def is_hash(user_operation_hash):
         isinstance(user_operation_hash, str)
         and re.match(hash_pattern, user_operation_hash) is not None
     )
-
-
-def decode_handle_op_input(handle_op_input):
-    INPUT_ABI = [
-        "(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)[]",
-        "address",
-    ]
-    inputResult = decode(INPUT_ABI, bytes.fromhex(handle_op_input[10:]))
-    return inputResult[0][0]

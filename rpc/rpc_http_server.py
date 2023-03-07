@@ -7,7 +7,7 @@ from typing import Any
 from event_bus_manager.endpoint import Client
 from rpc.events import RPCCallRequestEvent, RPCCallResponseEvent
 from user_operation.user_operation import UserOperation
-from .exceptions import BundlerException
+from bundler.exceptions import BundlerException
 
 
 async def _handle_rpc_request(
