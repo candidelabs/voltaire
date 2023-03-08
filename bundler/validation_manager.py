@@ -34,7 +34,7 @@ class ValidationManager:
         self.entrypoint = entrypoint
         self.entrypoint_abi = entrypoint_abi
 
-        path = "utils/BundlerCollectorTracer.js"
+        path = "utils/BundlerCollectorTracer.min.js"
         with open(path) as keyfile:
             self.bundler_collector_tracer = keyfile.read()
 
