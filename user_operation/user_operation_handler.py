@@ -289,6 +289,12 @@ class UserOperationHandler:
         res = await send_rpc_request_to_eth_client(
             self.geth_rpc_url, "eth_getLogs", params
         )
+
+        if(len(res["result"]) < 1):
+            raise BundlerException(
+                BundlerExceptionCode.INVALID_USEROPHASH, "null", ""
+            )
+            
         log = res["result"][0]
 
         log_object = Log(
