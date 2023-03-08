@@ -60,8 +60,11 @@ class BundlerManager:
             self.geth_rpc_url, "eth_gasPrice"
         )
 
+        chain_id = await send_rpc_request_to_eth_client(
+            self.geth_rpc_url, "eth_chainId"
+        )
         txnDict = {
-            "chainId": w3Provider.eth.chain_id,
+            "chainId": chain_id['result'],
             "from": self.bundler_address,
             "to": self.entrypoint,
             "nonce": w3Provider.eth.get_transaction_count(
