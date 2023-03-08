@@ -47,6 +47,8 @@ class MempoolManager:
             user_operation
         )
 
+        await self.validation_manager.check_banned_op_codes(user_operation)
+
         new_sender = None
         new_sender_address = user_operation.sender
 

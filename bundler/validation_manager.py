@@ -16,6 +16,8 @@ class ValidationManager():
     bundler_address: str
     entrypoint: str
     entrypoint_abi: str
+    bundler_collector_tracer:str
+    banned_opcodes:list()
 
     def __init__(
         self,
@@ -30,6 +32,28 @@ class ValidationManager():
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
         self.entrypoint_abi = entrypoint_abi
+
+        path = "utils/BundlerCollectorTracer.js"
+        with open(path) as keyfile:
+            self.bundler_collector_tracer = keyfile.read()
+
+        self.banned_opcodes = [
+            "GAS",
+            "NUMBER",
+            "TIMESTAMP",
+            "COINBASE",
+            "DIFFICULTY",
+            "BASEFEE",
+            "GASLIMIT",
+            "GASPRICE",
+            "SELFBALANCE",
+            "BALANCE",
+            "ORIGIN",
+            "BLOCKHASH",
+            "CREATE",
+            "CREATE2",
+            "SELFDESTRUCT"
+            ]
         
     async def simulate_validation_and_decode_result(
         self,
@@ -141,3 +165,63 @@ class ValidationManager():
         solidity_error_params = error_data[10:]
 
         return solidity_error_selector, solidity_error_params
+    
+    async def check_banned_op_codes(self, user_operation: UserOperation):
+        factory_opcodes, account_opcodes, paymaster_opcodes = await self.get_user_operation_banned_opcodes(user_operation)
+        
+        await asyncio.gather(
+            self.verify_banned_opcodes(factory_opcodes, 'factory'),
+            self.verify_banned_opcodes(account_opcodes, 'account'),
+            self.verify_banned_opcodes(paymaster_opcodes, 'paymaster')
+        )
+
+    async def get_user_operation_banned_opcodes(self,user_operation: UserOperation):
+        debug_data = await self.get_debug_traceCall_data(user_operation)
+
+        factory_opcodes = debug_data['numberLevels'][0]['opcodes']
+        account_opcodes = debug_data['numberLevels'][1]['opcodes']
+        paymaster_opcodes = debug_data['numberLevels'][2]['opcodes']
+
+        return factory_opcodes, account_opcodes, paymaster_opcodes
+    
+
+    async def get_debug_traceCall_data(self,user_operation: UserOperation):
+        simultion_gas = user_operation.pre_verification_gas + user_operation.verification_gas_limit
+        
+        w3_provider = Web3()
+        entrypoint_contract = w3_provider.eth.contract(
+            address=self.entrypoint, abi=self.entrypoint_abi
+        )
+        call_data = entrypoint_contract.encodeABI(
+            "simulateValidation", [user_operation.get_user_operation_dict()]
+        )
+
+        params = [
+            {
+                "from": self.bundler_address,
+                "to": self.entrypoint,
+                "data": call_data,
+                "gasLimit":simultion_gas,
+            },
+            "latest",
+            {
+             "tracer": self.bundler_collector_tracer
+            }
+        ]
+
+        res = await send_rpc_request_to_eth_client(
+            self.geth_rpc_url, "debug_traceCall", params
+        )
+        return res["result"]
+       
+    async def verify_banned_opcodes(self, opcodes, opcode_source):
+        opcodes = {k for k in opcodes.keys() if k in self.banned_opcodes}
+        number_of_opcodes = len(opcodes)
+        if number_of_opcodes > 0:
+            opcodes_str = " ".join([opcode for opcode in opcodes])
+            raise BundlerException(
+                    BundlerExceptionCode.BANNED_OPCODE,
+                    opcode_source + " uses banned opcode: " + opcodes_str,
+                    "",
+                )
+
