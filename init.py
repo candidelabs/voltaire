@@ -16,6 +16,7 @@ VOLTAIRE_HEADER = "\n".join(
     )
 )
 
+
 @dataclass()
 class InitData:
     entrypoint: list()
@@ -25,6 +26,7 @@ class InitData:
     geth_url: str
     bundler_pk: str
     bundler_address: str
+
 
 def entrypoint(ep):
     address_pattern = "^0x[0-9,a-f,A-F]{40}$"

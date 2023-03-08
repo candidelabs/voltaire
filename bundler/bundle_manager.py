@@ -4,7 +4,8 @@ from utils.eth_client_utils import send_rpc_request_to_eth_client
 from user_operation.user_operation_handler import UserOperationHandler
 from .mempool_manager import MempoolManager
 
-class BundlerManager():
+
+class BundlerManager:
     geth_rpc_url: str
     bundler_private_key: str
     bundler_address: str
@@ -47,10 +48,12 @@ class BundlerManager():
 
         args = [transactions_dict, self.bundler_address]
         call_data = entrypoint_contract.encodeABI("handleOps", args)
-        gasEstimation = await self.user_operation_handler.estimate_call_gas_limit(
-            call_data,
-            _from=self.bundler_address,
-            to=self.entrypoint,
+        gasEstimation = (
+            await self.user_operation_handler.estimate_call_gas_limit(
+                call_data,
+                _from=self.bundler_address,
+                to=self.entrypoint,
+            )
         )
 
         gasPrice = await send_rpc_request_to_eth_client(
@@ -61,7 +64,9 @@ class BundlerManager():
             "chainId": w3Provider.eth.chain_id,
             "from": self.bundler_address,
             "to": self.entrypoint,
-            "nonce": w3Provider.eth.get_transaction_count(self.bundler_address),
+            "nonce": w3Provider.eth.get_transaction_count(
+                self.bundler_address
+            ),
             "gas": int(gasEstimation, 16),
             "maxFeePerGas": gasPrice["result"],
             "maxPriorityFeePerGas": gasPrice["result"],
@@ -76,4 +81,4 @@ class BundlerManager():
             "eth_sendRawTransaction",
             [sign_store_txn.rawTransaction.hex()],
         )
-        return result['result']
+        return result["result"]

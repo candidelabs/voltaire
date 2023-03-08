@@ -16,6 +16,7 @@ from user_operation.models import (
     UserOperationReceiptInfo,
 )
 
+
 class UserOperationHandler:
     geth_rpc_url: str
     bundler_private_key: str
@@ -39,18 +40,19 @@ class UserOperationHandler:
         self.entrypoint = entrypoint
         self.entrypoint_abi = entrypoint_abi
 
-    async def estimate_user_operation_gas(
-        self,
-        user_operation: UserOperation
-    ):
+    async def estimate_user_operation_gas(self, user_operation: UserOperation):
         tasks = await asyncio.gather(
-            self.validation_manager.simulate_validation_and_decode_result(user_operation),
+            self.validation_manager.simulate_validation_and_decode_result(
+                user_operation
+            ),
             self.estimate_call_gas_limit(
                 call_data="0x" + user_operation.call_data.hex(),
                 _from=self.entrypoint,
                 to=user_operation.sender,
             ),
-            asyncio.to_thread(UserOperationHandler.calc_preverification_gas, user_operation),
+            asyncio.to_thread(
+                UserOperationHandler.calc_preverification_gas, user_operation
+            ),
         )
 
         return_info, _, _, _ = tasks[0]
@@ -60,20 +62,22 @@ class UserOperationHandler:
         pre_operation_gas = return_info.preOpGas
         valid_until = return_info.validUntil
 
-        return call_gas_limit, pre_verification_gas, pre_operation_gas, valid_until
+        return (
+            call_gas_limit,
+            pre_verification_gas,
+            pre_operation_gas,
+            valid_until,
+        )
 
     async def estimate_user_operation_gas_rpc(
-        self,
-        user_operation: UserOperation
+        self, user_operation: UserOperation
     ):
         (
             call_gas_limit,
             preverification_gas,
             pre_operation_gas,
             deadline,
-        ) = await self.estimate_user_operation_gas(
-            user_operation
-        )
+        ) = await self.estimate_user_operation_gas(user_operation)
 
         response_params = {
             "callGasLimit": call_gas_limit,
@@ -83,7 +87,7 @@ class UserOperationHandler:
         }
 
         return response_params
-        
+
     async def estimate_call_gas_limit(self, call_data, _from, to):
         params = [{"from": _from, "to": to, "data": call_data}]
 
@@ -95,7 +99,9 @@ class UserOperationHandler:
             errorData = result["error"]["data"]
             errorParams = errorData[10:]
             raise BundlerException(
-                BundlerExceptionCode.EXECUTION_REVERTED, errorMessage, errorParams
+                BundlerExceptionCode.EXECUTION_REVERTED,
+                errorMessage,
+                errorParams,
             )
         call_gas_limit = result["result"]
 
@@ -130,8 +136,6 @@ class UserOperationHandler:
         )
 
         return math.ceil(pre_verification_gas)
-    
-
 
     async def get_user_operation_by_hash(self, user_operation_hash):
         (
@@ -153,7 +157,7 @@ class UserOperationHandler:
         user_operation = transaction["input"]
 
         return user_operation, block_number, block_hash, transaction_hash
-    
+
     async def get_user_operation_by_hash_rpc(self, user_operation_hash):
         (
             handle_op_input,
@@ -162,7 +166,9 @@ class UserOperationHandler:
             transaction_hash,
         ) = await self.get_user_operation_by_hash(user_operation_hash)
 
-        user_operation = UserOperationHandler.decode_handle_op_input(handle_op_input)
+        user_operation = UserOperationHandler.decode_handle_op_input(
+            handle_op_input
+        )
 
         user_operation_json = {
             "sender": Web3.to_checksum_address(user_operation[0]),
@@ -236,14 +242,12 @@ class UserOperationHandler:
         )
 
         return receiptInfo, userOperationReceiptInfo
-    
+
     async def get_user_operation_receipt_rpc(self, user_operation_hash):
         (
             receipt_info,
             user_operation_receipt_info,
-        ) = await self.get_user_operation_receipt(
-            user_operation_hash
-        )
+        ) = await self.get_user_operation_receipt(user_operation_hash)
 
         receipt_info_json = {
             "blockHash": receipt_info.blockHash,
@@ -272,17 +276,15 @@ class UserOperationHandler:
 
         return user_operation_receipt_rpc_json
 
-
-    async def get_user_operation_event_log_info(
-        self,user_operation_hash
-    ):
-        USER_OPERATIOM_EVENT_DISCRIPTOR = (
-            "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
-        )
+    async def get_user_operation_event_log_info(self, user_operation_hash):
+        USER_OPERATIOM_EVENT_DISCRIPTOR = "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
         params = [
             {
                 "address": self.entrypoint,
-                "topics": [USER_OPERATIOM_EVENT_DISCRIPTOR, user_operation_hash],
+                "topics": [
+                    USER_OPERATIOM_EVENT_DISCRIPTOR,
+                    user_operation_hash,
+                ],
             }
         ]
 
@@ -290,11 +292,11 @@ class UserOperationHandler:
             self.geth_rpc_url, "eth_getLogs", params
         )
 
-        if(len(res["result"]) < 1):
+        if len(res["result"]) < 1:
             raise BundlerException(
                 BundlerExceptionCode.INVALID_USEROPHASH, "null", ""
             )
-            
+
         log = res["result"][0]
 
         log_object = Log(
@@ -334,14 +336,12 @@ class UserOperationHandler:
             actualGasUsed,
         )
 
-
     async def get_transaction_receipt(self, transaction_hash):
         params = [transaction_hash]
         res = await send_rpc_request_to_eth_client(
             self.geth_rpc_url, "eth_getTransactionReceipt", params
         )
         return res["result"]
-
 
     async def get_logs(self, transaction_hash, _from):
         params = [
@@ -356,7 +356,6 @@ class UserOperationHandler:
         )
         return res["result"]
 
-
     async def get_transaction_by_hash(self, transaction_hash):
         params = [transaction_hash]
         res = await send_rpc_request_to_eth_client(
@@ -364,12 +363,7 @@ class UserOperationHandler:
         )
         return res["result"]
 
-
-
-    async def get_user_operation_hash(
-        self,
-        user_operation
-    ):
+    async def get_user_operation_hash(self, user_operation):
         w3_provider = Web3()
         entrypoint_contract = w3_provider.eth.contract(
             address=self.entrypoint, abi=self.entrypoint_abi
@@ -391,7 +385,7 @@ class UserOperationHandler:
         result = await send_rpc_request_to_eth_client(
             self.geth_rpc_url, "eth_call", params
         )
-        return result['result']
+        return result["result"]
 
     @staticmethod
     def pack_user_operation(user_operation):

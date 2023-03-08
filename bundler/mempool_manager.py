@@ -39,10 +39,12 @@ class MempoolManager:
         self.senders.clear()
 
     async def add_user_operation(self, user_operation: UserOperation):
-        user_operation_hash = await self.user_operation_handler.get_user_operation_hash(
-            user_operation
+        user_operation_hash = (
+            await self.user_operation_handler.get_user_operation_hash(
+                user_operation
+            )
         )
-        
+
         await self.validation_manager.simulate_validation_and_decode_result(
             user_operation
         )

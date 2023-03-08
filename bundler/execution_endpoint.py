@@ -45,22 +45,24 @@ class ExecutionEndpoint(Endpoint):
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
         self.entrypoint_abi = entrypoint_abi
-        
+
         self.validation_manager = ValidationManager(
             geth_rpc_url,
             bundler_private_key,
             bundler_address,
             entrypoint,
-            entrypoint_abi)
-        
+            entrypoint_abi,
+        )
+
         self.user_operation_handler = UserOperationHandler(
             self.validation_manager,
             geth_rpc_url,
             bundler_private_key,
             bundler_address,
             entrypoint,
-            entrypoint_abi)
-        
+            entrypoint_abi,
+        )
+
         self.mempool_manager = MempoolManager(
             self.validation_manager,
             self.user_operation_handler,
@@ -68,8 +70,9 @@ class ExecutionEndpoint(Endpoint):
             bundler_private_key,
             bundler_address,
             entrypoint,
-            entrypoint_abi)
-        
+            entrypoint_abi,
+        )
+
         self.bundle_manager = BundlerManager(
             self.mempool_manager,
             self.user_operation_handler,
@@ -77,8 +80,8 @@ class ExecutionEndpoint(Endpoint):
             bundler_private_key,
             bundler_address,
             entrypoint,
-            entrypoint_abi)
-        
+            entrypoint_abi,
+        )
 
     async def start_execution_endpoint(self) -> None:
         self.add_events_and_response_functions_by_prefix(
@@ -105,8 +108,10 @@ class ExecutionEndpoint(Endpoint):
         user_operation: UserOperation = rpc_request.req_arguments[0]
         entrypoint = rpc_request.req_arguments[1]
 
-        estimated_gas_json = await self.user_operation_handler.estimate_user_operation_gas_rpc(
-            user_operation
+        estimated_gas_json = (
+            await self.user_operation_handler.estimate_user_operation_gas_rpc(
+                user_operation
+            )
         )
 
         return RPCCallResponseEvent(estimated_gas_json)
@@ -118,7 +123,8 @@ class ExecutionEndpoint(Endpoint):
         entrypoint_address = rpc_request.req_arguments[1]
 
         user_operation_hash = await self.mempool_manager.add_user_operation(
-            user_operation)
+            user_operation
+        )
         return RPCCallResponseEvent(user_operation_hash)
 
     async def _event_debug_bundler_sendBundleNow(
@@ -160,7 +166,11 @@ class ExecutionEndpoint(Endpoint):
                 "",
             )
 
-        user_operation_by_hash_json = await self.user_operation_handler.get_user_operation_by_hash_rpc(user_operation_hash)
+        user_operation_by_hash_json = (
+            await self.user_operation_handler.get_user_operation_by_hash_rpc(
+                user_operation_hash
+            )
+        )
 
         return RPCCallResponseEvent(user_operation_by_hash_json)
 
@@ -176,8 +186,10 @@ class ExecutionEndpoint(Endpoint):
                 "",
             )
 
-        user_operation_receipt_info_json = await self.user_operation_handler.get_user_operation_receipt_rpc(
-            user_operation_hash
+        user_operation_receipt_info_json = (
+            await self.user_operation_handler.get_user_operation_receipt_rpc(
+                user_operation_hash
+            )
         )
 
         return RPCCallResponseEvent(user_operation_receipt_info_json)

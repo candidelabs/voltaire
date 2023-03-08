@@ -10,14 +10,15 @@ from user_operation.models import ReturnInfo, StakeInfo, FailedOpRevertData
 from bundler.exceptions import BundlerException, BundlerExceptionCode
 from utils.eth_client_utils import send_rpc_request_to_eth_client
 
-class ValidationManager():
+
+class ValidationManager:
     geth_rpc_url: str
     bundler_private_key: str
     bundler_address: str
     entrypoint: str
     entrypoint_abi: str
-    bundler_collector_tracer:str
-    banned_opcodes:list()
+    bundler_collector_tracer: str
+    banned_opcodes: list()
 
     def __init__(
         self,
@@ -52,27 +53,34 @@ class ValidationManager():
             "BLOCKHASH",
             "CREATE",
             "CREATE2",
-            "SELFDESTRUCT"
-            ]
-        
+            "SELFDESTRUCT",
+        ]
+
     async def simulate_validation_and_decode_result(
-        self,
-        user_operation: UserOperation
+        self, user_operation: UserOperation
     ) -> ReturnInfo:
         # simulateValidation(entrypoint solidity function) will always revert
-        solidity_error_selector, solidity_error_params = await self.simulate_validation(
-            user_operation
-        )
+        (
+            solidity_error_selector,
+            solidity_error_params,
+        ) = await self.simulate_validation(user_operation)
 
         if ValidationManager.check_if_failed_op_error(solidity_error_selector):
-            _, _, reason = ValidationManager.decode_FailedOp_event(solidity_error_params)
+            _, _, reason = ValidationManager.decode_FailedOp_event(
+                solidity_error_params
+            )
             raise BundlerException(
                 BundlerExceptionCode.REJECTED_BY_EP_OR_ACCOUNT,
                 "revert reason : " + reason,
                 solidity_error_params,
             )
 
-        return_info, sender_info, factory_info, paymaster_info = ValidationManager.decode_validation_result_event(
+        (
+            return_info,
+            sender_info,
+            factory_info,
+            paymaster_info,
+        ) = ValidationManager.decode_validation_result_event(
             solidity_error_params
         )
 
@@ -131,8 +139,7 @@ class ValidationManager():
 
         return operation_index, paymaster_address, reason
 
-
-    async def simulate_validation(self,user_operation: UserOperation):
+    async def simulate_validation(self, user_operation: UserOperation):
         w3_provider = Web3()
         entrypoint_contract = w3_provider.eth.contract(
             address=self.entrypoint, abi=self.entrypoint_abi
@@ -165,29 +172,37 @@ class ValidationManager():
         solidity_error_params = error_data[10:]
 
         return solidity_error_selector, solidity_error_params
-    
+
     async def check_banned_op_codes(self, user_operation: UserOperation):
-        factory_opcodes, account_opcodes, paymaster_opcodes = await self.get_user_operation_banned_opcodes(user_operation)
-        
+        (
+            factory_opcodes,
+            account_opcodes,
+            paymaster_opcodes,
+        ) = await self.get_user_operation_banned_opcodes(user_operation)
+
         await asyncio.gather(
-            self.verify_banned_opcodes(factory_opcodes, 'factory'),
-            self.verify_banned_opcodes(account_opcodes, 'account'),
-            self.verify_banned_opcodes(paymaster_opcodes, 'paymaster')
+            self.verify_banned_opcodes(factory_opcodes, "factory"),
+            self.verify_banned_opcodes(account_opcodes, "account"),
+            self.verify_banned_opcodes(paymaster_opcodes, "paymaster"),
         )
 
-    async def get_user_operation_banned_opcodes(self,user_operation: UserOperation):
+    async def get_user_operation_banned_opcodes(
+        self, user_operation: UserOperation
+    ):
         debug_data = await self.get_debug_traceCall_data(user_operation)
 
-        factory_opcodes = debug_data['numberLevels'][0]['opcodes']
-        account_opcodes = debug_data['numberLevels'][1]['opcodes']
-        paymaster_opcodes = debug_data['numberLevels'][2]['opcodes']
+        factory_opcodes = debug_data["numberLevels"][0]["opcodes"]
+        account_opcodes = debug_data["numberLevels"][1]["opcodes"]
+        paymaster_opcodes = debug_data["numberLevels"][2]["opcodes"]
 
         return factory_opcodes, account_opcodes, paymaster_opcodes
-    
 
-    async def get_debug_traceCall_data(self,user_operation: UserOperation):
-        simultion_gas = user_operation.pre_verification_gas + user_operation.verification_gas_limit
-        
+    async def get_debug_traceCall_data(self, user_operation: UserOperation):
+        simultion_gas = (
+            user_operation.pre_verification_gas
+            + user_operation.verification_gas_limit
+        )
+
         w3_provider = Web3()
         entrypoint_contract = w3_provider.eth.contract(
             address=self.entrypoint, abi=self.entrypoint_abi
@@ -201,27 +216,24 @@ class ValidationManager():
                 "from": self.bundler_address,
                 "to": self.entrypoint,
                 "data": call_data,
-                "gasLimit":simultion_gas,
+                "gasLimit": simultion_gas,
             },
             "latest",
-            {
-             "tracer": self.bundler_collector_tracer
-            }
+            {"tracer": self.bundler_collector_tracer},
         ]
 
         res = await send_rpc_request_to_eth_client(
             self.geth_rpc_url, "debug_traceCall", params
         )
         return res["result"]
-       
+
     async def verify_banned_opcodes(self, opcodes, opcode_source):
         opcodes = {k for k in opcodes.keys() if k in self.banned_opcodes}
         number_of_opcodes = len(opcodes)
         if number_of_opcodes > 0:
             opcodes_str = " ".join([opcode for opcode in opcodes])
             raise BundlerException(
-                    BundlerExceptionCode.BANNED_OPCODE,
-                    opcode_source + " uses banned opcode: " + opcodes_str,
-                    "",
-                )
-
+                BundlerExceptionCode.BANNED_OPCODE,
+                opcode_source + " uses banned opcode: " + opcodes_str,
+                "",
+            )
