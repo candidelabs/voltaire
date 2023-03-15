@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import asyncio
 from user_operation.user_operation import UserOperation
 from .sender import Sender
 from user_operation.user_operation_handler import UserOperationHandler
@@ -67,12 +68,20 @@ class MempoolManager:
         )
         return user_operation_hash
 
-    def get_user_operations_to_bundle(self):
+    async def get_user_operations_to_bundle(self):
         bundle = []
+        validation_operations = []
         for sender in self.senders:
-            bundle.append(sender.user_operations.pop(0))
+            user_operation = sender.user_operations.pop(0)
+            validation_operations.append(
+                self.validation_manager.validate_user_operation(user_operation)
+            )
+            bundle.append(user_operation)
             if len(sender.user_operations) == 0:
                 self.senders.remove(sender)
+
+        await asyncio.gather(*validation_operations)
+
         return bundle
 
     def get_all_user_operations(self) -> list[UserOperation]:
