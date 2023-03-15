@@ -163,7 +163,6 @@ class ValidationManager:
                 paymaster_stake_info
             )
             if len(paymaster_call._data) > 194 and not is_paymaster_staked:
-                print(str(paymaster_call))
                 raise BundlerException(
                     ValidationExceptionCode.OpcodeValidation,
                     "unstaked paymaster must not return context",
@@ -472,7 +471,6 @@ class ValidationManager:
             self.geth_rpc_url, "debug_traceCall", params
         )
         debug_data = res["result"]
-        # print(debug_data)
         factory_data = DebugEntityData(
             debug_data["numberLevels"][0]["access"],
             debug_data["numberLevels"][0]["opcodes"],
@@ -626,7 +624,5 @@ class ValidationManager:
                 )
 
                 stack.append(call_to_stack)
-        # print(str(stack))
-        # print("")
-        # print(str(results))
+      
         return results, paymaster_call
