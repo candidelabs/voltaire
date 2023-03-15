@@ -23,3 +23,22 @@ class BundlerException(Exception):
     exception_code: BundlerExceptionCode
     message: str
     data: bytes
+
+
+class ValidationExceptionCode(Enum):
+    InvalidFields = (-32602,)
+    SimulateValidation = -32500
+    SimulatePaymasterValidation = -32501
+    OpcodeValidation = -32502
+    ExpiresShortly = -32503
+    Reputation = -32504
+    InsufficientStake = -32505
+    UnsupportedSignatureAggregator = -32506
+    InvalidSignature = -32507
+
+
+@dataclass
+class ValidationException(Exception):
+    exception_code: BundlerExceptionCode
+    message: str
+    data: bytes
