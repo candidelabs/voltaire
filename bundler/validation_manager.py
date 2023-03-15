@@ -7,8 +7,17 @@ from eth_abi import decode
 
 from user_operation.user_operation import UserOperation
 from user_operation.models import ReturnInfo, StakeInfo, FailedOpRevertData
-from bundler.exceptions import BundlerException, BundlerExceptionCode
-from utils.eth_client_utils import send_rpc_request_to_eth_client
+from bundler.exceptions import (
+    BundlerException,
+    BundlerExceptionCode,
+    ValidationException,
+    ValidationExceptionCode,
+)
+from utils.eth_client_utils import (
+    send_rpc_request_to_eth_client,
+    DebugTraceCallData,
+    DebugEntityData,
+)
 
 
 class ValidationManager:
