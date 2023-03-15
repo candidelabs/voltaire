@@ -17,7 +17,7 @@ docker cp geth:tmp/`docker exec -i geth ls tmp| grep go` keystore
 mv keystore/*/* keystore
 rmdir keystore/go-ethereum*
 
-poetry run python scripts/init-geth.py > entrypoints
+poetry run python scripts/init-geth.py > init-params
 
 fg
 
