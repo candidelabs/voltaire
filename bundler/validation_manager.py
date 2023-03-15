@@ -141,7 +141,9 @@ class ValidationManager:
                 + list(debug_data.factory_data.contract_size.keys())
             )
 
-        _, paymaster_call = ValidationManager.parse_call_stack(debug_data.calls, paymaster_address)
+        _, paymaster_call = ValidationManager.parse_call_stack(
+            debug_data.calls, paymaster_address
+        )
 
         if paymaster_address is not None:
             self.validate_entity_storage_access(
@@ -157,8 +159,10 @@ class ValidationManager:
                 associated_addresses_lowercase
                 + list(debug_data.paymaster_data.contract_size.keys())
             )
-            is_paymaster_staked = ValidationManager.is_staked(paymaster_stake_info)
-            if(len(paymaster_call._data) > 194 and not is_paymaster_staked):
+            is_paymaster_staked = ValidationManager.is_staked(
+                paymaster_stake_info
+            )
+            if len(paymaster_call._data) > 194 and not is_paymaster_staked:
                 print(str(paymaster_call))
                 raise BundlerException(
                     ValidationExceptionCode.OpcodeValidation,
@@ -189,8 +193,6 @@ class ValidationManager:
                     "modified code after first validation",
                     "",
                 )
-            
-        
 
     @staticmethod
     def is_slot_associated_with_address(slot, address, associated_slots):
@@ -567,7 +569,7 @@ class ValidationManager:
                     if slot not in current_entity_slot:
                         current_entity_slot.append(slot)
         return entity_slots
-    
+
     @staticmethod
     def parse_call_stack(calls, paymaster_address):
         stack = []
@@ -576,14 +578,14 @@ class ValidationManager:
         paymaster_call = None
         VALIDATE_PAYMASTER_USER_OP_METHOD_SELECTOR = "0xf465c77e"
         for call in calls:
-            if(call.get("type") == "RETURN" or call.get("type") == "REVERT" ):
-                if(len(stack) == 0):
+            if call.get("type") == "RETURN" or call.get("type") == "REVERT":
+                if len(stack) == 0:
                     top = Call()
                     top._type = "top"
                     top._method = "validateUserOp"
                 else:
                     top = stack.pop()
-                
+
                 return_data = call["data"]
 
                 result = Call()
@@ -603,19 +605,24 @@ class ValidationManager:
                     result._data = call.get("data")
                     result._return_type = "RETURN"
 
-                if(paymaster_address is not None and paymaster_address == result._to and VALIDATE_PAYMASTER_USER_OP_METHOD_SELECTOR == result._method):
+                if (
+                    paymaster_address is not None
+                    and paymaster_address == result._to
+                    and VALIDATE_PAYMASTER_USER_OP_METHOD_SELECTOR
+                    == result._method
+                ):
                     paymaster_call = result
 
                 results.append(result)
             else:
                 call_to_stack = Call(
-                    _to= call.get("to"),
-                    _from= call.get("from"),
-                    _type= call.get("type"),
-                    _method= call.get("method"),
-                    _value= call.get("value"),
-                    _gas= call.get("gas"),
-                    _data= call.get("data"),
+                    _to=call.get("to"),
+                    _from=call.get("from"),
+                    _type=call.get("type"),
+                    _method=call.get("method"),
+                    _value=call.get("value"),
+                    _gas=call.get("gas"),
+                    _data=call.get("data"),
                 )
 
                 stack.append(call_to_stack)

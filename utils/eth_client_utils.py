@@ -41,6 +41,7 @@ class DebugTraceCallData:
     calls: list()
     debug: list()
 
+
 @dataclass
 class Call:
     _to: str = ""
@@ -51,4 +52,4 @@ class Call:
     _gas: str = ""
     _data: str = ""
     _gas_used: str = ""
-    _return_type: str = "" #RETURN or REVERT
+    _return_type: str = ""  # RETURN or REVERT

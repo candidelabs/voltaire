@@ -54,7 +54,7 @@ if __name__ == "__main__":
 
     abi = data["abi"]
     bytecode = data["bytecode"]
-    #deploy entrypoint
+    # deploy entrypoint
     deploy(abi, bytecode, public_key, private_key, 0)
 
     f = open("utils/BundlerHelper.json")
@@ -62,5 +62,5 @@ if __name__ == "__main__":
 
     abi = data["abi"]
     bytecode = data["bytecode"]
-    #deploy BundlerHelper
+    # deploy BundlerHelper
     deploy(abi, bytecode, public_key, private_key, 1)
