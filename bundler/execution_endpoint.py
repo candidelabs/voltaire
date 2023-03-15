@@ -33,6 +33,8 @@ class ExecutionEndpoint(Endpoint):
     mempool_manager: MempoolManager
     validation_manager: ValidationManager
     user_operation_handler: UserOperationHandler
+    bundler_helper_abi: str
+    bundler_helper_address: str
 
     def __init__(
         self,
@@ -41,14 +43,17 @@ class ExecutionEndpoint(Endpoint):
         bundler_address,
         entrypoint,
         entrypoint_abi,
+        bundler_helper_address,
+        bundler_helper_abi,
     ):
         super().__init__("bundler_endpoint")
-
         self.geth_rpc_url = geth_rpc_url
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
         self.entrypoint_abi = entrypoint_abi
+        self.bundler_helper_abi = bundler_helper_abi
+        self.bundler_helper_address = bundler_helper_address
 
         self.validation_manager = ValidationManager(
             geth_rpc_url,
@@ -56,6 +61,8 @@ class ExecutionEndpoint(Endpoint):
             bundler_address,
             entrypoint,
             entrypoint_abi,
+            bundler_helper_address,
+            bundler_helper_abi,
         )
 
         self.user_operation_handler = UserOperationHandler(

@@ -29,6 +29,8 @@ async def main():
             initData.bundler_address,
             initData.entrypoint,
             initData.entrypoint_abi,
+            initData.bundler_helper_address,
+            initData.bundler_helper_abi,
         )
         task_group.create_task(execution_endpoint.start_execution_endpoint())
         task_group.create_task(

@@ -26,9 +26,11 @@ class InitData:
     geth_url: str
     bundler_pk: str
     bundler_address: str
+    bundler_helper_address: str
+    bundler_helper_abi: str
 
 
-def entrypoint(ep):
+def address(ep):
     address_pattern = "^0x[0-9,a-f,A-F]{40}$"
     if not isinstance(ep, str) or re.match(address_pattern, ep) is None:
         raise ValueError
@@ -44,7 +46,7 @@ def initialize() -> InitData:
     parser.add_argument(
         "entrypoint",
         metavar="--entrypoint",
-        type=entrypoint,
+        type=address,
         help="supported entrypoints addresses",
     )
 
@@ -76,6 +78,13 @@ def initialize() -> InitData:
         nargs="?",
         const="http://0.0.0.0:8545",
         default="http://0.0.0.0:8545",
+    )
+
+    parser.add_argument(
+        "bundler_helper_address",
+        metavar="--helper-contract-address",
+        type=address,
+        help="helper contract address",
     )
 
     parser.add_argument(
@@ -117,6 +126,10 @@ def initialize() -> InitData:
     data = json.load(entrypoint_abi_file)
     entrypoint_abi = data["abi"]
 
+    bundler_helper_abi_file = open("utils/BundlerHelper.json")
+    data = json.load(bundler_helper_abi_file)
+    bundler_helper_abi = data["abi"]
+
     ret = InitData(
         args.entrypoint,
         entrypoint_abi,
@@ -125,6 +138,8 @@ def initialize() -> InitData:
         args.geth_url,
         bundler_pk,
         bundler_address,
+        args.bundler_helper_address,
+        bundler_helper_abi,
     )
 
     logging.basicConfig(
