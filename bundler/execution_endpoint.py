@@ -14,7 +14,11 @@ from utils.eth_client_utils import send_rpc_request_to_eth_client
 
 from .mempool_manager import MempoolManager
 from user_operation.user_operation_handler import UserOperationHandler
-from bundler.exceptions import BundlerException, BundlerExceptionCode
+from bundler.exceptions import (
+    BundlerException,
+    BundlerExceptionCode,
+    ValidationException,
+)
 from .bundle_manager import BundlerManager
 from .validation_manager import ValidationManager
 
@@ -200,7 +204,7 @@ async def exception_handler_decorator(
 ) -> RPCCallResponseEvent:
     try:
         response = await response_function(rpc_request)
-    except BundlerException as excp:
+    except (BundlerException, ValidationException) as excp:
         response = RPCCallResponseEvent(excp)
         response.is_error = True
     finally:
