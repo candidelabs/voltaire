@@ -12,15 +12,12 @@
     numberCounter: 0,
   
     fault: function fault(log, db) {
-      this.debug.push(
-        "fault depth=" +
-          log.getDepth() +
-          " gas=" +
-          log.getGas() +
-          " cost=" +
-          log.getCost() +
-          " err=" +
-          log.getError()
+      this.debug.push({fault:{
+          depth : log.getDepth(),
+          gas:log.getGas(),
+          cost:log.getCost(),
+          err:log.getError()
+      }}
       );
     },
     result: function result(ctx, db) {
@@ -33,17 +30,16 @@
         debug: this.debug,
       };
     },
-    enter: function enter(frame) {
-      this.debug.push(
-        "enter gas=" +
-          frame.getGas() +
-          " type=" +
-          frame.getType() +
-          " to=" +
-          toHex(frame.getTo()) +
-          " in=" +
-          toHex(frame.getInput()).slice(0, 500)
-      );
+    enter: function enter(frame){
+      this.debug.push({
+          enter:{
+            gas:frame.getGas(),
+            type:frame.getType(),
+            to:toHex(frame.getTo()),
+            in:toHex(frame.getInput()).slice(0, 500)
+          }
+        }
+    );
       this.calls.push({
         type: frame.getType(),
         from: toHex(frame.getFrom()),
@@ -80,7 +76,7 @@
           var ofs = parseInt(log.stack.peek(0).toString());
           var len = parseInt(log.stack.peek(1).toString());
           var data = toHex(log.memory.slice(ofs, ofs + len)).slice(0, 1000);
-          this.debug.push(opcode + " " + data);
+          this.debug.push(opcode == "REVERT"?{REVERT : data}:{RETURN : data});
           this.calls.push({
             type: opcode,
             gasUsed: 0,
