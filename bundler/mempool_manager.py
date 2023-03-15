@@ -45,11 +45,7 @@ class MempoolManager:
             )
         )
 
-        await self.validation_manager.simulate_validation_and_decode_result(
-            user_operation
-        )
-
-        await self.validation_manager.check_banned_op_codes(user_operation)
+        await self.validation_manager.validate_user_operation(user_operation)
 
         new_sender = None
         new_sender_address = user_operation.sender
