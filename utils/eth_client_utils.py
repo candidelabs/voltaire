@@ -1,6 +1,7 @@
 from aiohttp import ClientSession
 import json
 from eth_abi import decode
+from dataclasses import dataclass
 
 
 async def send_rpc_request_to_eth_client(geth_rpc_url, method, params=None):
@@ -21,3 +22,21 @@ async def send_rpc_request_to_eth_client(geth_rpc_url, method, params=None):
         ) as response:
             resp = await response.read()
             return json.loads(resp)
+
+
+@dataclass
+class DebugEntityData:
+    access: list()
+    opcodes: list()
+    contract_size: list()
+
+
+@dataclass
+class DebugTraceCallData:
+    factory_data: DebugEntityData
+    account_data: DebugEntityData
+    paymaster_data: DebugEntityData
+    keccak: list()
+    logs: list()
+    calls: list()
+    debug: list()
