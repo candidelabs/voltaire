@@ -28,6 +28,8 @@ class ValidationManager:
     entrypoint_abi: str
     bundler_collector_tracer: str
     banned_opcodes: list()
+    bundler_helper_abi: str
+    bundler_helper_address: str
 
     def __init__(
         self,
@@ -36,12 +38,16 @@ class ValidationManager:
         bundler_address,
         entrypoint,
         entrypoint_abi,
+        bundler_helper_address,
+        bundler_helper_abi,
     ):
         self.geth_rpc_url = geth_rpc_url
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
         self.entrypoint_abi = entrypoint_abi
+        self.bundler_helper_address = bundler_helper_address
+        self.bundler_helper_abi = bundler_helper_abi
 
         path = "utils/BundlerCollectorTracer.min.js"
         with open(path) as keyfile:
