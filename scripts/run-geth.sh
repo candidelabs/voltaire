@@ -21,5 +21,5 @@ poetry run python scripts/init-geth.py > init-params
 
 fg
 
-rm entrypoints
+rm init-params
 rm -r keystore/*
