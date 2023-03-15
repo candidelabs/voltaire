@@ -17,6 +17,7 @@ from utils.eth_client_utils import (
     send_rpc_request_to_eth_client,
     DebugTraceCallData,
     DebugEntityData,
+    Call,
 )
 
 
@@ -140,6 +141,8 @@ class ValidationManager:
                 + list(debug_data.factory_data.contract_size.keys())
             )
 
+        _, paymaster_call = ValidationManager.parse_call_stack(debug_data.calls, paymaster_address)
+
         if paymaster_address is not None:
             self.validate_entity_storage_access(
                 paymaster_address,
@@ -154,6 +157,14 @@ class ValidationManager:
                 associated_addresses_lowercase
                 + list(debug_data.paymaster_data.contract_size.keys())
             )
+            is_paymaster_staked = ValidationManager.is_staked(paymaster_stake_info)
+            if(len(paymaster_call._data) > 194 and not is_paymaster_staked):
+                print(str(paymaster_call))
+                raise BundlerException(
+                    ValidationExceptionCode.OpcodeValidation,
+                    "unstaked paymaster must not return context",
+                    "",
+                )
 
         if len(associated_addresses_lowercase) > 0:
             associated_addresses = [
@@ -178,6 +189,8 @@ class ValidationManager:
                     "modified code after first validation",
                     "",
                 )
+            
+        
 
     @staticmethod
     def is_slot_associated_with_address(slot, address, associated_slots):
@@ -457,7 +470,7 @@ class ValidationManager:
             self.geth_rpc_url, "debug_traceCall", params
         )
         debug_data = res["result"]
-
+        # print(debug_data)
         factory_data = DebugEntityData(
             debug_data["numberLevels"][0]["access"],
             debug_data["numberLevels"][0]["opcodes"],
@@ -554,3 +567,59 @@ class ValidationManager:
                     if slot not in current_entity_slot:
                         current_entity_slot.append(slot)
         return entity_slots
+    
+    @staticmethod
+    def parse_call_stack(calls, paymaster_address):
+        stack = []
+        top = Call()
+        results = []
+        paymaster_call = None
+        VALIDATE_PAYMASTER_USER_OP_METHOD_SELECTOR = "0xf465c77e"
+        for call in calls:
+            if(call.get("type") == "RETURN" or call.get("type") == "REVERT" ):
+                if(len(stack) == 0):
+                    top = Call()
+                    top._type = "top"
+                    top._method = "validateUserOp"
+                else:
+                    top = stack.pop()
+                
+                return_data = call["data"]
+
+                result = Call()
+                result._to = top._to
+                result._from = top._from
+                result._type = top._type
+                result._gas = top._gas
+                result._gas_used = call.get("gasUsed")
+                if top._type == "CREATE":
+                    result._data = "len=" + str(len(return_data))
+                elif top._type == "REVERT":
+                    result._method = top._method
+                    result._data = call.get("data")
+                    result._return_type = "REVERT"
+                else:
+                    result._method = top._method
+                    result._data = call.get("data")
+                    result._return_type = "RETURN"
+
+                if(paymaster_address is not None and paymaster_address == result._to and VALIDATE_PAYMASTER_USER_OP_METHOD_SELECTOR == result._method):
+                    paymaster_call = result
+
+                results.append(result)
+            else:
+                call_to_stack = Call(
+                    _to= call.get("to"),
+                    _from= call.get("from"),
+                    _type= call.get("type"),
+                    _method= call.get("method"),
+                    _value= call.get("value"),
+                    _gas= call.get("gas"),
+                    _data= call.get("data"),
+                )
+
+                stack.append(call_to_stack)
+        # print(str(stack))
+        # print("")
+        # print(str(results))
+        return results, paymaster_call
