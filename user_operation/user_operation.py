@@ -16,6 +16,7 @@ class UserOperation:
     max_priority_fee_per_gas: int
     paymaster_and_data: bytes
     signature: bytes
+    code_hash: str | None
     jsonRequestDict: InitVar[dict]
 
     def __init__(self, jsonRequestDict):
@@ -45,6 +46,8 @@ class UserOperation:
             jsonRequestDict["paymasterAndData"]
         )
         self.signature = verify_and_get_bytes(jsonRequestDict["signature"])
+
+        self.code_hash = None
 
     def get_user_operation_dict(self) -> tuple:
         return {
