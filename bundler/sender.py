@@ -8,6 +8,7 @@ from utils.eth_client_utils import send_rpc_request_to_eth_client
 from user_operation.models import DepositInfo
 
 ALLOWED_OPS_PER_UNSTAKED_SENDER = 4
+MIN_PRICE_BUMP = 10
 
 
 @dataclass
@@ -75,15 +76,28 @@ class Sender:
     ):
         if new_operation.nonce != existing_operation.nonce:
             return False
-        diff_max_priority_fee_per_gas = (
-            new_operation.max_priority_fee_per_gas
-            - existing_operation.max_priority_fee_per_gas
+
+        min_priority_fee_per_gas_to_replace = (
+            Sender._calculate_min_fee_to_replace(
+                existing_operation.max_priority_fee_per_gas
+            )
+        )
+        min_fee_per_gas_to_replace = Sender._calculate_min_fee_to_replace(
+            existing_operation.max_fee_per_gas
         )
 
-        if diff_max_priority_fee_per_gas > 0:
+        if (
+            new_operation.max_priority_fee_per_gas
+            >= min_priority_fee_per_gas_to_replace
+            and new_operation.max_fee_per_gas >= min_fee_per_gas_to_replace
+        ):
             return True
         else:
             return False
+
+    @staticmethod
+    def _calculate_min_fee_to_replace(fee):
+        return round(fee * (100 + MIN_PRICE_BUMP) / 100)
 
     def _get_user_operation_with_same_nonce(self, nonce):
         for user_operation in self.user_operations:
