@@ -5,6 +5,8 @@ import glob
 import json
 from eth_account import Account
 
+NONCE = 0
+
 
 def get_account():
     path = "keystore/*"
@@ -17,10 +19,9 @@ def get_account():
         return acct.address, private_key.hex()
 
 
-def deploy(abi, bytecode, public_key, private_key):
+def deploy(abi, bytecode, public_key, private_key, nonce):
     entrypoint = provider.eth.contract(abi=abi, bytecode=bytecode)
     chain_id = 1337
-    nonce = 0
 
     # Submit the transaction that deploys the contract
     transaction = entrypoint.constructor().build_transaction(
@@ -53,5 +54,13 @@ if __name__ == "__main__":
 
     abi = data["abi"]
     bytecode = data["bytecode"]
+    #deploy entrypoint
+    deploy(abi, bytecode, public_key, private_key, 0)
 
-    deploy(abi, bytecode, public_key, private_key)
+    f = open("utils/BundlerHelper.json")
+    data = json.load(f)
+
+    abi = data["abi"]
+    bytecode = data["bytecode"]
+    #deploy BundlerHelper
+    deploy(abi, bytecode, public_key, private_key, 1)
