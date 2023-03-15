@@ -69,7 +69,7 @@ source scripts/run-geth.sh
 
 ### Run the bundler in a new terminal
 ```
-poetry run python3 main.py `cat entrypoints` --verbose
+poetry run python3 main.py `cat init-params` --verbose
 ```
 
 ### Test the bundler by cloning `eth-infinitism/bundler-spec-tests`
