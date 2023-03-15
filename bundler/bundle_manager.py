@@ -33,7 +33,9 @@ class BundlerManager:
         self.entrypoint_abi = entrypoint_abi
 
     async def send_next_bundle(self):
-        user_operations = self.mempool_manager.get_user_operations_to_bundle()
+        user_operations = (
+            await self.mempool_manager.get_user_operations_to_bundle()
+        )
         return await self.send_bundle(user_operations)
 
     async def send_bundle(self, user_operations):
