@@ -66,7 +66,7 @@ class BundlerManager:
             self.geth_rpc_url, "eth_chainId"
         )
         txnDict = {
-            "chainId": chain_id['result'],
+            "chainId": chain_id["result"],
             "from": self.bundler_address,
             "to": self.entrypoint,
             "nonce": w3Provider.eth.get_transaction_count(
