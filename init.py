@@ -44,15 +44,13 @@ def initialize() -> InitData:
         epilog="Candide Labs : http://candidewallet.com - Github : https://github.com/candidelabs",
     )
     parser.add_argument(
-        "entrypoint",
-        metavar="--entrypoint",
+        "--entrypoint",
         type=address,
         help="supported entrypoints addresses",
     )
 
     parser.add_argument(
-        "bundler_helper_address",
-        metavar="--helper-contract-address",
+        "--bundler_helper_address",
         type=address,
         help="helper contract address",
     )
@@ -60,24 +58,21 @@ def initialize() -> InitData:
     group = parser.add_mutually_exclusive_group(required=True)
     
     group.add_argument(
-        "bundlerSecret",
-        metavar="--bundler-secret",
+        "--bundler_secret",
         type=str,
         help="Bundler private key",
         nargs="?",
     )
 
     group.add_argument(
-        "keystoreFilePath",
-        metavar="--keystore-file-path",
+        "--keystore_file_path",
         type=str,
         help="Bundler Keystore file path - defaults to first file in keystore folder",
         nargs="?",
     )
 
     parser.add_argument(
-        "keystoreFilePaassword",
-        metavar="--keystore-file-password",
+        "--keystore_file_password",
         type=str,
         help="Bundler Keystore file password - defaults to no password",
         nargs="?",
@@ -86,8 +81,7 @@ def initialize() -> InitData:
     )
 
     parser.add_argument(
-        "rpc_url",
-        metavar="--rpc-url",
+        "--rpc_url",
         type=str,
         help="RPC serve url - defaults to localhost",
         nargs="?",
@@ -96,8 +90,7 @@ def initialize() -> InitData:
     )
 
     parser.add_argument(
-        "rpc_port",
-        metavar="--rpc-port",
+        "--rpc_port",
         type=int,
         help="RPC serve port - defaults to 3000",
         nargs="?",
@@ -106,8 +99,7 @@ def initialize() -> InitData:
     )
 
     parser.add_argument(
-        "geth_url",
-        metavar="--geth-url",
+        "--geth_url",
         type=str,
         help="Geth Client Http Url - defaults to http://0.0.0.0:8545",
         nargs="?",
@@ -117,7 +109,6 @@ def initialize() -> InitData:
 
     parser.add_argument(
         "--verbose",
-        metavar="verbose",
         help="show debug log",
         nargs="?",
         const=True,
@@ -129,12 +120,12 @@ def initialize() -> InitData:
     bundler_address="" 
     bundler_pk=""
 
-    if args.keystoreFilePath is not None:
+    if args.keystore_file_path is not None:
         bundler_address, bundler_pk = import_bundler_account(
-            args.keystoreFilePaassword, args.keystoreFilePath
+            args.keystore_file_password, args.keystore_file_path
         )
     else:
-        bundler_pk = args.bundlerSecret
+        bundler_pk = args.bundler_secret
         bundler_address = public_address_from_private_key(bundler_pk)
 
     entrypoint_abi_file = open("utils/EntryPoint.json")
