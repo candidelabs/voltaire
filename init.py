@@ -4,7 +4,7 @@ import re
 import json
 from dataclasses import dataclass
 
-from utils.import_key import import_bundler_account
+from utils.import_key import import_bundler_account, public_address_from_private_key
 
 VOLTAIRE_HEADER = "\n".join(
     (
@@ -51,13 +51,48 @@ def initialize() -> InitData:
     )
 
     parser.add_argument(
+        "bundler_helper_address",
+        metavar="--helper-contract-address",
+        type=address,
+        help="helper contract address",
+    )
+
+    group = parser.add_mutually_exclusive_group(required=True)
+    
+    group.add_argument(
+        "bundlerSecret",
+        metavar="--bundler-secret",
+        type=str,
+        help="Bundler private key",
+        nargs="?",
+    )
+
+    group.add_argument(
+        "keystoreFilePath",
+        metavar="--keystore-file-path",
+        type=str,
+        help="Bundler Keystore file path - defaults to first file in keystore folder",
+        nargs="?",
+    )
+
+    parser.add_argument(
+        "keystoreFilePaassword",
+        metavar="--keystore-file-password",
+        type=str,
+        help="Bundler Keystore file password - defaults to no password",
+        nargs="?",
+        const="",
+        default="",
+    )
+
+    parser.add_argument(
         "rpc_url",
         metavar="--rpc-url",
         type=str,
         help="RPC serve url - defaults to localhost",
         nargs="?",
-        const="localhost",
-        default="localhost",
+        const="127.0.0.1",
+        default="127.0.0.1",
     )
 
     parser.add_argument(
@@ -81,13 +116,6 @@ def initialize() -> InitData:
     )
 
     parser.add_argument(
-        "bundler_helper_address",
-        metavar="--helper-contract-address",
-        type=address,
-        help="helper contract address",
-    )
-
-    parser.add_argument(
         "--verbose",
         metavar="verbose",
         help="show debug log",
@@ -96,31 +124,18 @@ def initialize() -> InitData:
         default=False,
     )
 
-    parser.add_argument(
-        "keystoreFilePath",
-        metavar="--keystore-file-path",
-        type=str,
-        help="Bundler Keystore file path - defaults to first file in keystore folder",
-        nargs="?",
-        const="keystore/*",
-        default="keystore/*",
-    )
-
-    parser.add_argument(
-        "keystoreFilePaassword",
-        metavar="--keystore-file-password",
-        type=str,
-        help="Bundler Keystore file password - defaults to no password",
-        nargs="?",
-        const="",
-        default="",
-    )
-
     args = parser.parse_args()
 
-    bundler_address, bundler_pk = import_bundler_account(
-        args.keystoreFilePaassword, args.keystoreFilePath
-    )
+    bundler_address="" 
+    bundler_pk=""
+
+    if args.keystoreFilePath is not None:
+        bundler_address, bundler_pk = import_bundler_account(
+            args.keystoreFilePaassword, args.keystoreFilePath
+        )
+    else:
+        bundler_pk = args.bundlerSecret
+        bundler_address = public_address_from_private_key(bundler_pk)
 
     entrypoint_abi_file = open("utils/EntryPoint.json")
     data = json.load(entrypoint_abi_file)
