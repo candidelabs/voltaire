@@ -26,8 +26,7 @@ class InitData:
     geth_url: str
     bundler_pk: str
     bundler_address: str
-    bundler_helper_address: str
-    bundler_helper_abi: str
+    bundler_helper_byte_code: str
 
 
 def address(ep):
@@ -47,12 +46,6 @@ def initialize() -> InitData:
         "--entrypoint",
         type=address,
         help="supported entrypoints addresses",
-    )
-
-    parser.add_argument(
-        "--bundler_helper_address",
-        type=address,
-        help="helper contract address",
     )
 
     group = parser.add_mutually_exclusive_group(required=True)
@@ -132,9 +125,9 @@ def initialize() -> InitData:
     data = json.load(entrypoint_abi_file)
     entrypoint_abi = data["abi"]
 
-    bundler_helper_abi_file = open("utils/BundlerHelper.json")
-    data = json.load(bundler_helper_abi_file)
-    bundler_helper_abi = data["abi"]
+    bundler_helper_byte_code_file = open("utils/BundlerHelper.json")
+    data = json.load(bundler_helper_byte_code_file)
+    bundler_helper_byte_code = data["bytecode"]
 
     ret = InitData(
         args.entrypoint,
@@ -144,8 +137,7 @@ def initialize() -> InitData:
         args.geth_url,
         bundler_pk,
         bundler_address,
-        args.bundler_helper_address,
-        bundler_helper_abi,
+        bundler_helper_byte_code,
     )
 
     logging.basicConfig(

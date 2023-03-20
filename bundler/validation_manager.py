@@ -3,7 +3,7 @@ from typing import Dict
 import json
 
 from web3 import Web3
-from eth_abi import decode
+from eth_abi import decode, encode
 
 from user_operation.user_operation import UserOperation
 from user_operation.models import ReturnInfo, StakeInfo, FailedOpRevertData
@@ -29,8 +29,7 @@ class ValidationManager:
     entrypoint_abi: str
     bundler_collector_tracer: str
     banned_opcodes: list()
-    bundler_helper_abi: str
-    bundler_helper_address: str
+    bundler_helper_byte_code: str
 
     def __init__(
         self,
@@ -39,16 +38,14 @@ class ValidationManager:
         bundler_address,
         entrypoint,
         entrypoint_abi,
-        bundler_helper_address,
-        bundler_helper_abi,
+        bundler_helper_byte_code,
     ):
         self.geth_rpc_url = geth_rpc_url
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
         self.entrypoint_abi = entrypoint_abi
-        self.bundler_helper_address = bundler_helper_address
-        self.bundler_helper_abi = bundler_helper_abi
+        self.bundler_helper_byte_code = bundler_helper_byte_code
 
         path = "utils/BundlerCollectorTracer.js"
         with open(path) as keyfile:
@@ -527,25 +524,21 @@ class ValidationManager:
                 )
 
     async def get_addresses_code_hash(self, addresses):
-        w3_provider = Web3()
-        entrypoint_contract = w3_provider.eth.contract(
-            address=self.bundler_helper_address, abi=self.bundler_helper_abi
-        )
-        call_data = entrypoint_contract.encodeABI("getCodeHashes", [addresses])
-
+        call_data = encode(["address[]"], [addresses])
         params = [
             {
                 "from": self.bundler_address,
-                "to": self.bundler_helper_address,
-                "data": call_data,
+                "data": "0x" + self.bundler_helper_byte_code + call_data.hex(),
             },
             "latest",
         ]
-
         result = await send_rpc_request_to_eth_client(
             self.geth_rpc_url, "eth_call", params
         )
-        return result["result"]
+        if "error" not in result:
+            raise ValueError("BundlerHelper should revert")
+
+        return result["error"]["data"]
 
     @staticmethod
     def parse_entity_slots(entities: str, keccak_list):
@@ -624,5 +617,5 @@ class ValidationManager:
                 )
 
                 stack.append(call_to_stack)
-      
+
         return results, paymaster_call
