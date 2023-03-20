@@ -23,11 +23,19 @@
   </a>
 </p>
 
+# Deployment
+
+Deploy Voltaire using the latest docker image
+
+```
+docker run --rm -ti sherifahmed990/voltaire-bundler:latest --entrypoint $ENTRYPOINT --bundler_secret $BUNDLER_SECRET --rpc_url $RPC_URL --geth_url $GETH_URL --chain_id $CHAIN_ID --verbose
+```
+
 # Development
 
 The information provided is only a rough estimate based on the current implementation. We plan on publishing more documentation for different developer audiences as we move forward.
 
-## Ubuntu: Get started in 5 minutes 
+## Ubuntu: Get started testing the bundler in 5 minutes 
 
 Voltaire requires `Python3.11` or above well as some tools to compile its dependencies. On Ubuntu, the `python3.11-dev` & `libpython3.11-dev` package contains everything we need
 
@@ -62,14 +70,32 @@ Follow the installation guide to install [docker on ubunutu](https://docs.docker
 
 Follow the instruction for docker's [post linux instalation](https://docs.docker.com/engine/install/linux-postinstall/)  
 
-### Start geth and deploy the EntryPoint
+### Start geth
 ```
-source scripts/run-geth.sh
+docker run --rm -ti --name geth -p 8545:8545 ethereum/client-go:v1.10.26 \                                                               ✔  4m 16s 
+  --miner.gaslimit 12000000 \
+  --http --http.api personal,eth,net,web3,debug \
+  --http.vhosts '*,localhost,host.docker.internal' --http.addr "0.0.0.0" \
+  --ignore-legacy-receipts --allow-insecure-unlock --rpc.allow-unprotected-txs \
+  --dev \
+  --verbosity 4 \
+  --nodiscover --maxpeers 0 --mine --miner.threads 1 \
+  --networkid 1337
 ```
 
-### Run the bundler in a new terminal
+### Deploy the EntryPoint and fund the signer (in another terminal)
 ```
-poetry run python3 main.py `cat init-params` --verbose
+geth --exec 'loadScript("test/deploy.js")' attach http://0.0.0.0:8545
+```
+
+### Set env values
+```
+source test/init-params 
+```
+
+### Run the bundler
+```
+poetry run python3 main.py --entrypoint $ENTRYPOINT --bundler_secret $BUNDLER_SECRET --chain_id 1337 --verbos
 ```
 
 ### Test the bundler by cloning `eth-infinitism/bundler-spec-tests`
