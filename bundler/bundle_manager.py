@@ -1,3 +1,4 @@
+import asyncio
 from web3 import Web3
 
 from utils.eth_client_utils import send_rpc_request_to_eth_client
@@ -50,37 +51,46 @@ class BundlerManager:
 
         args = [transactions_dict, self.bundler_address]
         call_data = entrypoint_contract.encodeABI("handleOps", args)
-        gasEstimation = (
-            await self.user_operation_handler.estimate_call_gas_limit(
+        gas_estimation_op = (
+            self.user_operation_handler.estimate_call_gas_limit(
                 call_data,
                 _from=self.bundler_address,
                 to=self.entrypoint,
             )
         )
 
-        gasPrice = await send_rpc_request_to_eth_client(
+        gas_price_op = send_rpc_request_to_eth_client(
             self.geth_rpc_url, "eth_gasPrice"
         )
 
-        chain_id = await send_rpc_request_to_eth_client(
+        chain_id_op = send_rpc_request_to_eth_client(
             self.geth_rpc_url, "eth_chainId"
         )
 
-        nonce = await send_rpc_request_to_eth_client(
+        nonce_op = send_rpc_request_to_eth_client(
             self.geth_rpc_url, 
             "eth_getTransactionCount",
             [self.bundler_address, "latest"]
         )
+
+        tasks = await asyncio.gather(gas_estimation_op, gas_price_op, chain_id_op, nonce_op)
+
+        gas_estimation = tasks[0]
+        gas_price = tasks[1]["result"]
+        chain_id = tasks[2]["result"]
+        nonce = tasks[3]["result"]
+
         txnDict = {
-            "chainId": chain_id["result"],
+            "chainId": chain_id,
             "from": self.bundler_address,
             "to": self.entrypoint,
-            "nonce": nonce["result"],
-            "gas": int(gasEstimation, 16),
-            "maxFeePerGas": gasPrice["result"],
-            "maxPriorityFeePerGas": gasPrice["result"],
+            "nonce": nonce,
+            "gas": int(gas_estimation, 16),
+            "maxFeePerGas": gas_price,
+            "maxPriorityFeePerGas": gas_price,
             "data": call_data,
         }
+
 
         sign_store_txn = w3Provider.eth.account.sign_transaction(
             txnDict, private_key=self.bundler_private_key
