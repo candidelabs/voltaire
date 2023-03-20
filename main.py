@@ -30,6 +30,7 @@ async def main():
             initData.entrypoint,
             initData.entrypoint_abi,
             initData.bundler_helper_byte_code,
+            initData.chain_id,
         )
         task_group.create_task(execution_endpoint.start_execution_endpoint())
         task_group.create_task(

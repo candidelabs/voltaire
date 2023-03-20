@@ -27,6 +27,7 @@ class InitData:
     bundler_pk: str
     bundler_address: str
     bundler_helper_byte_code: str
+    chain_id: int
 
 
 def address(ep):
@@ -101,6 +102,13 @@ def initialize() -> InitData:
     )
 
     parser.add_argument(
+        "--chain_id",
+        type=int,
+        help="chain id",
+        nargs="?",
+    )
+
+    parser.add_argument(
         "--verbose",
         help="show debug log",
         nargs="?",
@@ -138,6 +146,7 @@ def initialize() -> InitData:
         bundler_pk,
         bundler_address,
         bundler_helper_byte_code,
+        args.chain_id,
     )
 
     logging.basicConfig(

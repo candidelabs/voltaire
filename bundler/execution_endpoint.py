@@ -34,6 +34,7 @@ class ExecutionEndpoint(Endpoint):
     validation_manager: ValidationManager
     user_operation_handler: UserOperationHandler
     bundler_helper_byte_code: str
+    chain_id: int
 
     def __init__(
         self,
@@ -43,6 +44,7 @@ class ExecutionEndpoint(Endpoint):
         entrypoint,
         entrypoint_abi,
         bundler_helper_byte_code,
+        chain_id,
     ):
         super().__init__("bundler_endpoint")
         self.geth_rpc_url = geth_rpc_url
@@ -51,6 +53,7 @@ class ExecutionEndpoint(Endpoint):
         self.entrypoint = entrypoint
         self.entrypoint_abi = entrypoint_abi
         self.bundler_helper_byte_code = bundler_helper_byte_code
+        self.chain_id = chain_id
 
         self.validation_manager = ValidationManager(
             geth_rpc_url,
@@ -88,6 +91,7 @@ class ExecutionEndpoint(Endpoint):
             bundler_address,
             entrypoint,
             entrypoint_abi,
+            chain_id,
         )
 
     async def start_execution_endpoint(self) -> None:
@@ -99,10 +103,7 @@ class ExecutionEndpoint(Endpoint):
     async def _event_rpc_chainId(
         self, rpc_request: RPCCallRequestEvent
     ) -> RPCCallResponseEvent:
-        response = await send_rpc_request_to_eth_client(
-            self.geth_rpc_url, "eth_chainId"
-        )
-        return RPCCallResponseEvent(response["result"])
+        return RPCCallResponseEvent(hex(self.chain_id))
 
     async def _event_rpc_supportedEntryPoints(
         self, rpc_request: RPCCallRequestEvent

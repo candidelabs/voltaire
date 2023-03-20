@@ -14,6 +14,7 @@ class BundlerManager:
     entrypoint_abi: str
     mempool_manager: MempoolManager
     user_operation_handler: UserOperationHandler
+    chain_id: int
 
     def __init__(
         self,
@@ -24,6 +25,7 @@ class BundlerManager:
         bundler_address,
         entrypoint,
         entrypoint_abi,
+        chain_id,
     ):
         self.mempool_manager = mempool_manager
         self.user_operation_handler = user_operation_handler
@@ -32,6 +34,7 @@ class BundlerManager:
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
         self.entrypoint_abi = entrypoint_abi
+        self.chain_id= chain_id
 
     async def send_next_bundle(self):
         user_operations = (
@@ -63,25 +66,20 @@ class BundlerManager:
             self.geth_rpc_url, "eth_gasPrice"
         )
 
-        chain_id_op = send_rpc_request_to_eth_client(
-            self.geth_rpc_url, "eth_chainId"
-        )
-
         nonce_op = send_rpc_request_to_eth_client(
             self.geth_rpc_url, 
             "eth_getTransactionCount",
             [self.bundler_address, "latest"]
         )
 
-        tasks = await asyncio.gather(gas_estimation_op, gas_price_op, chain_id_op, nonce_op)
+        tasks = await asyncio.gather(gas_estimation_op, gas_price_op, nonce_op)
 
         gas_estimation = tasks[0]
         gas_price = tasks[1]["result"]
-        chain_id = tasks[2]["result"]
-        nonce = tasks[3]["result"]
+        nonce = tasks[2]["result"]
 
         txnDict = {
-            "chainId": chain_id,
+            "chainId": self.chain_id,
             "from": self.bundler_address,
             "to": self.entrypoint,
             "nonce": nonce,
