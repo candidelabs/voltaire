@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 from eth_abi import decode
@@ -22,6 +23,7 @@ from bundler.exceptions import (
 from .bundle_manager import BundlerManager
 from .validation_manager import ValidationManager
 
+BUNDLE_INTERVAL = 10 #in seconds
 
 class ExecutionEndpoint(Endpoint):
     geth_rpc_url: str
@@ -93,6 +95,13 @@ class ExecutionEndpoint(Endpoint):
             entrypoint_abi,
             chain_id,
         )
+    
+        asyncio.ensure_future(self.execute_bundle_cron_job())
+
+    async def execute_bundle_cron_job(self):
+        while True:
+            await self.bundle_manager.send_next_bundle()
+            await asyncio.sleep(BUNDLE_INTERVAL)
 
     async def start_execution_endpoint(self) -> None:
         self.add_events_and_response_functions_by_prefix(

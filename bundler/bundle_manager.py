@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from web3 import Web3
 
 from utils.eth_client_utils import send_rpc_request_to_eth_client
@@ -40,7 +41,13 @@ class BundlerManager:
         user_operations = (
             await self.mempool_manager.get_user_operations_to_bundle()
         )
-        return await self.send_bundle(user_operations)
+        numbder_of_user_operations = len(user_operations)
+        
+        if(numbder_of_user_operations > 0):
+            await self.send_bundle(user_operations)
+            logging.info(f"Sending bundle with {len(user_operations)} user operations")
+        else:
+            logging.info(f"Waiting for user operations to send bundle")
 
     async def send_bundle(self, user_operations):
         w3Provider = Web3()
