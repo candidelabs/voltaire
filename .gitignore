@@ -2,3 +2,6 @@ keystore
 *__pycache__
 .vscode
 *.ipc
+**/.env
+**/.aws
+**/.ssh
