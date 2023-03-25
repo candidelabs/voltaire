@@ -3,9 +3,10 @@ import logging
 from web3 import Web3
 
 from utils.eth_client_utils import send_rpc_request_to_eth_client
+from user_operation.user_operation import UserOperation
 from user_operation.user_operation_handler import UserOperationHandler
 from .mempool_manager import MempoolManager
-
+from .reputation_manager import ReputationManager
 
 class BundlerManager:
     geth_rpc_url: str
@@ -15,12 +16,14 @@ class BundlerManager:
     entrypoint_abi: str
     mempool_manager: MempoolManager
     user_operation_handler: UserOperationHandler
+    reputation_manager: ReputationManager
     chain_id: int
 
     def __init__(
         self,
         mempool_manager,
         user_operation_handler,
+        reputation_manager,
         geth_rpc_url,
         bundler_private_key,
         bundler_address,
@@ -30,6 +33,7 @@ class BundlerManager:
     ):
         self.mempool_manager = mempool_manager
         self.user_operation_handler = user_operation_handler
+        self.reputation_manager = reputation_manager
         self.geth_rpc_url = geth_rpc_url
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
@@ -49,17 +53,17 @@ class BundlerManager:
         else:
             logging.info(f"Waiting for user operations to send bundle")
 
-    async def send_bundle(self, user_operations):
+    async def send_bundle(self, user_operations: list[UserOperation]):
         w3Provider = Web3()
         entrypoint_contract = w3Provider.eth.contract(
             address=self.entrypoint, abi=self.entrypoint_abi
         )
 
-        transactions_dict = []
-        for transaction in user_operations:
-            transactions_dict.append(transaction.get_user_operation_dict())
+        user_operation_dict = []
+        for user_operation in user_operations:
+            user_operation_dict.append(user_operation.get_user_operation_dict())
 
-        args = [transactions_dict, self.bundler_address]
+        args = [user_operation_dict, self.bundler_address]
         call_data = entrypoint_contract.encodeABI("handleOps", args)
         gas_estimation_op = (
             self.user_operation_handler.estimate_call_gas_limit(
@@ -105,4 +109,19 @@ class BundlerManager:
             "eth_sendRawTransaction",
             [sign_store_txn.rawTransaction.hex()],
         )
-        return result["result"]
+        transaction_hash =  result["result"]
+        
+        #todo : check if bundle was included on chain
+        for user_operation in user_operations:
+            self.update_included_status(user_operation.sender, user_operation.factory_address, user_operation.paymaster_address)
+
+        return transaction_hash
+    
+    def update_included_status(self, sender_address, factory_address, paymaster_address):
+        self.reputation_manager.update_included_status(sender_address)
+
+        if factory_address is not None:
+            self.reputation_manager.update_included_status(factory_address)
+        
+        if paymaster_address is not None:
+            self.reputation_manager.update_included_status(paymaster_address)

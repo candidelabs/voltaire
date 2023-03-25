@@ -89,12 +89,9 @@ class ValidationManager:
         )
 
         sender = user_operation.sender
-        (
-            factory_address,
-            paymaster_address,
-        ) = ValidationManager.get_factory_and_paymaster_address(
-            user_operation.init_code, user_operation.paymaster_and_data
-        )
+        factory_address = user_operation.factory_address
+        paymaster_address = user_operation.paymaster_address
+        
         is_init_code = len(user_operation.init_code) > 2
 
         entities_addreses = []
@@ -190,6 +187,8 @@ class ValidationManager:
                     "",
                 )
 
+        return sender, factory_address, paymaster_address
+
     @staticmethod
     def is_slot_associated_with_address(slot, address, associated_slots):
         address_lowercase = address[2:].lower()
@@ -214,19 +213,6 @@ class ValidationManager:
     @staticmethod
     def is_staked(entity_stake: StakeInfo):
         return entity_stake.stake > 1 and entity_stake.unstakeDelaySec > 1
-
-    @staticmethod
-    def get_factory_and_paymaster_address(intit_data, paymaster_data):
-        factory_address = None
-        paymaster_address = None
-
-        if len(intit_data) > 20:
-            factory_address = "0x" + intit_data[:20].hex()
-
-        if len(paymaster_data) > 20:
-            paymaster_address = "0x" + paymaster_data[:20].hex()
-
-        return factory_address, paymaster_address
 
     def validate_entity_storage_access(
         self,

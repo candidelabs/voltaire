@@ -22,6 +22,7 @@ from bundler.exceptions import (
 )
 from .bundle_manager import BundlerManager
 from .validation_manager import ValidationManager
+from .reputation_manager import ReputationManager
 
 BUNDLE_INTERVAL = 10 #in seconds
 
@@ -35,6 +36,7 @@ class ExecutionEndpoint(Endpoint):
     mempool_manager: MempoolManager
     validation_manager: ValidationManager
     user_operation_handler: UserOperationHandler
+    reputation_manager: ReputationManager
     bundler_helper_byte_code: str
     chain_id: int
 
@@ -57,6 +59,8 @@ class ExecutionEndpoint(Endpoint):
         self.bundler_helper_byte_code = bundler_helper_byte_code
         self.chain_id = chain_id
 
+        self.reputation_manager = ReputationManager()
+
         self.validation_manager = ValidationManager(
             geth_rpc_url,
             bundler_private_key,
@@ -78,6 +82,7 @@ class ExecutionEndpoint(Endpoint):
         self.mempool_manager = MempoolManager(
             self.validation_manager,
             self.user_operation_handler,
+            self.reputation_manager,
             geth_rpc_url,
             bundler_private_key,
             bundler_address,
@@ -88,6 +93,7 @@ class ExecutionEndpoint(Endpoint):
         self.bundle_manager = BundlerManager(
             self.mempool_manager,
             self.user_operation_handler,
+            self.reputation_manager,
             geth_rpc_url,
             bundler_private_key,
             bundler_address,

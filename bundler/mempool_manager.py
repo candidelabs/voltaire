@@ -4,12 +4,13 @@ from user_operation.user_operation import UserOperation
 from .sender import Sender
 from user_operation.user_operation_handler import UserOperationHandler
 from .validation_manager import ValidationManager
-
+from .reputation_manager import ReputationManager, ReputationStatus
 
 @dataclass
 class MempoolManager:
     validation_manager: ValidationManager
     user_operation_handler: UserOperationHandler
+    reputation_manager: ReputationManager
     geth_rpc_url: str
     bundler_private_key: str
     bundler_address: str
@@ -21,6 +22,7 @@ class MempoolManager:
         self,
         validation_manager,
         user_operation_handler,
+        reputation_manager,
         geth_rpc_url,
         bundler_private_key,
         bundler_address,
@@ -29,6 +31,7 @@ class MempoolManager:
     ):
         self.validation_manager = validation_manager
         self.user_operation_handler = user_operation_handler
+        self.reputation_manager = reputation_manager
         self.geth_rpc_url = geth_rpc_url
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
@@ -47,6 +50,8 @@ class MempoolManager:
         )
 
         await self.validation_manager.validate_user_operation(user_operation)
+
+        self.update_seen_status(user_operation.sender, user_operation.factory_address, user_operation.paymaster_address)
 
         new_sender = None
         new_sender_address = user_operation.sender
@@ -91,3 +96,12 @@ class MempoolManager:
             for user_operation in sender.user_operations
         ]
         return user_operations
+    
+    def update_seen_status(self, sender_address, factory_address, paymaster_address):
+        self.reputation_manager.update_seen_status(sender_address)
+
+        if factory_address is not None:
+            self.reputation_manager.update_seen_status(factory_address)
+        
+        if paymaster_address is not None:
+            self.reputation_manager.update_seen_status(paymaster_address)

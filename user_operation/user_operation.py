@@ -17,6 +17,8 @@ class UserOperation:
     paymaster_and_data: bytes
     signature: bytes
     code_hash: str | None
+    factory_address: str | None
+    paymaster_address: str | None
     jsonRequestDict: InitVar[dict]
 
     def __init__(self, jsonRequestDict):
@@ -48,6 +50,8 @@ class UserOperation:
         self.signature = verify_and_get_bytes(jsonRequestDict["signature"])
 
         self.code_hash = None
+
+        self._set_factory_and_paymaster_address()
 
     def get_user_operation_dict(self) -> tuple:
         return {
@@ -93,7 +97,17 @@ class UserOperation:
             self.paymaster_and_data,
             self.signature,
         ]
+    
+    def _set_factory_and_paymaster_address(self):
+        if len(self.init_code) > 20:
+            self.factory_address = "0x" + self.init_code[:20].hex()
+        else:
+            self.factory_address = None
 
+        if len(self.paymaster_and_data) > 20:
+            self.paymaster_address = "0x" + self.paymaster_and_data[:20].hex()
+        else:
+            self.paymaster_address = None
 
 def verify_and_get_address(value) -> str:
     if value is None:
