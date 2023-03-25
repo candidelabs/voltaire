@@ -7,7 +7,7 @@ from bundler.exceptions import BundlerException, BundlerExceptionCode
 from utils.eth_client_utils import send_rpc_request_to_eth_client
 from user_operation.models import DepositInfo
 
-ALLOWED_OPS_PER_UNSTAKED_SENDER = 4
+MAX_MEMPOOL_USEROPS_PER_SENDER = 4
 MIN_PRICE_BUMP = 10
 
 
@@ -33,7 +33,7 @@ class Sender:
             self.user_operations.append(new_user_operation)
         elif (
             is_staked
-            or sender_operations_num <= ALLOWED_OPS_PER_UNSTAKED_SENDER
+            or sender_operations_num <= MAX_MEMPOOL_USEROPS_PER_SENDER
         ):
             existing_user_operation_with_same_nonce = (
                 self._get_user_operation_with_same_nonce(
@@ -46,7 +46,7 @@ class Sender:
                 )
             elif (
                 is_staked
-                or sender_operations_num < ALLOWED_OPS_PER_UNSTAKED_SENDER
+                or sender_operations_num < MAX_MEMPOOL_USEROPS_PER_SENDER
             ):
                 self.user_operations.append(new_user_operation)
             else:
