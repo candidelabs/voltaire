@@ -59,6 +59,7 @@ class MempoolManager:
         for sender in self.senders:
             if sender.address == new_sender_address:
                 new_sender = sender
+                break
 
         if new_sender is None:
             new_sender: Sender = Sender(new_sender_address)
