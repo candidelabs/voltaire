@@ -192,7 +192,12 @@ class MempoolManager:
         if entity_reputation.status == ReputationStatus.BANNED:
             raise BundlerException(
                 BundlerExceptionCode.BANNED_OR_THROTTLED_PAYMASTER,
-                entity_address + " Banned " + entity_name,
+                " ".join(
+                    "user operation was dropped because ",
+                    entity_address,
+                    "is banned",
+                    entity_name,
+                ),
                 "",
             )
         elif (
@@ -201,7 +206,12 @@ class MempoolManager:
         ):
             raise BundlerException(
                 BundlerExceptionCode.BANNED_OR_THROTTLED_PAYMASTER,
-                entity_address + " Banned " + entity_name,
+                " ".join(
+                    "user operation was dropped",
+                    entity_address,
+                    "is throttled",
+                    entity_name,
+                ),
                 "",
             )
 
