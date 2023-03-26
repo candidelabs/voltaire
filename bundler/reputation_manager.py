@@ -33,7 +33,7 @@ class ReputationManager:
 
     def get_reputation_entry(self, entity:str):
         if entity not in self.entities_reputation:
-            self.entities_reputation[entity] = ReputationEntry()
+            self.entities_reputation[entity] = ReputationEntry(0, 0, ReputationStatus.OK)
 
         return self.entities_reputation[entity]
     
