@@ -16,7 +16,7 @@ class MempoolManager:
     bundler_address: str
     entrypoint: str
     entrypoint_abi: str
-    senders: list = field(default_factory=list[Sender])
+    senders: dict[str, Sender]
 
     def __init__(
         self,
@@ -37,7 +37,7 @@ class MempoolManager:
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
         self.entrypoint_abi = entrypoint_abi
-        self.senders = []
+        self.senders = {}
 
     def clear_user_operations(self):
         self.senders.clear()
@@ -56,14 +56,10 @@ class MempoolManager:
         new_sender = None
         new_sender_address = user_operation.sender
 
-        for sender in self.senders:
-            if sender.address == new_sender_address:
-                new_sender = sender
-                break
-
-        if new_sender is None:
-            new_sender: Sender = Sender(new_sender_address)
-            self.senders.append(new_sender)
+        if new_sender_address not in self.senders:
+            self.senders[new_sender_address] = Sender(new_sender_address)
+        
+        new_sender = self.senders[new_sender_address]
 
         await new_sender.add_user_operation(
             user_operation,
@@ -77,14 +73,15 @@ class MempoolManager:
     async def get_user_operations_to_bundle(self):
         bundle = []
         validation_operations = []
-        for sender in self.senders:
+        for sender_address in list(self.senders):
+            sender = self.senders[sender_address]
             user_operation = sender.user_operations.pop(0)
             validation_operations.append(
                 self.validation_manager.validate_user_operation(user_operation)
             )
             bundle.append(user_operation)
             if len(sender.user_operations) == 0:
-                self.senders.remove(sender)
+                del self.senders[sender.address]
 
         await asyncio.gather(*validation_operations)
 
@@ -93,7 +90,7 @@ class MempoolManager:
     def get_all_user_operations(self) -> list[UserOperation]:
         user_operations = [
             user_operation
-            for sender in self.senders
+            for sender in self.senders.values()
             for user_operation in sender.user_operations
         ]
         return user_operations
