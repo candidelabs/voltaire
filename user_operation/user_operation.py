@@ -97,7 +97,7 @@ class UserOperation:
             self.paymaster_and_data,
             self.signature,
         ]
-    
+
     def _set_factory_and_paymaster_address(self):
         if len(self.init_code) > 20:
             self.factory_address = "0x" + self.init_code[:20].hex()
@@ -108,6 +108,7 @@ class UserOperation:
             self.paymaster_address = "0x" + self.paymaster_and_data[:20].hex()
         else:
             self.paymaster_address = None
+
 
 def verify_and_get_address(value) -> str:
     if value is None:

@@ -91,7 +91,7 @@ class ValidationManager:
         sender = user_operation.sender
         factory_address = user_operation.factory_address
         paymaster_address = user_operation.paymaster_address
-        
+
         is_init_code = len(user_operation.init_code) > 2
 
         entities_addreses = []

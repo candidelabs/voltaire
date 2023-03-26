@@ -8,6 +8,7 @@ from user_operation.user_operation_handler import UserOperationHandler
 from .mempool_manager import MempoolManager
 from .reputation_manager import ReputationManager
 
+
 class BundlerManager:
     geth_rpc_url: str
     bundler_private_key: str
@@ -39,17 +40,19 @@ class BundlerManager:
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
         self.entrypoint_abi = entrypoint_abi
-        self.chain_id= chain_id
+        self.chain_id = chain_id
 
     async def send_next_bundle(self):
         user_operations = (
             await self.mempool_manager.get_user_operations_to_bundle()
         )
         numbder_of_user_operations = len(user_operations)
-        
-        if(numbder_of_user_operations > 0):
+
+        if numbder_of_user_operations > 0:
             await self.send_bundle(user_operations)
-            logging.info(f"Sending bundle with {len(user_operations)} user operations")
+            logging.info(
+                f"Sending bundle with {len(user_operations)} user operations"
+            )
         else:
             logging.info(f"Waiting for user operations to send bundle")
 
@@ -61,7 +64,9 @@ class BundlerManager:
 
         user_operation_dict = []
         for user_operation in user_operations:
-            user_operation_dict.append(user_operation.get_user_operation_dict())
+            user_operation_dict.append(
+                user_operation.get_user_operation_dict()
+            )
 
         args = [user_operation_dict, self.bundler_address]
         call_data = entrypoint_contract.encodeABI("handleOps", args)
@@ -78,9 +83,9 @@ class BundlerManager:
         )
 
         nonce_op = send_rpc_request_to_eth_client(
-            self.geth_rpc_url, 
+            self.geth_rpc_url,
             "eth_getTransactionCount",
-            [self.bundler_address, "latest"]
+            [self.bundler_address, "latest"],
         )
 
         tasks = await asyncio.gather(gas_estimation_op, gas_price_op, nonce_op)
@@ -100,7 +105,6 @@ class BundlerManager:
             "data": call_data,
         }
 
-
         sign_store_txn = w3Provider.eth.account.sign_transaction(
             txnDict, private_key=self.bundler_private_key
         )
@@ -109,19 +113,25 @@ class BundlerManager:
             "eth_sendRawTransaction",
             [sign_store_txn.rawTransaction.hex()],
         )
-        transaction_hash =  result["result"]
-        
-        #todo : check if bundle was included on chain
+        transaction_hash = result["result"]
+
+        # todo : check if bundle was included on chain
         for user_operation in user_operations:
-            self.update_included_status(user_operation.sender, user_operation.factory_address, user_operation.paymaster_address)
+            self.update_included_status(
+                user_operation.sender,
+                user_operation.factory_address,
+                user_operation.paymaster_address,
+            )
 
         return transaction_hash
-    
-    def update_included_status(self, sender_address, factory_address, paymaster_address):
+
+    def update_included_status(
+        self, sender_address, factory_address, paymaster_address
+    ):
         self.reputation_manager.update_included_status(sender_address)
 
         if factory_address is not None:
             self.reputation_manager.update_included_status(factory_address)
-        
+
         if paymaster_address is not None:
             self.reputation_manager.update_included_status(paymaster_address)

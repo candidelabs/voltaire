@@ -24,7 +24,8 @@ from .bundle_manager import BundlerManager
 from .validation_manager import ValidationManager
 from .reputation_manager import ReputationManager
 
-BUNDLE_INTERVAL = 10 #in seconds
+BUNDLE_INTERVAL = 10  # in seconds
+
 
 class ExecutionEndpoint(Endpoint):
     geth_rpc_url: str
@@ -101,7 +102,7 @@ class ExecutionEndpoint(Endpoint):
             entrypoint_abi,
             chain_id,
         )
-    
+
         asyncio.ensure_future(self.execute_bundle_cron_job())
 
     async def execute_bundle_cron_job(self):

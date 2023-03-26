@@ -20,6 +20,7 @@ def import_bundler_account(
         acct = Account.from_key(private_key)
         return acct.address, private_key.hex()
 
+
 def public_address_from_private_key(private_key):
     public_address = Account.from_key(bytes.fromhex(private_key[2:]))
     return public_address.address
