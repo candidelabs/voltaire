@@ -118,7 +118,7 @@ def verify_and_get_address(value) -> str:
     if isinstance(value, str) and re.match(address_pattern, value) is not None:
         return value
     else:
-        raise ValueError
+        raise ValueError("Invalide address value")
 
 
 def verify_and_get_uint(value) -> int:
@@ -128,12 +128,12 @@ def verify_and_get_uint(value) -> int:
     uint_pattern = "^0x([1-9a-f]+[0-9a-f]*|0)$"
     if isinstance(value, int):
         return value
-    if isinstance(value, str) and re.match(uint_pattern, value) is not None:
+    elif isinstance(value, str) and re.match(uint_pattern, value) is not None:
         return int(value, 16)
     elif isinstance(value, str) and value.isdigit():
         return int(value)
     else:
-        raise ValueError
+        raise ValueError("Invalide uint value")
 
 
 def verify_and_get_bytes(value) -> bytes:
@@ -144,4 +144,4 @@ def verify_and_get_bytes(value) -> bytes:
     if isinstance(value, str) and re.match(bytes_pattern, value) is not None:
         return bytes.fromhex(value[2:])
     else:
-        raise ValueError
+        raise ValueError("Invalide bytes value")
