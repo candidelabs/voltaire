@@ -130,6 +130,8 @@ def verify_and_get_uint(value) -> int:
         return value
     if isinstance(value, str) and re.match(uint_pattern, value) is not None:
         return int(value, 16)
+    elif isinstance(value, str) and value.isdigit():
+        return int(value)
     else:
         raise ValueError
 
