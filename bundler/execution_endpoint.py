@@ -107,7 +107,11 @@ class ExecutionEndpoint(Endpoint):
 
     async def execute_bundle_cron_job(self):
         while True:
-            await self.bundle_manager.send_next_bundle()
+            try:
+                await self.bundle_manager.send_next_bundle()
+            except (BundlerException, ValidationException) as excp:
+                logging.exception(excp.message)
+            
             await asyncio.sleep(BUNDLE_INTERVAL)
 
     async def start_execution_endpoint(self) -> None:
