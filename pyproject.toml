@@ -10,8 +10,9 @@ readme = "README.md"
 python = "^3.11"
 aiohttp = "^3.8.3"
 jsonrpcserver = "^5.0.9"
-web3 = "v6.0.0-beta.9"
 uvloop = "^0.17.0"
+eth-abi = "^4.0.0"
+eth-account = "^0.8.0"
 
 [build-system]
 requires = ["poetry-core"]

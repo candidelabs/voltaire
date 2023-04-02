@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
-from web3 import Web3
-from eth_abi import decode
+
+from eth_abi import encode, decode
 
 from user_operation.user_operation import UserOperation
 from bundler.exceptions import ValidationException, ValidationExceptionCode
@@ -108,14 +108,10 @@ class Sender:
     async def _check_if_stacked(
         self, entrypoint_address, entrypoint_abi, bundler_address, geth_rpc_url
     ):
-        w3_provider = Web3()
-        entrypoint_contract = w3_provider.eth.contract(
-            address=entrypoint_address, abi=entrypoint_abi
-        )
-
-        call_data = entrypoint_contract.encodeABI(
-            "getDepositInfo", [self.address]
-        )
+        function_selector="0x5287ce12" #getDepositInfo
+        params = encode(["address"], [self.address])
+        
+        call_data = function_selector + params.hex()
 
         params = [
             {

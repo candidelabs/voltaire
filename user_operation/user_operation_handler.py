@@ -2,14 +2,13 @@ import asyncio
 from functools import reduce
 import math
 
-from web3 import Web3
-from eth_abi import decode
+from eth_utils import to_checksum_address
+from eth_abi import encode, decode
 
 from .user_operation import UserOperation
 from bundler.exceptions import ValidationException, ValidationExceptionCode
 from bundler.exceptions import ExecutionException, ExecutionExceptionCode
 from utils.eth_client_utils import send_rpc_request_to_eth_client
-from eth_abi import encode
 
 from user_operation.models import (
     Log,
@@ -172,7 +171,7 @@ class UserOperationHandler:
         )
 
         user_operation_json = {
-            "sender": Web3.to_checksum_address(user_operation[0]),
+            "sender": to_checksum_address(user_operation[0]),
             "nonce": hex(user_operation[1]),
             "initCode": "0x" + user_operation[2].hex(),
             "callData": "0x" + user_operation[3].hex(),
@@ -364,16 +363,14 @@ class UserOperationHandler:
         )
         return res["result"]
 
-    async def get_user_operation_hash(self, user_operation):
-        w3_provider = Web3()
-        entrypoint_contract = w3_provider.eth.contract(
-            address=self.entrypoint, abi=self.entrypoint_abi
+    async def get_user_operation_hash(self, user_operation:UserOperation):
+        function_selector="0xa6193531" #getUserOpHash
+        params = encode(
+            ["(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)"],
+            [user_operation.to_list()],
         )
-
-        call_data = entrypoint_contract.encodeABI(
-            "getUserOpHash", [user_operation.get_user_operation_dict()]
-        )
-
+        
+        call_data = function_selector + params.hex()
         params = [
             {
                 "from": self.bundler_address,

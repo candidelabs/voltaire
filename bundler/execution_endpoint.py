@@ -1,10 +1,8 @@
 import asyncio
 import logging
 import re
+
 from eth_abi import decode
-from web3 import Web3
-
-
 from aiohttp import ClientSession
 
 from event_bus_manager.endpoint import Endpoint

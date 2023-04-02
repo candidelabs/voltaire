@@ -1,6 +1,4 @@
-from dataclasses import dataclass
 import glob
-from web3.auto import w3
 from eth_account import Account
 
 
@@ -14,7 +12,7 @@ def import_bundler_account(
 
     with open(keystore) as keyfile:
         encrypted_key = keyfile.read()
-        private_key = w3.eth.account.decrypt(
+        private_key = Account.decrypt(
             encrypted_key, keystore_file_password
         )
         acct = Account.from_key(private_key)

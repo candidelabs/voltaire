@@ -17,7 +17,6 @@ ENV PATH="${PATH}:${POETRY_VENV}/bin"
 WORKDIR /app
 
 # Install dependencies
-RUN apk add python3-dev libc-dev gcc
 COPY poetry.lock pyproject.toml ./
 RUN poetry install
 

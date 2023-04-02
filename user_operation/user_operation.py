@@ -1,7 +1,5 @@
 from dataclasses import dataclass, InitVar
 import re
-from web3 import Web3
-
 
 @dataclass()
 class UserOperation:

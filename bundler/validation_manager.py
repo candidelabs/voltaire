@@ -2,7 +2,7 @@ import asyncio
 from typing import Dict
 import json
 
-from web3 import Web3
+from eth_utils import to_checksum_address, keccak
 from eth_abi import decode, encode
 
 from user_operation.user_operation import UserOperation
@@ -163,7 +163,7 @@ class ValidationManager:
 
         if len(associated_addresses_lowercase) > 0:
             associated_addresses = [
-                Web3.to_checksum_address(lower_case_address)
+                to_checksum_address(lower_case_address)
                 for lower_case_address in associated_addresses_lowercase
             ]
 
@@ -378,13 +378,13 @@ class ValidationManager:
         return operation_index, reason
 
     async def simulate_validation(self, user_operation: UserOperation):
-        w3_provider = Web3()
-        entrypoint_contract = w3_provider.eth.contract(
-            address=self.entrypoint, abi=self.entrypoint_abi
+        function_selector="0xee219423" #simulateValidation
+        params = encode(
+            ["(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)"],
+            [user_operation.to_list()],
         )
-        call_data = entrypoint_contract.encodeABI(
-            "simulateValidation", [user_operation.get_user_operation_dict()]
-        )
+        
+        call_data = function_selector + params.hex()
 
         params = [
             {
@@ -428,13 +428,13 @@ class ValidationManager:
             + user_operation.verification_gas_limit
         )
 
-        w3_provider = Web3()
-        entrypoint_contract = w3_provider.eth.contract(
-            address=self.entrypoint, abi=self.entrypoint_abi
+        function_selector="0xee219423" #simulateValidation
+        params = encode(
+            ["(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)"],
+            [user_operation.to_list()],
         )
-        call_data = entrypoint_contract.encodeABI(
-            "simulateValidation", [user_operation.get_user_operation_dict()]
-        )
+        
+        call_data = function_selector + params.hex()
 
         params = [
             {
@@ -526,7 +526,7 @@ class ValidationManager:
     @staticmethod
     def parse_entity_slots(entities: str, keccak_list):
         entity_slots = dict()
-        for keccak in keccak_list:
+        for slot_keccak in keccak_list:
             for address in entities:
                 address_lowercase = address[2:].lower()
                 address_padded = (
@@ -537,9 +537,9 @@ class ValidationManager:
                     entity_slots[address] = []
 
                 current_entity_slot = entity_slots[address]
-                if address_padded in keccak:
-                    keccak_hash = Web3.solidity_keccak(["bytes"], [keccak])
-                    slot = keccak_hash.hex()[2:]
+                if address_padded in slot_keccak:
+                    keccak_hash = keccak(bytes.fromhex(slot_keccak[2:]))
+                    slot = keccak_hash.hex()
                     if slot not in current_entity_slot:
                         current_entity_slot.append(slot)
         return entity_slots

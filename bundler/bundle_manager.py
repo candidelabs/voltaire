@@ -1,6 +1,8 @@
 import asyncio
 import logging
-from web3 import Web3
+
+from eth_abi import encode
+from eth_account import Account
 
 from utils.eth_client_utils import send_rpc_request_to_eth_client
 from user_operation.user_operation import UserOperation
@@ -57,19 +59,20 @@ class BundlerManager:
             logging.info(f"Waiting for user operations to send bundle")
 
     async def send_bundle(self, user_operations: list[UserOperation]):
-        w3Provider = Web3()
-        entrypoint_contract = w3Provider.eth.contract(
-            address=self.entrypoint, abi=self.entrypoint_abi
-        )
-
-        user_operation_dict = []
+        user_operations_list = []
         for user_operation in user_operations:
-            user_operation_dict.append(
-                user_operation.get_user_operation_dict()
+            user_operations_list.append(
+                user_operation.to_list()
             )
 
-        args = [user_operation_dict, self.bundler_address]
-        call_data = entrypoint_contract.encodeABI("handleOps", args)
+        function_selector="0x1fad948c" #handleOps
+        params = encode(
+            ["(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)[]", "address"],
+            [user_operations_list, self.bundler_address],
+        )
+        
+        call_data = function_selector + params.hex()
+
         gas_estimation_op = (
             self.user_operation_handler.estimate_call_gas_limit(
                 call_data,
@@ -105,7 +108,7 @@ class BundlerManager:
             "data": call_data,
         }
 
-        sign_store_txn = w3Provider.eth.account.sign_transaction(
+        sign_store_txn = Account.sign_transaction(
             txnDict, private_key=self.bundler_private_key
         )
         result = await send_rpc_request_to_eth_client(
