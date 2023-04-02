@@ -55,8 +55,6 @@ class BundlerManager:
             logging.info(
                 f"Sending bundle with {len(user_operations)} user operations"
             )
-        else:
-            logging.info(f"Waiting for user operations to send bundle")
 
     async def send_bundle(self, user_operations: list[UserOperation]):
         user_operations_list = []
