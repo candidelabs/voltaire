@@ -5,7 +5,7 @@ from .sender import Sender
 from user_operation.user_operation_handler import UserOperationHandler
 from .validation_manager import ValidationManager
 from .reputation_manager import ReputationManager, ReputationStatus
-from bundler.exceptions import BundlerException, BundlerExceptionCode
+from bundler.exceptions import ValidationException, ValidationExceptionCode
 
 
 @dataclass
@@ -187,8 +187,8 @@ class MempoolManager:
         entity_no_of_ops = self.entity_no_of_ops_in_mempool[entity_address]
         status = self.reputation_manager.get_status(entity_address)
         if status == ReputationStatus.BANNED:
-            raise BundlerException(
-                BundlerExceptionCode.BANNED_OR_THROTTLED_PAYMASTER,
+            raise ValidationException(
+                ValidationExceptionCode.Reputation,
                 " ".join((
                     "user operation was dropped because ",
                     entity_address,
@@ -201,8 +201,8 @@ class MempoolManager:
             status == ReputationStatus.THROTTLED
             and entity_no_of_ops > 0
         ):
-            raise BundlerException(
-                BundlerExceptionCode.BANNED_OR_THROTTLED_PAYMASTER,
+            raise ValidationException(
+                ValidationExceptionCode.Reputation,
                 " ".join((
                     "user operation was dropped",
                     entity_address,

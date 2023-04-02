@@ -8,8 +8,6 @@ from eth_abi import decode, encode
 from user_operation.user_operation import UserOperation
 from user_operation.models import ReturnInfo, StakeInfo, FailedOpRevertData
 from bundler.exceptions import (
-    BundlerException,
-    BundlerExceptionCode,
     ValidationException,
     ValidationExceptionCode,
 )
@@ -157,7 +155,7 @@ class ValidationManager:
                 paymaster_stake_info
             )
             if len(paymaster_call._data) > 194 and not is_paymaster_staked:
-                raise BundlerException(
+                raise ValidationException(
                     ValidationExceptionCode.OpcodeValidation,
                     "unstaked paymaster must not return context",
                     "",
@@ -181,7 +179,7 @@ class ValidationManager:
                     associated_addresses
                 )
             if new_code_hash != user_operation.code_hash:
-                raise BundlerException(
+                raise ValidationException(
                     ValidationExceptionCode.OpcodeValidation,
                     "modified code after first validation",
                     "",
@@ -303,8 +301,8 @@ class ValidationManager:
             _, reason = ValidationManager.decode_FailedOp_event(
                 solidity_error_params
             )
-            raise BundlerException(
-                BundlerExceptionCode.REJECTED_BY_EP_OR_ACCOUNT,
+            raise ValidationException(
+                ValidationExceptionCode.SimulateValidation,
                 "revert reason : " + reason,
                 solidity_error_params,
             )
@@ -336,8 +334,8 @@ class ValidationManager:
                 VALIDATION_RESULT_ABI, bytes.fromhex(solidity_error_params)
             )
         except Exception as err:
-            raise BundlerException(
-                BundlerExceptionCode.REJECTED_BY_EP_OR_ACCOUNT,
+            raise ValidationException(
+                ValidationExceptionCode.SimulateValidation,
                 bytearray.fromhex(solidity_error_params).decode(),
                 "",
             )
@@ -492,8 +490,8 @@ class ValidationManager:
         number_of_opcodes = len(found_opcodes)
         if number_of_opcodes > 0:
             opcodes_str = " ".join([opcode for opcode in found_opcodes])
-            raise BundlerException(
-                BundlerExceptionCode.BANNED_OPCODE,
+            raise ValidationException(
+                ValidationExceptionCode.OpcodeValidation,
                 opcode_source + " uses banned opcode: " + opcodes_str,
                 "",
             )
@@ -502,8 +500,8 @@ class ValidationManager:
             if (opcodes["CREATE2"] > 1) or (
                 opcodes["CREATE2"] == 1 and not is_factory
             ):
-                raise BundlerException(
-                    BundlerExceptionCode.BANNED_OPCODE,
+                raise ValidationException(
+                    ValidationExceptionCode.OpcodeValidation,
                     opcode_source + " uses banned opcode: " + "CREATE2",
                     "",
                 )

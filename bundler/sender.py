@@ -3,7 +3,7 @@ from web3 import Web3
 from eth_abi import decode
 
 from user_operation.user_operation import UserOperation
-from bundler.exceptions import BundlerException, BundlerExceptionCode
+from bundler.exceptions import ValidationException, ValidationExceptionCode
 from utils.eth_client_utils import send_rpc_request_to_eth_client
 from user_operation.models import DepositInfo
 
@@ -50,8 +50,8 @@ class Sender:
             ):
                 self.user_operations.append(new_user_operation)
             else:
-                raise BundlerException(
-                    BundlerExceptionCode.INVALID_FIELDS,
+                raise ValidationException(
+                    ValidationExceptionCode.InvalidFields,
                     "invalid UserOperation struct/fields",
                     "",
                 )
@@ -65,8 +65,8 @@ class Sender:
             index = self.user_operations.index(existing_user_operation)
             self.user_operations[index] = new_user_operation
         else:
-            raise BundlerException(
-                BundlerExceptionCode.INVALID_FIELDS,
+            raise ValidationException(
+                    ValidationExceptionCode.InvalidFields,
                 "invalid UserOperation struct/fields",
                 "",
             )

@@ -6,7 +6,8 @@ from web3 import Web3
 from eth_abi import decode
 
 from .user_operation import UserOperation
-from bundler.exceptions import BundlerException, BundlerExceptionCode
+from bundler.exceptions import ValidationException, ValidationExceptionCode
+from bundler.exceptions import ExecutionException, ExecutionExceptionCode
 from utils.eth_client_utils import send_rpc_request_to_eth_client
 from eth_abi import encode
 
@@ -98,8 +99,8 @@ class UserOperationHandler:
             errorMessage = result["error"]["message"]
             errorData = result["error"]["data"]
             errorParams = errorData[10:]
-            raise BundlerException(
-                BundlerExceptionCode.EXECUTION_REVERTED,
+            raise ExecutionException(
+                ExecutionExceptionCode.EXECUTION_REVERTED,
                 errorMessage,
                 errorParams,
             )
@@ -293,8 +294,8 @@ class UserOperationHandler:
         )
 
         if len(res["result"]) < 1:
-            raise BundlerException(
-                BundlerExceptionCode.INVALID_USEROPHASH, "null", ""
+            raise ExecutionException(
+                ExecutionExceptionCode.INVALID_USEROPHASH, "can't find user operation with hash : " + user_operation_hash, ""
             )
 
         log = res["result"][0]

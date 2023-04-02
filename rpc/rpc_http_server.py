@@ -7,7 +7,7 @@ from typing import Any
 from event_bus_manager.endpoint import Client
 from rpc.events import RPCCallRequestEvent, RPCCallResponseEvent
 from user_operation.user_operation import UserOperation
-from bundler.exceptions import BundlerException, ValidationException
+from bundler.exceptions import ValidationException, ExecutionException
 
 
 async def _handle_rpc_request(
@@ -19,7 +19,7 @@ async def _handle_rpc_request(
 
     logging.debug(f"{request_type} RPC served")
     if resp.is_error:
-        error: BundlerException | ValidationException = resp.payload
+        error: ValidationException | ExecutionException = resp.payload
         error_code = error.exception_code.value
         error_message = str(error.message)
         revert_message = bytes.fromhex(error.data[-64:]).decode("ascii")

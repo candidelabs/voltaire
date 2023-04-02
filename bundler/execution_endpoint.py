@@ -16,9 +16,9 @@ from utils.eth_client_utils import send_rpc_request_to_eth_client
 from .mempool_manager import MempoolManager
 from user_operation.user_operation_handler import UserOperationHandler
 from bundler.exceptions import (
-    BundlerException,
-    BundlerExceptionCode,
     ValidationException,
+    ValidationExceptionCode,
+    ExecutionException
 )
 from .bundle_manager import BundlerManager
 from .validation_manager import ValidationManager
@@ -109,7 +109,7 @@ class ExecutionEndpoint(Endpoint):
         while True:
             try:
                 await self.bundle_manager.send_next_bundle()
-            except (BundlerException, ValidationException) as excp:
+            except (ValidationException, ExecutionException) as excp:
                 logging.exception(excp.message)
             
             await asyncio.sleep(BUNDLE_INTERVAL)
@@ -188,8 +188,8 @@ class ExecutionEndpoint(Endpoint):
         user_operation_hash = rpc_request.req_arguments[0]
 
         if not is_hash(user_operation_hash):
-            raise BundlerException(
-                BundlerExceptionCode.INVALID_USEROPHASH,
+            raise ValidationException(
+                ValidationExceptionCode.INVALID_USEROPHASH,
                 "Missing/invalid userOpHash",
                 "",
             )
@@ -208,8 +208,8 @@ class ExecutionEndpoint(Endpoint):
         user_operation_hash = rpc_request.req_arguments[0]
 
         if not is_hash(user_operation_hash):
-            raise BundlerException(
-                BundlerExceptionCode.INVALID_USEROPHASH,
+            raise ValidationException(
+                ValidationExceptionCode.INVALID_USEROPHASH,
                 "Missing/invalid userOpHash",
                 "",
             )
@@ -228,7 +228,7 @@ async def exception_handler_decorator(
 ) -> RPCCallResponseEvent:
     try:
         response = await response_function(rpc_request)
-    except (BundlerException, ValidationException) as excp:
+    except (ExecutionException, ValidationException) as excp:
         response = RPCCallResponseEvent(excp)
         response.is_error = True
     finally:
