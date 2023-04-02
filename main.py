@@ -7,7 +7,7 @@ from init import initialize
 from rpc.rpc_http_server import run_rpc_http_server
 from init import InitData
 from bundler.execution_endpoint import ExecutionEndpoint
-from erros.SignalHaltError import immediate_exit
+from utils.SignalHaltError import immediate_exit
 
 
 async def main():
