@@ -300,7 +300,7 @@ class ValidationManager:
         ) = await self.simulate_validation(user_operation)
 
         if ValidationManager.check_if_failed_op_error(solidity_error_selector):
-            _, _, reason = ValidationManager.decode_FailedOp_event(
+            _, reason = ValidationManager.decode_FailedOp_event(
                 solidity_error_params
             )
             raise BundlerException(
@@ -370,15 +370,14 @@ class ValidationManager:
 
     @staticmethod
     def decode_FailedOp_event(solidity_error_params):
-        FAILED_OP_PARAMS_API = ["uint256", "address", "string"]
+        FAILED_OP_PARAMS_API = ["uint256", "string"]
         failed_op_params_res = decode(
             FAILED_OP_PARAMS_API, bytes.fromhex(solidity_error_params)
         )
         operation_index = failed_op_params_res[0]
-        paymaster_address = failed_op_params_res[1]
-        reason = failed_op_params_res[2]
+        reason = failed_op_params_res[1]
 
-        return operation_index, paymaster_address, reason
+        return operation_index, reason
 
     async def simulate_validation(self, user_operation: UserOperation):
         w3_provider = Web3()

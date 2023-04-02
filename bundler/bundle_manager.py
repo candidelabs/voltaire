@@ -7,7 +7,7 @@ from user_operation.user_operation import UserOperation
 from user_operation.user_operation_handler import UserOperationHandler
 from .mempool_manager import MempoolManager
 from .reputation_manager import ReputationManager
-
+from .validation_manager import ValidationManager
 
 class BundlerManager:
     geth_rpc_url: str
@@ -113,17 +113,46 @@ class BundlerManager:
             "eth_sendRawTransaction",
             [sign_store_txn.rawTransaction.hex()],
         )
-        transaction_hash = result["result"]
+        if ("error" in result):
+            # raise ValueError("simulateValidation didn't revert!")
+            error_data = result["error"]["data"]
 
-        # todo : check if bundle was included on chain
-        for user_operation in user_operations:
-            self.update_included_status(
-                user_operation.sender,
-                user_operation.factory_address,
-                user_operation.paymaster_address,
-            )
+            solidity_error_selector = str(error_data[:10])
+            if ValidationManager.check_if_failed_op_error(solidity_error_selector):
+                solidity_error_params = error_data[10:]         
+                operation_index, reason = ValidationManager.decode_FailedOp_event(
+                    solidity_error_params
+                )
 
-        return transaction_hash
+                if "AA3" in reason and user_operation.paymaster_address is not None:
+                    self.reputation_manager.ban_entity(user_operation.paymaster_address)
+                elif "AA2" in reason:
+                    self.reputation_manager.ban_entity(user_operation.sender)
+                elif "AA1" in reason and user_operation.factory_address is not None:
+                    self.reputation_manager.ban_entity(user_operation.factory_address)
+                
+                logging.info("Dropping user operation that caused bundle crash")
+                del user_operations[operation_index]
+
+                if(len(user_operations) > 0):
+                    self.send_bundle(user_operations)
+            else:
+                logging.info("Failed to send bundle.")
+                for user_operation in user_operations:
+                    sender = self.mempool_manager.senders[user_operation.sender]
+                    sender.user_operations.append(user_operation)
+            
+        else:
+            transaction_hash = result["result"]
+            logging.info("Bundle was sent with transaction hash : " + transaction_hash)
+
+            # todo : check if bundle was included on chain
+            for user_operation in user_operations:
+                self.update_included_status(
+                    user_operation.sender,
+                    user_operation.factory_address,
+                    user_operation.paymaster_address,
+                )
 
     def update_included_status(
         self, sender_address, factory_address, paymaster_address

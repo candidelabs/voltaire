@@ -1,3 +1,6 @@
+import asyncio
+import logging
+import math
 from typing import Dict
 from dataclasses import field
 from enum import Enum
@@ -5,6 +8,8 @@ from enum import Enum
 MIN_INCLUSION_RATE_DENOMINATOR = 10
 THROTTLING_SLACK = 10
 BAN_SLACK = 50
+
+REPUTATION_BACKOFF_INTERVAL = 3600 #hourlt
 
 
 class ReputationStatus(Enum):
@@ -34,13 +39,33 @@ class ReputationManager:
     white_list: list = field(default_factory=list[str])
     black_list: list = field(default_factory=list[str])
 
-    def get_reputation_entry(self, entity: str):
-        if entity not in self.entities_reputation:
-            self.entities_reputation[entity] = ReputationEntry(
+    def __init__(self):
+        asyncio.ensure_future(self.execute_reputation_cron_job())
+
+    async def execute_reputation_cron_job(self):
+        while True:
+            self._reputation_backoff_cron_job()
+            await asyncio.sleep(REPUTATION_BACKOFF_INTERVAL)
+
+    def _reputation_backoff_cron_job(self):
+        logging.info("Updating reputation entries")
+        entities_to_delete = []
+        for entity_address, entry in self.entities_reputation.items():
+            entry.ops_seen = math.floor(entry.ops_seen * 23/24)
+            entry.ops_included = math.floor(entry.ops_included * 23/24)
+            if entry.ops_seen == 0 and entry.ops_included == 0:
+                entities_to_delete.append(entity_address)
+        for entity in entities_to_delete:
+            del self.entities_reputation[entity]
+
+
+    def get_reputation_entry(self, entity_address: str):
+        if entity_address not in self.entities_reputation:
+            self.entities_reputation[entity_address] = ReputationEntry(
                 0, 0, ReputationStatus.OK
             )
 
-        return self.entities_reputation[entity]
+        return self.entities_reputation[entity_address]
 
     def update_seen_status(self, entity: str):
         if entity not in self.entities_reputation:
@@ -57,6 +82,11 @@ class ReputationManager:
             )
         ops_included = self.entities_reputation[entity].ops_included
         self.entities_reputation[entity].ops_included = ops_included + 1
+    
+    def ban_entity(self, entity: str):
+        self.entities_reputation[entity] = ReputationEntry(
+            100, 0, ReputationStatus.BANNED
+        )
 
     def is_whitelisted(self, entity: str):
         return entity in self.white_list
@@ -67,8 +97,8 @@ class ReputationManager:
     def get_status(self, entity: str):
         if entity not in self.entities_reputation:
             return ReputationStatus.OK
-
-        reputation_entry = self.entities_reputation[entity]
+        
+        reputation_entry = self.entities_reputation[entity]       
         min_expected_included = (
             reputation_entry.ops_seen // MIN_INCLUSION_RATE_DENOMINATOR
         )

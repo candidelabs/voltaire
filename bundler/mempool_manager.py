@@ -61,12 +61,6 @@ class MempoolManager:
 
         await self.validation_manager.validate_user_operation(user_operation)
 
-        self.update_all_seen_status(
-            user_operation.sender,
-            user_operation.factory_address,
-            user_operation.paymaster_address,
-        )
-
         new_sender = None
         new_sender_address = user_operation.sender
 
@@ -81,6 +75,11 @@ class MempoolManager:
             self.entrypoint_abi,
             self.bundler_address,
             self.geth_rpc_url,
+        )
+        self.update_all_seen_status(
+            user_operation.sender,
+            user_operation.factory_address,
+            user_operation.paymaster_address,
         )
 
         if user_operation.factory_address is not None:
@@ -100,13 +99,14 @@ class MempoolManager:
         validation_operations = []
         for sender_address in list(self.senders):
             sender = self.senders[sender_address]
-            user_operation = sender.user_operations.pop(0)
-            validation_operations.append(
-                self.validation_manager.validate_user_operation(user_operation)
-            )
-            bundle.append(user_operation)
-            if len(sender.user_operations) == 0:
-                del self.senders[sender.address]
+            if(len(sender.user_operations)> 0):
+                user_operation = sender.user_operations.pop(0)
+                validation_operations.append(
+                    self.validation_manager.validate_user_operation(user_operation)
+                )
+                bundle.append(user_operation)
+                if len(sender.user_operations) == 0:
+                    del self.senders[sender.address]
 
         await asyncio.gather(*validation_operations)
 
@@ -156,7 +156,7 @@ class MempoolManager:
                 factory_address
             )
             self._verify_entity_reputation(
-                sender_address,
+                factory_address,
                 "factory",
                 factory_no_of_ops,
                 factory_reputation,
@@ -172,7 +172,7 @@ class MempoolManager:
                 self.reputation_manager.get_reputation_entry(paymaster_address)
             )
             self._verify_entity_reputation(
-                sender_address,
+                paymaster_address,
                 "paymaster",
                 paymaster_no_of_ops,
                 paymaster_reputation,
@@ -185,33 +185,30 @@ class MempoolManager:
             self.entity_no_of_ops_in_mempool[entity_address] = 0
 
         entity_no_of_ops = self.entity_no_of_ops_in_mempool[entity_address]
-        entity_reputation = self.reputation_manager.get_reputation_entry(
-            entity_address
-        )
-
-        if entity_reputation.status == ReputationStatus.BANNED:
+        status = self.reputation_manager.get_status(entity_address)
+        if status == ReputationStatus.BANNED:
             raise BundlerException(
                 BundlerExceptionCode.BANNED_OR_THROTTLED_PAYMASTER,
-                " ".join(
+                " ".join((
                     "user operation was dropped because ",
                     entity_address,
                     "is banned",
                     entity_name,
-                ),
+                )),
                 "",
             )
         elif (
-            entity_reputation.status == ReputationStatus.THROTTLED
+            status == ReputationStatus.THROTTLED
             and entity_no_of_ops > 0
         ):
             raise BundlerException(
                 BundlerExceptionCode.BANNED_OR_THROTTLED_PAYMASTER,
-                " ".join(
+                " ".join((
                     "user operation was dropped",
                     entity_address,
                     "is throttled",
                     entity_name,
-                ),
+                )),
                 "",
             )
 
