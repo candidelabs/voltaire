@@ -17,7 +17,7 @@ RUN set -ex \
     && adduser --system --uid 1001 -G appgroup --no-create-home appuser \
     # Install dependencies
     && pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir aiohttp jsonrpcserver uvloop eth-abi eth-account
+    pip install --no-cache-dir "aiohttp==3.8.3" "jsonrpcserver==5.0.9" "uvloop==0.17.0" "eth-abi==4.0.0" "eth-account==0.8.0"
 
 RUN chown -R appuser:appgroup /app
 
