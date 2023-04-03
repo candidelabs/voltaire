@@ -293,8 +293,8 @@ class UserOperationHandler:
         )
 
         if len(res["result"]) < 1:
-            raise ExecutionException(
-                ExecutionExceptionCode.INVALID_USEROPHASH, "can't find user operation with hash : " + user_operation_hash, ""
+            raise ValidationException(
+                ValidationExceptionCode.INVALID_USEROPHASH, "can't find user operation with hash : " + user_operation_hash, ""
             )
 
         log = res["result"][0]
