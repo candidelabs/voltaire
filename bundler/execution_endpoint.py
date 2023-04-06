@@ -60,22 +60,23 @@ class ExecutionEndpoint(Endpoint):
 
         self.reputation_manager = ReputationManager()
 
+        self.user_operation_handler = UserOperationHandler(
+            # self.validation_manager,
+            geth_rpc_url,
+            bundler_private_key,
+            bundler_address,
+            entrypoint,
+            entrypoint_abi,
+        )
+
         self.validation_manager = ValidationManager(
+            self.user_operation_handler,
             geth_rpc_url,
             bundler_private_key,
             bundler_address,
             entrypoint,
             entrypoint_abi,
             bundler_helper_byte_code,
-        )
-
-        self.user_operation_handler = UserOperationHandler(
-            self.validation_manager,
-            geth_rpc_url,
-            bundler_private_key,
-            bundler_address,
-            entrypoint,
-            entrypoint_abi,
         )
 
         self.mempool_manager = MempoolManager(
@@ -134,11 +135,26 @@ class ExecutionEndpoint(Endpoint):
         user_operation: UserOperation = rpc_request.req_arguments[0]
         entrypoint = rpc_request.req_arguments[1]
 
+        (
+            return_info,
+            _,
+            _,
+            _,
+        ) = await self.validation_manager.simulate_validation_and_decode_result(user_operation)
+        
+        pre_operation_gas = return_info.preOpGas
+        deadline = return_info.validUntil
+
         estimated_gas_json = (
             await self.user_operation_handler.estimate_user_operation_gas_rpc(
                 user_operation
             )
         )
+        
+        estimated_gas_json.update({
+            "verificationGas": pre_operation_gas,
+            "deadline": deadline,
+        })
 
         return RPCCallResponseEvent(estimated_gas_json)
 

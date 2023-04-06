@@ -59,8 +59,17 @@ class MempoolManager:
             )
         )
 
-        await self.validation_manager.validate_user_operation(user_operation)
+        (
+            return_info,
+            sender_stake_info,
+            factory_stake_info,
+            paymaster_stake_info,
+        ) = await self.validation_manager.simulate_validation_and_decode_result(user_operation)
 
+        await self.validation_manager.verify_gas_and_return_info(user_operation, return_info)
+
+        await self.validation_manager.validate_user_operation(user_operation, sender_stake_info, factory_stake_info, paymaster_stake_info)
+        
         new_sender = None
         new_sender_address = user_operation.sender
 
@@ -101,8 +110,15 @@ class MempoolManager:
             sender = self.senders[sender_address]
             if(len(sender.user_operations)> 0):
                 user_operation = sender.user_operations.pop(0)
+                (
+                    _,
+                    sender_stake_info,
+                    factory_stake_info,
+                    paymaster_stake_info,
+                ) = await self.validation_manager.simulate_validation_and_decode_result(user_operation)
+                
                 validation_operations.append(
-                    self.validation_manager.validate_user_operation(user_operation)
+                    self.validation_manager.validate_user_operation(user_operation, sender_stake_info, factory_stake_info, paymaster_stake_info)
                 )
                 bundle.append(user_operation)
                 if len(sender.user_operations) == 0:

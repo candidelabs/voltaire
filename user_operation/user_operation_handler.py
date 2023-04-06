@@ -26,14 +26,12 @@ class UserOperationHandler:
 
     def __init__(
         self,
-        validation_manager,
         geth_rpc_url,
         bundler_private_key,
         bundler_address,
         entrypoint,
         entrypoint_abi,
     ):
-        self.validation_manager = validation_manager
         self.geth_rpc_url = geth_rpc_url
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
@@ -42,9 +40,6 @@ class UserOperationHandler:
 
     async def estimate_user_operation_gas(self, user_operation: UserOperation):
         tasks = await asyncio.gather(
-            self.validation_manager.simulate_validation_and_decode_result(
-                user_operation
-            ),
             self.estimate_call_gas_limit(
                 call_data="0x" + user_operation.call_data.hex(),
                 _from=self.entrypoint,
@@ -55,18 +50,12 @@ class UserOperationHandler:
             ),
         )
 
-        return_info, _, _, _ = tasks[0]
-        call_gas_limit = tasks[1]
-        pre_verification_gas = tasks[2]
-
-        pre_operation_gas = return_info.preOpGas
-        valid_until = return_info.validUntil
+        call_gas_limit = tasks[0]
+        pre_verification_gas = tasks[1]
 
         return (
             call_gas_limit,
             pre_verification_gas,
-            pre_operation_gas,
-            valid_until,
         )
 
     async def estimate_user_operation_gas_rpc(
@@ -75,20 +64,19 @@ class UserOperationHandler:
         (
             call_gas_limit,
             preverification_gas,
-            pre_operation_gas,
-            deadline,
         ) = await self.estimate_user_operation_gas(user_operation)
 
         response_params = {
             "callGasLimit": call_gas_limit,
             "preVerificationGas": preverification_gas,
-            "verificationGas": pre_operation_gas,
-            "deadline": deadline,
         }
 
         return response_params
 
     async def estimate_call_gas_limit(self, call_data, _from, to):
+        if(call_data == "0x"):
+            return "0x"
+        
         params = [{"from": _from, "to": to, "data": call_data}]
 
         result = await send_rpc_request_to_eth_client(
@@ -119,8 +107,6 @@ class UserOperationHandler:
         bundle_size = 1
         sigSize = 65
 
-        # userOp.preVerificationGas = fixed
-        # userOp.signature = bytes(sigSize)
         packed = UserOperationHandler.pack_user_operation(userOp.to_list())
 
         cost_list = list(

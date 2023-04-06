@@ -1,10 +1,12 @@
 import asyncio
 from typing import Dict
+import time
 import json
 
 from eth_utils import to_checksum_address, keccak
 from eth_abi import decode, encode
 
+from user_operation.user_operation_handler import UserOperationHandler
 from user_operation.user_operation import UserOperation
 from user_operation.models import ReturnInfo, StakeInfo, FailedOpRevertData
 from bundler.exceptions import (
@@ -20,6 +22,7 @@ from utils.eth_client_utils import (
 
 
 class ValidationManager:
+    user_operation_handler: UserOperationHandler
     geth_rpc_url: str
     bundler_private_key: str
     bundler_address: str
@@ -31,6 +34,7 @@ class ValidationManager:
 
     def __init__(
         self,
+        user_operation_handler,
         geth_rpc_url,
         bundler_private_key,
         bundler_address,
@@ -38,6 +42,7 @@ class ValidationManager:
         entrypoint_abi,
         bundler_helper_byte_code,
     ):
+        self.user_operation_handler = user_operation_handler
         self.geth_rpc_url = geth_rpc_url
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
@@ -67,13 +72,7 @@ class ValidationManager:
             "SELFDESTRUCT",
         ]
 
-    async def validate_user_operation(self, user_operation: UserOperation):
-        (
-            _,
-            sender_stake_info,
-            factory_stake_info,
-            paymaster_stake_info,
-        ) = await self.simulate_validation_and_decode_result(user_operation)
+    async def validate_user_operation(self, user_operation: UserOperation, sender_stake_info:StakeInfo, factory_stake_info:StakeInfo, paymaster_stake_info:StakeInfo):
 
         debug_data: DebugTraceCallData = await self.get_debug_traceCall_data(
             user_operation
@@ -184,8 +183,6 @@ class ValidationManager:
                     "modified code after first validation",
                     "",
                 )
-
-        return sender, factory_address, paymaster_address
 
     @staticmethod
     def is_slot_associated_with_address(slot, address, associated_slots):
@@ -602,3 +599,56 @@ class ValidationManager:
                 stack.append(call_to_stack)
 
         return results, paymaster_call
+    
+    async def verify_gas_and_return_info(self, user_operation: UserOperation, return_info):
+        pre_operation_gas = return_info.preOpGas
+        # prefund=return_info.prefund
+        sigFailed=return_info.preOpGas
+        validAfter=return_info.validAfter
+        deadline = return_info.validUntil
+
+        (
+            call_gas_limit,
+            preverification_gas,
+        ) = await self.user_operation_handler.estimate_user_operation_gas(user_operation)
+
+        if(sigFailed):
+            raise ValidationException(
+                    ValidationExceptionCode.InvalidSignature,
+                    "Invalide Signature",
+                    "",
+                )
+        
+        if(call_gas_limit is not '0x' and user_operation.call_gas_limit < int(call_gas_limit,16)):
+            raise ValidationException(
+                    ValidationExceptionCode.SimulateValidation,
+                    "Call gas limit is too low. it should be minimum :" + call_gas_limit,
+                    "",
+                )
+        if(user_operation.pre_verification_gas < preverification_gas):
+            raise ValidationException(
+                    ValidationExceptionCode.SimulateValidation,
+                    f"Preverification gas is too low. it should be minimum : {preverification_gas}",
+                    "",
+                )
+        if(user_operation.verification_gas_limit + user_operation.pre_verification_gas < pre_operation_gas):
+            raise ValidationException(
+                    ValidationExceptionCode.SimulateValidation,
+                    f"verification gas + preverification gas is too low. it should be minimum : {pre_operation_gas}",
+                    "",
+                )
+        
+        if(validAfter is None or validAfter > (time.time()/1000) - 30):
+            raise ValidationException(
+                    ValidationExceptionCode.InvalidFields,
+                    "Transaction is not valid yet",
+                    "",
+                )
+        
+        if(deadline is None or deadline + 30 < (time.time()/1000)):
+            raise ValidationException(
+                    ValidationExceptionCode.ExpiresShortly,
+                    "Transaction will expire shortly or has expired.",
+                    "",
+                )
+        
