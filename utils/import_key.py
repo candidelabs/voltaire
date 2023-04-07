@@ -12,9 +12,7 @@ def import_bundler_account(
 
     with open(keystore) as keyfile:
         encrypted_key = keyfile.read()
-        private_key = Account.decrypt(
-            encrypted_key, keystore_file_password
-        )
+        private_key = Account.decrypt(encrypted_key, keystore_file_password)
         acct = Account.from_key(private_key)
         return acct.address, private_key.hex()
 

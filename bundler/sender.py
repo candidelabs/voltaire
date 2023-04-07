@@ -66,7 +66,7 @@ class Sender:
             self.user_operations[index] = new_user_operation
         else:
             raise ValidationException(
-                    ValidationExceptionCode.InvalidFields,
+                ValidationExceptionCode.InvalidFields,
                 "invalid UserOperation struct/fields",
                 "",
             )
@@ -108,9 +108,9 @@ class Sender:
     async def _check_if_stacked(
         self, entrypoint_address, entrypoint_abi, bundler_address, geth_rpc_url
     ):
-        function_selector="0x5287ce12" #getDepositInfo
+        function_selector = "0x5287ce12"  # getDepositInfo
         params = encode(["address"], [self.address])
-        
+
         call_data = function_selector + params.hex()
 
         params = [

@@ -2,6 +2,7 @@ from typing import Dict, Type
 from enum import Enum
 from dataclasses import dataclass, field
 
+
 class ValidationExceptionCode(Enum):
     InvalidFields = -32602
     SimulateValidation = -32500
@@ -14,14 +15,17 @@ class ValidationExceptionCode(Enum):
     InvalidSignature = -32507
     INVALID_USEROPHASH = -32601
 
+
 @dataclass
 class ValidationException(Exception):
     exception_code: ValidationExceptionCode
     message: str
     data: bytes
 
+
 class ExecutionExceptionCode(Enum):
     EXECUTION_REVERTED = -32521
+
 
 @dataclass
 class ExecutionException(Exception):

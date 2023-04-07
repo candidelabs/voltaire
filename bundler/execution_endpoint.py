@@ -16,7 +16,7 @@ from user_operation.user_operation_handler import UserOperationHandler
 from bundler.exceptions import (
     ValidationException,
     ValidationExceptionCode,
-    ExecutionException
+    ExecutionException,
 )
 from .bundle_manager import BundlerManager
 from .validation_manager import ValidationManager
@@ -110,7 +110,7 @@ class ExecutionEndpoint(Endpoint):
                 await self.bundle_manager.send_next_bundle()
             except (ValidationException, ExecutionException) as excp:
                 logging.exception(excp.message)
-            
+
             await asyncio.sleep(BUNDLE_INTERVAL)
 
     async def start_execution_endpoint(self) -> None:
@@ -140,8 +140,10 @@ class ExecutionEndpoint(Endpoint):
             _,
             _,
             _,
-        ) = await self.validation_manager.simulate_validation_and_decode_result(user_operation)
-        
+        ) = await self.validation_manager.simulate_validation_and_decode_result(
+            user_operation
+        )
+
         pre_operation_gas = return_info.preOpGas
         deadline = return_info.validUntil
 
@@ -150,11 +152,13 @@ class ExecutionEndpoint(Endpoint):
                 user_operation
             )
         )
-        
-        estimated_gas_json.update({
-            "verificationGas": pre_operation_gas,
-            "deadline": deadline,
-        })
+
+        estimated_gas_json.update(
+            {
+                "verificationGas": pre_operation_gas,
+                "deadline": deadline,
+            }
+        )
 
         return RPCCallResponseEvent(estimated_gas_json)
 

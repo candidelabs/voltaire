@@ -11,6 +11,7 @@ from .mempool_manager import MempoolManager
 from .reputation_manager import ReputationManager
 from .validation_manager import ValidationManager
 
+
 class BundlerManager:
     geth_rpc_url: str
     bundler_private_key: str
@@ -59,16 +60,17 @@ class BundlerManager:
     async def send_bundle(self, user_operations: list[UserOperation]):
         user_operations_list = []
         for user_operation in user_operations:
-            user_operations_list.append(
-                user_operation.to_list()
-            )
+            user_operations_list.append(user_operation.to_list())
 
-        function_selector="0x1fad948c" #handleOps
+        function_selector = "0x1fad948c"  # handleOps
         params = encode(
-            ["(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)[]", "address"],
+            [
+                "(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)[]",
+                "address",
+            ],
             [user_operations_list, self.bundler_address],
         )
-        
+
         call_data = function_selector + params.hex()
 
         gas_estimation_op = (
@@ -114,38 +116,59 @@ class BundlerManager:
             "eth_sendRawTransaction",
             [sign_store_txn.rawTransaction.hex()],
         )
-        if ("error" in result):
+        if "error" in result:
             # raise ValueError("simulateValidation didn't revert!")
             error_data = result["error"]["data"]
 
             solidity_error_selector = str(error_data[:10])
-            if ValidationManager.check_if_failed_op_error(solidity_error_selector):
-                solidity_error_params = error_data[10:]         
-                operation_index, reason = ValidationManager.decode_FailedOp_event(
+            if ValidationManager.check_if_failed_op_error(
+                solidity_error_selector
+            ):
+                solidity_error_params = error_data[10:]
+                (
+                    operation_index,
+                    reason,
+                ) = ValidationManager.decode_FailedOp_event(
                     solidity_error_params
                 )
 
-                if "AA3" in reason and user_operation.paymaster_address is not None:
-                    self.reputation_manager.ban_entity(user_operation.paymaster_address)
+                if (
+                    "AA3" in reason
+                    and user_operation.paymaster_address is not None
+                ):
+                    self.reputation_manager.ban_entity(
+                        user_operation.paymaster_address
+                    )
                 elif "AA2" in reason:
                     self.reputation_manager.ban_entity(user_operation.sender)
-                elif "AA1" in reason and user_operation.factory_address is not None:
-                    self.reputation_manager.ban_entity(user_operation.factory_address)
-                
-                logging.info("Dropping user operation that caused bundle crash")
+                elif (
+                    "AA1" in reason
+                    and user_operation.factory_address is not None
+                ):
+                    self.reputation_manager.ban_entity(
+                        user_operation.factory_address
+                    )
+
+                logging.info(
+                    "Dropping user operation that caused bundle crash"
+                )
                 del user_operations[operation_index]
 
-                if(len(user_operations) > 0):
+                if len(user_operations) > 0:
                     self.send_bundle(user_operations)
             else:
                 logging.info("Failed to send bundle.")
                 for user_operation in user_operations:
-                    sender = self.mempool_manager.senders[user_operation.sender]
+                    sender = self.mempool_manager.senders[
+                        user_operation.sender
+                    ]
                     sender.user_operations.append(user_operation)
-            
+
         else:
             transaction_hash = result["result"]
-            logging.info("Bundle was sent with transaction hash : " + transaction_hash)
+            logging.info(
+                "Bundle was sent with transaction hash : " + transaction_hash
+            )
 
             # todo : check if bundle was included on chain
             for user_operation in user_operations:

@@ -74,9 +74,9 @@ class UserOperationHandler:
         return response_params
 
     async def estimate_call_gas_limit(self, call_data, _from, to):
-        if(call_data == "0x"):
+        if call_data == "0x":
             return "0x"
-        
+
         params = [{"from": _from, "to": to, "data": call_data}]
 
         result = await send_rpc_request_to_eth_client(
@@ -280,7 +280,9 @@ class UserOperationHandler:
 
         if len(res["result"]) < 1:
             raise ValidationException(
-                ValidationExceptionCode.INVALID_USEROPHASH, "can't find user operation with hash : " + user_operation_hash, ""
+                ValidationExceptionCode.INVALID_USEROPHASH,
+                "can't find user operation with hash : " + user_operation_hash,
+                "",
             )
 
         log = res["result"][0]
@@ -349,13 +351,15 @@ class UserOperationHandler:
         )
         return res["result"]
 
-    async def get_user_operation_hash(self, user_operation:UserOperation):
-        function_selector="0xa6193531" #getUserOpHash
+    async def get_user_operation_hash(self, user_operation: UserOperation):
+        function_selector = "0xa6193531"  # getUserOpHash
         params = encode(
-            ["(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)"],
+            [
+                "(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)"
+            ],
             [user_operation.to_list()],
         )
-        
+
         call_data = function_selector + params.hex()
         params = [
             {

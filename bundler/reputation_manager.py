@@ -9,7 +9,7 @@ MIN_INCLUSION_RATE_DENOMINATOR = 10
 THROTTLING_SLACK = 10
 BAN_SLACK = 50
 
-REPUTATION_BACKOFF_INTERVAL = 3600 #hourlt
+REPUTATION_BACKOFF_INTERVAL = 3600  # hourlt
 
 
 class ReputationStatus(Enum):
@@ -51,13 +51,12 @@ class ReputationManager:
         logging.info("Updating reputation entries")
         entities_to_delete = []
         for entity_address, entry in self.entities_reputation.items():
-            entry.ops_seen = math.floor(entry.ops_seen * 23/24)
-            entry.ops_included = math.floor(entry.ops_included * 23/24)
+            entry.ops_seen = math.floor(entry.ops_seen * 23 / 24)
+            entry.ops_included = math.floor(entry.ops_included * 23 / 24)
             if entry.ops_seen == 0 and entry.ops_included == 0:
                 entities_to_delete.append(entity_address)
         for entity in entities_to_delete:
             del self.entities_reputation[entity]
-
 
     def get_reputation_entry(self, entity_address: str):
         if entity_address not in self.entities_reputation:
@@ -82,7 +81,7 @@ class ReputationManager:
             )
         ops_included = self.entities_reputation[entity].ops_included
         self.entities_reputation[entity].ops_included = ops_included + 1
-    
+
     def ban_entity(self, entity: str):
         self.entities_reputation[entity] = ReputationEntry(
             100, 0, ReputationStatus.BANNED
@@ -97,8 +96,8 @@ class ReputationManager:
     def get_status(self, entity: str):
         if entity not in self.entities_reputation:
             return ReputationStatus.OK
-        
-        reputation_entry = self.entities_reputation[entity]       
+
+        reputation_entry = self.entities_reputation[entity]
         min_expected_included = (
             reputation_entry.ops_seen // MIN_INCLUSION_RATE_DENOMINATOR
         )

@@ -72,8 +72,13 @@ class ValidationManager:
             "SELFDESTRUCT",
         ]
 
-    async def validate_user_operation(self, user_operation: UserOperation, sender_stake_info:StakeInfo, factory_stake_info:StakeInfo, paymaster_stake_info:StakeInfo):
-
+    async def validate_user_operation(
+        self,
+        user_operation: UserOperation,
+        sender_stake_info: StakeInfo,
+        factory_stake_info: StakeInfo,
+        paymaster_stake_info: StakeInfo,
+    ):
         debug_data: DebugTraceCallData = await self.get_debug_traceCall_data(
             user_operation
         )
@@ -375,12 +380,14 @@ class ValidationManager:
         return operation_index, reason
 
     async def simulate_validation(self, user_operation: UserOperation):
-        function_selector="0xee219423" #simulateValidation
+        function_selector = "0xee219423"  # simulateValidation
         params = encode(
-            ["(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)"],
+            [
+                "(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)"
+            ],
             [user_operation.to_list()],
         )
-        
+
         call_data = function_selector + params.hex()
 
         params = [
@@ -425,12 +432,14 @@ class ValidationManager:
             + user_operation.verification_gas_limit
         )
 
-        function_selector="0xee219423" #simulateValidation
+        function_selector = "0xee219423"  # simulateValidation
         params = encode(
-            ["(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)"],
+            [
+                "(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)"
+            ],
             [user_operation.to_list()],
         )
-        
+
         call_data = function_selector + params.hex()
 
         params = [
@@ -599,56 +608,66 @@ class ValidationManager:
                 stack.append(call_to_stack)
 
         return results, paymaster_call
-    
-    async def verify_gas_and_return_info(self, user_operation: UserOperation, return_info):
+
+    async def verify_gas_and_return_info(
+        self, user_operation: UserOperation, return_info
+    ):
         pre_operation_gas = return_info.preOpGas
         # prefund=return_info.prefund
-        sigFailed=return_info.sigFailed
-        validAfter=return_info.validAfter
+        sigFailed = return_info.sigFailed
+        validAfter = return_info.validAfter
         deadline = return_info.validUntil
 
         (
             call_gas_limit,
             preverification_gas,
-        ) = await self.user_operation_handler.estimate_user_operation_gas(user_operation)
+        ) = await self.user_operation_handler.estimate_user_operation_gas(
+            user_operation
+        )
 
-        if(sigFailed):
+        if sigFailed:
             raise ValidationException(
-                    ValidationExceptionCode.InvalidSignature,
-                    "Invalide Signature",
-                    "",
-                )
-        
-        if(call_gas_limit is not '0x' and user_operation.call_gas_limit < int(call_gas_limit,16)):
+                ValidationExceptionCode.InvalidSignature,
+                "Invalide Signature",
+                "",
+            )
+
+        if call_gas_limit is not "0x" and user_operation.call_gas_limit < int(
+            call_gas_limit, 16
+        ):
             raise ValidationException(
-                    ValidationExceptionCode.SimulateValidation,
-                    "Call gas limit is too low. it should be minimum :" + call_gas_limit,
-                    "",
-                )
-        if(user_operation.pre_verification_gas < preverification_gas):
+                ValidationExceptionCode.SimulateValidation,
+                "Call gas limit is too low. it should be minimum :"
+                + call_gas_limit,
+                "",
+            )
+        if user_operation.pre_verification_gas < preverification_gas:
             raise ValidationException(
-                    ValidationExceptionCode.SimulateValidation,
-                    f"Preverification gas is too low. it should be minimum : {preverification_gas}",
-                    "",
-                )
-        if(user_operation.verification_gas_limit + user_operation.pre_verification_gas < pre_operation_gas):
+                ValidationExceptionCode.SimulateValidation,
+                f"Preverification gas is too low. it should be minimum : {preverification_gas}",
+                "",
+            )
+        if (
+            user_operation.verification_gas_limit
+            + user_operation.pre_verification_gas
+            < pre_operation_gas
+        ):
             raise ValidationException(
-                    ValidationExceptionCode.SimulateValidation,
-                    f"verification gas + preverification gas is too low. it should be minimum : {pre_operation_gas}",
-                    "",
-                )
-        
-        if(validAfter is None or validAfter > (time.time()/1000) - 30):
+                ValidationExceptionCode.SimulateValidation,
+                f"verification gas + preverification gas is too low. it should be minimum : {pre_operation_gas}",
+                "",
+            )
+
+        if validAfter is None or validAfter > (time.time() / 1000) - 30:
             raise ValidationException(
-                    ValidationExceptionCode.InvalidFields,
-                    "Transaction is not valid yet",
-                    "",
-                )
-        
-        if(deadline is None or deadline + 30 < (time.time()/1000)):
+                ValidationExceptionCode.InvalidFields,
+                "Transaction is not valid yet",
+                "",
+            )
+
+        if deadline is None or deadline + 30 < (time.time() / 1000):
             raise ValidationException(
-                    ValidationExceptionCode.ExpiresShortly,
-                    "Transaction will expire shortly or has expired.",
-                    "",
-                )
-        
+                ValidationExceptionCode.ExpiresShortly,
+                "Transaction will expire shortly or has expired.",
+                "",
+            )

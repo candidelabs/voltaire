@@ -1,6 +1,7 @@
 from dataclasses import dataclass, InitVar
 import re
 
+
 @dataclass()
 class UserOperation:
     sender: str

@@ -64,12 +64,21 @@ class MempoolManager:
             sender_stake_info,
             factory_stake_info,
             paymaster_stake_info,
-        ) = await self.validation_manager.simulate_validation_and_decode_result(user_operation)
+        ) = await self.validation_manager.simulate_validation_and_decode_result(
+            user_operation
+        )
 
-        await self.validation_manager.verify_gas_and_return_info(user_operation, return_info)
+        await self.validation_manager.verify_gas_and_return_info(
+            user_operation, return_info
+        )
 
-        await self.validation_manager.validate_user_operation(user_operation, sender_stake_info, factory_stake_info, paymaster_stake_info)
-        
+        await self.validation_manager.validate_user_operation(
+            user_operation,
+            sender_stake_info,
+            factory_stake_info,
+            paymaster_stake_info,
+        )
+
         new_sender = None
         new_sender_address = user_operation.sender
 
@@ -108,17 +117,24 @@ class MempoolManager:
         validation_operations = []
         for sender_address in list(self.senders):
             sender = self.senders[sender_address]
-            if(len(sender.user_operations)> 0):
+            if len(sender.user_operations) > 0:
                 user_operation = sender.user_operations.pop(0)
                 (
                     _,
                     sender_stake_info,
                     factory_stake_info,
                     paymaster_stake_info,
-                ) = await self.validation_manager.simulate_validation_and_decode_result(user_operation)
-                
+                ) = await self.validation_manager.simulate_validation_and_decode_result(
+                    user_operation
+                )
+
                 validation_operations.append(
-                    self.validation_manager.validate_user_operation(user_operation, sender_stake_info, factory_stake_info, paymaster_stake_info)
+                    self.validation_manager.validate_user_operation(
+                        user_operation,
+                        sender_stake_info,
+                        factory_stake_info,
+                        paymaster_stake_info,
+                    )
                 )
                 bundle.append(user_operation)
                 if len(sender.user_operations) == 0:
@@ -205,26 +221,27 @@ class MempoolManager:
         if status == ReputationStatus.BANNED:
             raise ValidationException(
                 ValidationExceptionCode.Reputation,
-                " ".join((
-                    "user operation was dropped because ",
-                    entity_address,
-                    "is banned",
-                    entity_name,
-                )),
+                " ".join(
+                    (
+                        "user operation was dropped because ",
+                        entity_address,
+                        "is banned",
+                        entity_name,
+                    )
+                ),
                 "",
             )
-        elif (
-            status == ReputationStatus.THROTTLED
-            and entity_no_of_ops > 0
-        ):
+        elif status == ReputationStatus.THROTTLED and entity_no_of_ops > 0:
             raise ValidationException(
                 ValidationExceptionCode.Reputation,
-                " ".join((
-                    "user operation was dropped",
-                    entity_address,
-                    "is throttled",
-                    entity_name,
-                )),
+                " ".join(
+                    (
+                        "user operation was dropped",
+                        entity_address,
+                        "is throttled",
+                        entity_name,
+                    )
+                ),
                 "",
             )
 
