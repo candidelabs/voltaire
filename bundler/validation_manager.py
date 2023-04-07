@@ -603,7 +603,7 @@ class ValidationManager:
     async def verify_gas_and_return_info(self, user_operation: UserOperation, return_info):
         pre_operation_gas = return_info.preOpGas
         # prefund=return_info.prefund
-        sigFailed=return_info.preOpGas
+        sigFailed=return_info.sigFailed
         validAfter=return_info.validAfter
         deadline = return_info.validUntil
 
