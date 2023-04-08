@@ -41,13 +41,13 @@ class ExecutionEndpoint(Endpoint):
 
     def __init__(
         self,
-        geth_rpc_url,
-        bundler_private_key,
-        bundler_address,
-        entrypoint,
-        entrypoint_abi,
-        bundler_helper_byte_code,
-        chain_id,
+        geth_rpc_url: str,
+        bundler_private_key: str,
+        bundler_address: str,
+        entrypoint: str,
+        entrypoint_abi: str,
+        bundler_helper_byte_code: str,
+        chain_id: str,
     ):
         super().__init__("bundler_endpoint")
         self.geth_rpc_url = geth_rpc_url
@@ -104,7 +104,7 @@ class ExecutionEndpoint(Endpoint):
 
         asyncio.ensure_future(self.execute_bundle_cron_job())
 
-    async def execute_bundle_cron_job(self):
+    async def execute_bundle_cron_job(self) -> None:
         while True:
             try:
                 await self.bundle_manager.send_next_bundle()
@@ -253,7 +253,7 @@ async def exception_handler_decorator(
         return response
 
 
-def is_hash(user_operation_hash):
+def is_hash(user_operation_hash) -> bool:
     hash_pattern = "^0x[0-9,a-f,A-F]{64}$"
     return (
         isinstance(user_operation_hash, str)

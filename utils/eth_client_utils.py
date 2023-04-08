@@ -4,7 +4,9 @@ from eth_abi import decode
 from dataclasses import dataclass
 
 
-async def send_rpc_request_to_eth_client(geth_rpc_url, method, params=None):
+async def send_rpc_request_to_eth_client(
+    geth_rpc_url, method, params=None
+) -> None:
     json_request = {
         "jsonrpc": "2.0",
         "id": 1,

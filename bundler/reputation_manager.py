@@ -25,9 +25,9 @@ class ReputationEntry:
 
     def __init__(
         self,
-        ops_seen,
-        ops_included,
-        status,
+        ops_seen: int,
+        ops_included: int,
+        status: ReputationStatus,
     ):
         self.ops_seen = ops_seen
         self.ops_included = ops_included
@@ -35,19 +35,19 @@ class ReputationEntry:
 
 
 class ReputationManager:
-    entities_reputation = {}
+    entities_reputation: dict[str, ReputationEntry] = {}
     white_list: list = field(default_factory=list[str])
     black_list: list = field(default_factory=list[str])
 
     def __init__(self):
         asyncio.ensure_future(self.execute_reputation_cron_job())
 
-    async def execute_reputation_cron_job(self):
+    async def execute_reputation_cron_job(self) -> None:
         while True:
             self._reputation_backoff_cron_job()
             await asyncio.sleep(REPUTATION_BACKOFF_INTERVAL)
 
-    def _reputation_backoff_cron_job(self):
+    def _reputation_backoff_cron_job(self) -> None:
         logging.info("Updating reputation entries")
         entities_to_delete = []
         for entity_address, entry in self.entities_reputation.items():

@@ -10,7 +10,7 @@ from bundler.execution_endpoint import ExecutionEndpoint
 from utils.SignalHaltError import immediate_exit
 
 
-async def main():
+async def main() -> None:
     initData: InitData = initialize()
 
     loop = asyncio.get_running_loop()

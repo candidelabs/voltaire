@@ -23,14 +23,14 @@ class MempoolManager:
 
     def __init__(
         self,
-        validation_manager,
-        user_operation_handler,
-        reputation_manager,
-        geth_rpc_url,
-        bundler_private_key,
-        bundler_address,
-        entrypoint,
-        entrypoint_abi,
+        validation_manager: ValidationManager,
+        user_operation_handler: UserOperationHandler,
+        reputation_manager: ReputationManager,
+        geth_rpc_url: str,
+        bundler_private_key: str,
+        bundler_address: str,
+        entrypoint: str,
+        entrypoint_abi: str,
     ):
         self.validation_manager = validation_manager
         self.user_operation_handler = user_operation_handler
@@ -43,10 +43,10 @@ class MempoolManager:
         self.senders = {}
         self.entity_no_of_ops_in_mempool = {}
 
-    def clear_user_operations(self):
+    def clear_user_operations(self) -> None:
         self.senders.clear()
 
-    async def add_user_operation(self, user_operation: UserOperation):
+    async def add_user_operation(self, user_operation: UserOperation) -> str:
         self._verify_entities_reputation(
             user_operation.sender,
             user_operation.factory_address,
@@ -112,7 +112,7 @@ class MempoolManager:
 
         return user_operation_hash
 
-    async def get_user_operations_to_bundle(self):
+    async def get_user_operations_to_bundle(self) -> list[UserOperation]:
         bundle = []
         validation_operations = []
         for sender_address in list(self.senders):
@@ -153,8 +153,8 @@ class MempoolManager:
         return user_operations
 
     def update_all_seen_status(
-        self, sender_address, factory_address, paymaster_address
-    ):
+        self, sender_address: str, factory_address: str, paymaster_address: str
+    ) -> None:
         self.reputation_manager.update_seen_status(sender_address)
 
         if factory_address is not None:
@@ -164,18 +164,15 @@ class MempoolManager:
             self.reputation_manager.update_seen_status(paymaster_address)
 
     def _verify_entities_reputation(
-        self, sender_address, factory_address, paymaster_address
-    ):
+        self, sender_address: str, factory_address: str, paymaster_address: str
+    ) -> None:
         sender_no_of_ops = 0
         if sender_address in self.senders:
             sender_no_of_ops = len(
                 self.senders[sender_address].user_operations
             )
-        sender_reputation = self.reputation_manager.get_reputation_entry(
-            sender_address
-        )
         self._verify_entity_reputation(
-            sender_address, "sender", sender_no_of_ops, sender_reputation
+            sender_address, "sender", sender_no_of_ops
         )
 
         if factory_address is not None:
@@ -184,14 +181,10 @@ class MempoolManager:
                 factory_no_of_ops = self.entity_no_of_ops_in_mempool[
                     factory_address
                 ]
-            factory_reputation = self.reputation_manager.get_reputation_entry(
-                factory_address
-            )
             self._verify_entity_reputation(
                 factory_address,
                 "factory",
                 factory_no_of_ops,
-                factory_reputation,
             )
 
         if paymaster_address is not None:
@@ -200,19 +193,15 @@ class MempoolManager:
                 paymaster_no_of_ops = self.entity_no_of_ops_in_mempool[
                     paymaster_address
                 ]
-            paymaster_reputation = (
-                self.reputation_manager.get_reputation_entry(paymaster_address)
-            )
             self._verify_entity_reputation(
                 paymaster_address,
                 "paymaster",
                 paymaster_no_of_ops,
-                paymaster_reputation,
             )
 
     def _verify_entity_reputation(
-        self, entity_address, entity_name, entity_no_of_ops, entity_reputation
-    ):
+        self, entity_address: str, entity_name: str, entity_no_of_ops: int
+    ) -> None:
         if entity_address not in self.entity_no_of_ops_in_mempool:
             self.entity_no_of_ops_in_mempool[entity_address] = 0
 
@@ -245,7 +234,7 @@ class MempoolManager:
                 "",
             )
 
-    def _update_entity_no_of_ops_in_mempool(self, entity_address):
+    def _update_entity_no_of_ops_in_mempool(self, entity_address: str) -> None:
         no_of_ops = 0
         if entity_address in self.entity_no_of_ops_in_mempool:
             no_of_ops = self.entity_no_of_ops_in_mempool[entity_address]

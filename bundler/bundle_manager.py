@@ -25,15 +25,15 @@ class BundlerManager:
 
     def __init__(
         self,
-        mempool_manager,
-        user_operation_handler,
-        reputation_manager,
-        geth_rpc_url,
-        bundler_private_key,
-        bundler_address,
-        entrypoint,
-        entrypoint_abi,
-        chain_id,
+        mempool_manager: MempoolManager,
+        user_operation_handler: UserOperationHandler,
+        reputation_manager: ReputationManager,
+        geth_rpc_url: str,
+        bundler_private_key: str,
+        bundler_address: str,
+        entrypoint: str,
+        entrypoint_abi: str,
+        chain_id: str,
     ):
         self.mempool_manager = mempool_manager
         self.user_operation_handler = user_operation_handler
@@ -45,7 +45,7 @@ class BundlerManager:
         self.entrypoint_abi = entrypoint_abi
         self.chain_id = chain_id
 
-    async def send_next_bundle(self):
+    async def send_next_bundle(self) -> None:
         user_operations = (
             await self.mempool_manager.get_user_operations_to_bundle()
         )
@@ -57,7 +57,7 @@ class BundlerManager:
                 f"Sending bundle with {len(user_operations)} user operations"
             )
 
-    async def send_bundle(self, user_operations: list[UserOperation]):
+    async def send_bundle(self, user_operations: list[UserOperation]) -> None:
         user_operations_list = []
         for user_operation in user_operations:
             user_operations_list.append(user_operation.to_list())
@@ -179,8 +179,8 @@ class BundlerManager:
                 )
 
     def update_included_status(
-        self, sender_address, factory_address, paymaster_address
-    ):
+        self, sender_address: str, factory_address: str, paymaster_address: str
+    ) -> None:
         self.reputation_manager.update_included_status(sender_address)
 
         if factory_address is not None:

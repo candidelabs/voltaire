@@ -34,13 +34,13 @@ class ValidationManager:
 
     def __init__(
         self,
-        user_operation_handler,
-        geth_rpc_url,
-        bundler_private_key,
-        bundler_address,
-        entrypoint,
-        entrypoint_abi,
-        bundler_helper_byte_code,
+        user_operation_handler: UserOperationHandler,
+        geth_rpc_url: str,
+        bundler_private_key: str,
+        bundler_address: str,
+        entrypoint: str,
+        entrypoint_abi: str,
+        bundler_helper_byte_code: str,
     ):
         self.user_operation_handler = user_operation_handler
         self.geth_rpc_url = geth_rpc_url
@@ -78,7 +78,7 @@ class ValidationManager:
         sender_stake_info: StakeInfo,
         factory_stake_info: StakeInfo,
         paymaster_stake_info: StakeInfo,
-    ):
+    ) -> None:
         debug_data: DebugTraceCallData = await self.get_debug_traceCall_data(
             user_operation
         )
@@ -190,7 +190,9 @@ class ValidationManager:
                 )
 
     @staticmethod
-    def is_slot_associated_with_address(slot, address, associated_slots):
+    def is_slot_associated_with_address(
+        slot, address: str, associated_slots: list[str]
+    ) -> bool:
         address_lowercase = address[2:].lower()
         address_padded = "0x000000000000000000000000" + address_lowercase
         address_lowercase = "0x" + address_lowercase
@@ -211,23 +213,23 @@ class ValidationManager:
         return False
 
     @staticmethod
-    def is_staked(entity_stake: StakeInfo):
+    def is_staked(entity_stake: StakeInfo) -> bool:
         return entity_stake.stake > 1 and entity_stake.unstakeDelaySec > 1
 
     def validate_entity_storage_access(
         self,
-        entity_address,
-        entity_title,
-        associated_slots_per_entity,
+        entity_address: str,
+        entity_title: str,
+        associated_slots_per_entity: list[str],
         stake_info: StakeInfo,
-        sender,
-        access,
-        is_init_code,
-    ):
+        sender_address: str,
+        access: dict[str, dict[str : list[str]]],
+        is_init_code: bool,
+    ) -> None:
         is_staked = ValidationManager.is_staked(stake_info)
 
         for contract_address in access.keys():
-            if contract_address == sender.lower():
+            if contract_address == sender_address.lower():
                 continue  # allowed to access sender's storage
             elif contract_address == self.entrypoint.lower():
                 continue
@@ -239,9 +241,11 @@ class ValidationManager:
                 require_stake_slot = None
 
                 if (
-                    sender in associated_slots_per_entity
+                    sender_address in associated_slots_per_entity
                     and ValidationManager.is_slot_associated_with_address(
-                        slot, sender, associated_slots_per_entity[sender]
+                        slot,
+                        sender_address,
+                        associated_slots_per_entity[sender_address],
                     )
                 ):
                     if is_init_code:
@@ -320,11 +324,13 @@ class ValidationManager:
         return return_info, sender_info, factory_info, paymaster_info
 
     @staticmethod
-    def check_if_failed_op_error(solidity_error_selector) -> bool:
+    def check_if_failed_op_error(solidity_error_selector: str) -> bool:
         return solidity_error_selector == FailedOpRevertData.SELECTOR
 
     @staticmethod
-    def decode_validation_result_event(solidity_error_params) -> ReturnInfo:
+    def decode_validation_result_event(
+        solidity_error_params: str,
+    ) -> tuple[ReturnInfo, StakeInfo, StakeInfo, StakeInfo]:
         VALIDATION_RESULT_ABI = [
             "(uint256,uint256,bool,uint64,uint64,bytes)",
             "(uint256,uint256)",
@@ -369,7 +375,7 @@ class ValidationManager:
         return return_info, sender_info, factory_info, paymaster_info
 
     @staticmethod
-    def decode_FailedOp_event(solidity_error_params):
+    def decode_FailedOp_event(solidity_error_params: str) -> tuple[str, str]:
         FAILED_OP_PARAMS_API = ["uint256", "string"]
         failed_op_params_res = decode(
             FAILED_OP_PARAMS_API, bytes.fromhex(solidity_error_params)
@@ -379,7 +385,9 @@ class ValidationManager:
 
         return operation_index, reason
 
-    async def simulate_validation(self, user_operation: UserOperation):
+    async def simulate_validation(
+        self, user_operation: UserOperation
+    ) -> tuple[str, str]:
         function_selector = "0xee219423"  # simulateValidation
         params = encode(
             [
@@ -416,8 +424,11 @@ class ValidationManager:
         return solidity_error_selector, solidity_error_params
 
     async def check_banned_op_codes(
-        self, factory_opcodes, account_opcodes, paymaster_opcodes
-    ):
+        self,
+        factory_opcodes: dict[str:int],
+        account_opcodes: dict[str:int],
+        paymaster_opcodes: dict[str:int],
+    ) -> None:
         await asyncio.gather(
             self.verify_banned_opcodes(factory_opcodes, "factory", True),
             self.verify_banned_opcodes(account_opcodes, "account"),
@@ -486,8 +497,11 @@ class ValidationManager:
         return debug_trace_call_data
 
     async def verify_banned_opcodes(
-        self, opcodes, opcode_source, is_factory=False
-    ):
+        self,
+        opcodes: dict[str:int],
+        opcode_source: str,
+        is_factory: bool = False,
+    ) -> None:
         found_opcodes = {
             opcode
             for opcode in opcodes.keys()
@@ -512,7 +526,7 @@ class ValidationManager:
                     "",
                 )
 
-    async def get_addresses_code_hash(self, addresses):
+    async def get_addresses_code_hash(self, addresses: list[str]) -> str:
         call_data = encode(["address[]"], [addresses])
         params = [
             {
@@ -530,7 +544,7 @@ class ValidationManager:
         return result["error"]["data"]
 
     @staticmethod
-    def parse_entity_slots(entities: str, keccak_list):
+    def parse_entity_slots(entities: list[str], keccak_list: list[str]):
         entity_slots = dict()
         for slot_keccak in keccak_list:
             for address in entities:
@@ -551,7 +565,9 @@ class ValidationManager:
         return entity_slots
 
     @staticmethod
-    def parse_call_stack(calls, paymaster_address):
+    def parse_call_stack(
+        calls: list[dict[str, str]], paymaster_address: str
+    ) -> tuple[list[Call], Call | None]:
         stack = []
         top = Call()
         results = []
@@ -610,8 +626,8 @@ class ValidationManager:
         return results, paymaster_call
 
     async def verify_gas_and_return_info(
-        self, user_operation: UserOperation, return_info
-    ):
+        self, user_operation: UserOperation, return_info: ReturnInfo
+    ) -> None:
         pre_operation_gas = return_info.preOpGas
         # prefund=return_info.prefund
         sigFailed = return_info.sigFailed

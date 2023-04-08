@@ -123,7 +123,9 @@ class UserOperationHandler:
 
         return math.ceil(pre_verification_gas)
 
-    async def get_user_operation_by_hash(self, user_operation_hash):
+    async def get_user_operation_by_hash(
+        self, user_operation_hash: str
+    ) -> tuple:
         (
             log_object,
             _,
@@ -144,7 +146,9 @@ class UserOperationHandler:
 
         return user_operation, block_number, block_hash, transaction_hash
 
-    async def get_user_operation_by_hash_rpc(self, user_operation_hash):
+    async def get_user_operation_by_hash_rpc(
+        self, user_operation_hash: str
+    ) -> dict:
         (
             handle_op_input,
             block_number,
@@ -178,7 +182,9 @@ class UserOperationHandler:
         }
         return user_operation_by_hash_json
 
-    async def get_user_operation_receipt(self, user_operation_hash):
+    async def get_user_operation_receipt(
+        self, user_operation_hash: str
+    ) -> tuple[ReceiptInfo, UserOperationReceiptInfo]:
         (
             log_object,
             userOpHash,
@@ -229,7 +235,9 @@ class UserOperationHandler:
 
         return receiptInfo, userOperationReceiptInfo
 
-    async def get_user_operation_receipt_rpc(self, user_operation_hash):
+    async def get_user_operation_receipt_rpc(
+        self, user_operation_hash: str
+    ) -> dict:
         (
             receipt_info,
             user_operation_receipt_info,
@@ -262,7 +270,9 @@ class UserOperationHandler:
 
         return user_operation_receipt_rpc_json
 
-    async def get_user_operation_event_log_info(self, user_operation_hash):
+    async def get_user_operation_event_log_info(
+        self, user_operation_hash: str
+    ) -> tuple:
         USER_OPERATIOM_EVENT_DISCRIPTOR = "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
         params = [
             {
@@ -324,7 +334,7 @@ class UserOperationHandler:
             actualGasUsed,
         )
 
-    async def get_transaction_receipt(self, transaction_hash):
+    async def get_transaction_receipt(self, transaction_hash: str) -> dict:
         params = [transaction_hash]
         res = await send_rpc_request_to_eth_client(
             self.geth_rpc_url, "eth_getTransactionReceipt", params
@@ -344,14 +354,16 @@ class UserOperationHandler:
         )
         return res["result"]
 
-    async def get_transaction_by_hash(self, transaction_hash):
+    async def get_transaction_by_hash(self, transaction_hash) -> dict:
         params = [transaction_hash]
         res = await send_rpc_request_to_eth_client(
             self.geth_rpc_url, "eth_getTransactionByHash", params
         )
         return res["result"]
 
-    async def get_user_operation_hash(self, user_operation: UserOperation):
+    async def get_user_operation_hash(
+        self, user_operation: UserOperation
+    ) -> str:
         function_selector = "0xa6193531"  # getUserOpHash
         params = encode(
             [
@@ -376,7 +388,7 @@ class UserOperationHandler:
         return result["result"]
 
     @staticmethod
-    def pack_user_operation(user_operation):
+    def pack_user_operation(user_operation: UserOperation) -> bytes:
         return encode(
             [
                 "address",
@@ -395,7 +407,7 @@ class UserOperationHandler:
         )[66:-64]
 
     @staticmethod
-    def decode_handle_op_input(handle_op_input):
+    def decode_handle_op_input(handle_op_input) -> list:
         INPUT_ABI = [
             "(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)[]",
             "address",

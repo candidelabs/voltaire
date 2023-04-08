@@ -19,14 +19,14 @@ class Sender:
     async def add_user_operation(
         self,
         new_user_operation: UserOperation,
-        entrypoint_address,
-        entrypoint_abi,
-        bundler_address,
-        geth_rpc_url,
+        entrypoint_address: str,
+        entrypoint_abi: str,
+        bundler_address: str,
+        geth_rpc_url: str,
     ):
         sender_operations_num = len(self.user_operations)
         is_staked = await self._check_if_stacked(
-            entrypoint_address, entrypoint_abi, bundler_address, geth_rpc_url
+            entrypoint_address, bundler_address, geth_rpc_url
         )
 
         if sender_operations_num == 0:
@@ -57,8 +57,10 @@ class Sender:
                 )
 
     def replace_user_operation(
-        self, new_user_operation, existing_user_operation
-    ):
+        self,
+        new_user_operation: UserOperation,
+        existing_user_operation: UserOperation,
+    ) -> None:
         if self._check_if_new_operation_can_replace_existing_operation(
             new_user_operation, existing_user_operation
         ):
@@ -73,7 +75,7 @@ class Sender:
 
     def _check_if_new_operation_can_replace_existing_operation(
         self, new_operation: UserOperation, existing_operation: UserOperation
-    ):
+    ) -> bool:
         if new_operation.nonce != existing_operation.nonce:
             return False
 
@@ -96,18 +98,20 @@ class Sender:
             return False
 
     @staticmethod
-    def _calculate_min_fee_to_replace(fee):
+    def _calculate_min_fee_to_replace(fee) -> int:
         return round(fee * (100 + MIN_PRICE_BUMP) / 100)
 
-    def _get_user_operation_with_same_nonce(self, nonce):
+    def _get_user_operation_with_same_nonce(
+        self, nonce
+    ) -> UserOperation | None:
         for user_operation in self.user_operations:
             if user_operation.nonce == nonce:
                 return user_operation
         return None
 
     async def _check_if_stacked(
-        self, entrypoint_address, entrypoint_abi, bundler_address, geth_rpc_url
-    ):
+        self, entrypoint_address: str, bundler_address: str, geth_rpc_url: str
+    ) -> bool:
         function_selector = "0x5287ce12"  # getDepositInfo
         params = encode(["address"], [self.address])
 
