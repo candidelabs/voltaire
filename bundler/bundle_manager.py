@@ -17,7 +17,6 @@ class BundlerManager:
     bundler_private_key: str
     bundler_address: str
     entrypoint: str
-    entrypoint_abi: str
     mempool_manager: MempoolManager
     user_operation_handler: UserOperationHandler
     reputation_manager: ReputationManager
@@ -32,7 +31,6 @@ class BundlerManager:
         bundler_private_key: str,
         bundler_address: str,
         entrypoint: str,
-        entrypoint_abi: str,
         chain_id: str,
     ):
         self.mempool_manager = mempool_manager
@@ -42,7 +40,6 @@ class BundlerManager:
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
-        self.entrypoint_abi = entrypoint_abi
         self.chain_id = chain_id
 
     async def send_next_bundle(self) -> None:

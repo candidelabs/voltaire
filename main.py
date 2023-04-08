@@ -28,7 +28,6 @@ async def main() -> None:
             initData.bundler_pk,
             initData.bundler_address,
             initData.entrypoint,
-            initData.entrypoint_abi,
             initData.bundler_helper_byte_code,
             initData.chain_id,
         )

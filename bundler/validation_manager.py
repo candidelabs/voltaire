@@ -27,7 +27,6 @@ class ValidationManager:
     bundler_private_key: str
     bundler_address: str
     entrypoint: str
-    entrypoint_abi: str
     bundler_collector_tracer: str
     banned_opcodes: list()
     bundler_helper_byte_code: str
@@ -39,7 +38,6 @@ class ValidationManager:
         bundler_private_key: str,
         bundler_address: str,
         entrypoint: str,
-        entrypoint_abi: str,
         bundler_helper_byte_code: str,
     ):
         self.user_operation_handler = user_operation_handler
@@ -47,7 +45,6 @@ class ValidationManager:
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
-        self.entrypoint_abi = entrypoint_abi
         self.bundler_helper_byte_code = bundler_helper_byte_code
 
         path = "utils/BundlerCollectorTracer.js"

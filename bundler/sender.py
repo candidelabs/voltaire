@@ -20,7 +20,6 @@ class Sender:
         self,
         new_user_operation: UserOperation,
         entrypoint_address: str,
-        entrypoint_abi: str,
         bundler_address: str,
         geth_rpc_url: str,
     ):

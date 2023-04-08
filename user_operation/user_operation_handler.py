@@ -22,7 +22,6 @@ class UserOperationHandler:
     bundler_private_key: str
     bundler_address: str
     entrypoint: str
-    entrypoint_abi: str
 
     def __init__(
         self,
@@ -30,13 +29,11 @@ class UserOperationHandler:
         bundler_private_key,
         bundler_address,
         entrypoint,
-        entrypoint_abi,
     ):
         self.geth_rpc_url = geth_rpc_url
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
-        self.entrypoint_abi = entrypoint_abi
 
     async def estimate_user_operation_gas(self, user_operation: UserOperation):
         tasks = await asyncio.gather(

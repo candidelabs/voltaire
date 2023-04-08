@@ -20,7 +20,6 @@ VOLTAIRE_HEADER = "\n".join(
 @dataclass()
 class InitData:
     entrypoint: list()
-    entrypoint_abi: list()
     rpc_url: str
     rpc_port: int
     geth_url: str
@@ -129,17 +128,12 @@ def initialize() -> InitData:
         bundler_pk = args.bundler_secret
         bundler_address = public_address_from_private_key(bundler_pk)
 
-    entrypoint_abi_file = open("utils/EntryPoint.json")
-    data = json.load(entrypoint_abi_file)
-    entrypoint_abi = data["abi"]
-
     bundler_helper_byte_code_file = open("utils/BundlerHelper.json")
     data = json.load(bundler_helper_byte_code_file)
     bundler_helper_byte_code = data["bytecode"]
 
     ret = InitData(
         args.entrypoint,
-        entrypoint_abi,
         args.rpc_url,
         args.rpc_port,
         args.geth_url,

@@ -30,7 +30,6 @@ class ExecutionEndpoint(Endpoint):
     bundler_private_key: str
     bundler_address: str
     entrypoint: str
-    entrypoint_abi: str
     bundle_manager: BundlerManager
     mempool_manager: MempoolManager
     validation_manager: ValidationManager
@@ -45,7 +44,6 @@ class ExecutionEndpoint(Endpoint):
         bundler_private_key: str,
         bundler_address: str,
         entrypoint: str,
-        entrypoint_abi: str,
         bundler_helper_byte_code: str,
         chain_id: str,
     ):
@@ -54,7 +52,6 @@ class ExecutionEndpoint(Endpoint):
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
-        self.entrypoint_abi = entrypoint_abi
         self.bundler_helper_byte_code = bundler_helper_byte_code
         self.chain_id = chain_id
 
@@ -66,7 +63,6 @@ class ExecutionEndpoint(Endpoint):
             bundler_private_key,
             bundler_address,
             entrypoint,
-            entrypoint_abi,
         )
 
         self.validation_manager = ValidationManager(
@@ -75,7 +71,6 @@ class ExecutionEndpoint(Endpoint):
             bundler_private_key,
             bundler_address,
             entrypoint,
-            entrypoint_abi,
             bundler_helper_byte_code,
         )
 
@@ -87,7 +82,6 @@ class ExecutionEndpoint(Endpoint):
             bundler_private_key,
             bundler_address,
             entrypoint,
-            entrypoint_abi,
         )
 
         self.bundle_manager = BundlerManager(
@@ -98,7 +92,6 @@ class ExecutionEndpoint(Endpoint):
             bundler_private_key,
             bundler_address,
             entrypoint,
-            entrypoint_abi,
             chain_id,
         )
 

@@ -17,7 +17,6 @@ class MempoolManager:
     bundler_private_key: str
     bundler_address: str
     entrypoint: str
-    entrypoint_abi: str
     senders: dict[str, Sender]
     entity_no_of_ops_in_mempool: dict[str, int]  # factory and paymaster
 
@@ -30,7 +29,6 @@ class MempoolManager:
         bundler_private_key: str,
         bundler_address: str,
         entrypoint: str,
-        entrypoint_abi: str,
     ):
         self.validation_manager = validation_manager
         self.user_operation_handler = user_operation_handler
@@ -39,7 +37,6 @@ class MempoolManager:
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
-        self.entrypoint_abi = entrypoint_abi
         self.senders = {}
         self.entity_no_of_ops_in_mempool = {}
 
@@ -90,7 +87,6 @@ class MempoolManager:
         await new_sender.add_user_operation(
             user_operation,
             self.entrypoint,
-            self.entrypoint_abi,
             self.bundler_address,
             self.geth_rpc_url,
         )
