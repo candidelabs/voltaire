@@ -1,13 +1,28 @@
 import asyncio
 import logging
 from aiohttp import web
-from jsonrpcserver import method, Result, Success, async_dispatch, Error
+from jsonrpcserver import (
+    method,
+    Result,
+    Success,
+    async_dispatch,
+    Error,
+    InvalidParams,
+)
 from typing import Any
 
 from event_bus_manager.endpoint import Client
 from rpc.events import RPCCallRequestEvent, RPCCallResponseEvent
-from user_operation.user_operation import UserOperation
-from bundler.exceptions import ValidationException, ExecutionException
+from user_operation.user_operation import (
+    UserOperation,
+    verify_and_get_address,
+    is_user_operation_hash,
+)
+from bundler.exceptions import (
+    ValidationException,
+    ExecutionException,
+    ValidationExceptionCode,
+)
 
 
 async def _handle_rpc_request(
@@ -52,7 +67,11 @@ async def eth_supportedEntryPoints() -> Result:
 async def eth_estimateUserOperationGas(
     userOperationJson, entrypoint
 ) -> Result:
-    userOperation: UserOperation = UserOperation(userOperationJson)
+    try:
+        userOperation: UserOperation = UserOperation(userOperationJson)
+        verify_and_get_address(entrypoint)
+    except ValidationException as exp:
+        return InvalidParams(exp.message)
 
     result = await _handle_rpc_request(
         endpoint_id="bundler_endpoint",
@@ -64,11 +83,48 @@ async def eth_estimateUserOperationGas(
 
 @method
 async def eth_sendUserOperation(userOperationJson, entrypoint) -> Result:
-    userOperation: UserOperation = UserOperation(userOperationJson)
+    try:
+        userOperation: UserOperation = UserOperation(userOperationJson)
+        verify_and_get_address(entrypoint)
+    except ValidationException as exp:
+        return InvalidParams(exp.message)
+
     result = await _handle_rpc_request(
         endpoint_id="bundler_endpoint",
         request_type="rpc_sendUserOperation",
         request_arguments=[userOperation, entrypoint],
+    )
+    return result
+
+
+@method
+async def eth_getUserOperationReceipt(userOperationHash) -> Result:
+    if not is_user_operation_hash(userOperationHash):
+        return Error(
+            ValidationExceptionCode.INVALID_USEROPHASH.value,
+            "Missing/invalid userOpHash",
+        )
+
+    result = await _handle_rpc_request(
+        endpoint_id="bundler_endpoint",
+        request_type="rpc_getUserOperationReceipt",
+        request_arguments=[userOperationHash],
+    )
+    return result
+
+
+@method
+async def eth_getUserOperationByHash(userOperationHash) -> Result:
+    if not is_user_operation_hash(userOperationHash):
+        return Error(
+            ValidationExceptionCode.INVALID_USEROPHASH.value,
+            "Missing/invalid userOpHash",
+        )
+
+    result = await _handle_rpc_request(
+        endpoint_id="bundler_endpoint",
+        request_type="rpc_getUserOperationByHash",
+        request_arguments=[userOperationHash],
     )
     return result
 
@@ -95,30 +151,15 @@ async def debug_bundler_clearState() -> Result:
 
 @method
 async def debug_bundler_dumpMempool(entrypoint) -> Result:
+    try:
+        verify_and_get_address(entrypoint)
+    except ValidationException as exp:
+        return InvalidParams(exp.message)
+
     result = await _handle_rpc_request(
         endpoint_id="bundler_endpoint",
         request_type="debug_bundler_dumpMempool",
         request_arguments=[entrypoint],
-    )
-    return result
-
-
-@method
-async def eth_getUserOperationReceipt(userOperationHash) -> Result:
-    result = await _handle_rpc_request(
-        endpoint_id="bundler_endpoint",
-        request_type="rpc_getUserOperationReceipt",
-        request_arguments=[userOperationHash],
-    )
-    return result
-
-
-@method
-async def eth_getUserOperationByHash(userOperationHash) -> Result:
-    result = await _handle_rpc_request(
-        endpoint_id="bundler_endpoint",
-        request_type="rpc_getUserOperationByHash",
-        request_arguments=[userOperationHash],
     )
     return result
 

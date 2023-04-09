@@ -1,4 +1,5 @@
 from dataclasses import dataclass, InitVar
+from bundler.exceptions import ValidationException, ValidationExceptionCode
 import re
 
 
@@ -22,7 +23,12 @@ class UserOperation:
 
     def __init__(self, jsonRequestDict):
         if len(jsonRequestDict) != 11:
-            raise ValueError("Invalide UserOperation")
+            raise ValidationException(
+                ValidationExceptionCode.InvalidFields,
+                "Invalide UserOperation",
+                "",
+            )
+        self.verify_fields_exist(jsonRequestDict)
 
         self.sender = verify_and_get_address(jsonRequestDict["sender"])
         self.nonce = verify_and_get_uint(jsonRequestDict["nonce"])
@@ -51,6 +57,30 @@ class UserOperation:
         self.code_hash = None
 
         self._set_factory_and_paymaster_address()
+
+    @staticmethod
+    def verify_fields_exist(jsonRequestDict) -> None:
+        field_list = [
+            "sender",
+            "nonce",
+            "initCode",
+            "callData",
+            "callGasLimit",
+            "verificationGasLimit",
+            "preVerificationGas",
+            "maxFeePerGas",
+            "maxPriorityFeePerGas",
+            "paymasterAndData",
+            "signature",
+        ]
+
+        for field in field_list:
+            if field not in jsonRequestDict:
+                raise ValidationException(
+                    ValidationExceptionCode.InvalidFields,
+                    f"UserOperation missing {field} field",
+                    "",
+                )
 
     def get_user_operation_dict(self) -> tuple:
         return {
@@ -117,7 +147,11 @@ def verify_and_get_address(value) -> str:
     if isinstance(value, str) and re.match(address_pattern, value) is not None:
         return value
     else:
-        raise ValueError("Invalide address value")
+        raise ValidationException(
+            ValidationExceptionCode.InvalidFields,
+            f"Invalide address value : {value}",
+            "",
+        )
 
 
 def verify_and_get_uint(value) -> int:
@@ -132,7 +166,11 @@ def verify_and_get_uint(value) -> int:
     elif isinstance(value, str) and value.isdigit():
         return int(value)
     else:
-        raise ValueError("Invalide uint value")
+        raise ValidationException(
+            ValidationExceptionCode.InvalidFields,
+            f"Invalide uint value : {value}",
+            "",
+        )
 
 
 def verify_and_get_bytes(value) -> bytes:
@@ -143,4 +181,16 @@ def verify_and_get_bytes(value) -> bytes:
     if isinstance(value, str) and re.match(bytes_pattern, value) is not None:
         return bytes.fromhex(value[2:])
     else:
-        raise ValueError("Invalide bytes value")
+        raise ValidationException(
+            ValidationExceptionCode.InvalidFields,
+            f"Invalide bytes value : {value}",
+            "",
+        )
+
+
+def is_user_operation_hash(user_operation_hash) -> bool:
+    hash_pattern = "^0x[0-9,a-f,A-F]{64}$"
+    return (
+        isinstance(user_operation_hash, str)
+        and re.match(hash_pattern, user_operation_hash) is not None
+    )

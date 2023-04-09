@@ -198,13 +198,6 @@ class ExecutionEndpoint(Endpoint):
     ) -> RPCCallResponseEvent:
         user_operation_hash = rpc_request.req_arguments[0]
 
-        if not is_hash(user_operation_hash):
-            raise ValidationException(
-                ValidationExceptionCode.INVALID_USEROPHASH,
-                "Missing/invalid userOpHash",
-                "",
-            )
-
         user_operation_by_hash_json = (
             await self.user_operation_handler.get_user_operation_by_hash_rpc(
                 user_operation_hash
@@ -217,13 +210,6 @@ class ExecutionEndpoint(Endpoint):
         self, rpc_request: RPCCallRequestEvent
     ) -> RPCCallResponseEvent:
         user_operation_hash = rpc_request.req_arguments[0]
-
-        if not is_hash(user_operation_hash):
-            raise ValidationException(
-                ValidationExceptionCode.INVALID_USEROPHASH,
-                "Missing/invalid userOpHash",
-                "",
-            )
 
         user_operation_receipt_info_json = (
             await self.user_operation_handler.get_user_operation_receipt_rpc(
@@ -245,10 +231,3 @@ async def exception_handler_decorator(
     finally:
         return response
 
-
-def is_hash(user_operation_hash) -> bool:
-    hash_pattern = "^0x[0-9,a-f,A-F]{64}$"
-    return (
-        isinstance(user_operation_hash, str)
-        and re.match(hash_pattern, user_operation_hash) is not None
-    )
