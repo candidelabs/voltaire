@@ -65,6 +65,8 @@ class ValidationManager:
             "CREATE",
             # "CREATE2",
             "SELFDESTRUCT",
+            "RANDOM",
+            "PREVRANDAO"
         ]
 
     async def validate_user_operation(
