@@ -1,7 +1,5 @@
 import asyncio
-from typing import Dict
 import time
-import json
 
 from eth_utils import to_checksum_address, keccak
 from eth_abi import decode, encode

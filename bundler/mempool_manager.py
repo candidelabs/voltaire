@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import asyncio
 from user_operation.user_operation import UserOperation
 from .sender import Sender

@@ -1,21 +1,14 @@
 import asyncio
 import logging
-import re
-
-from eth_abi import decode
-from aiohttp import ClientSession
 
 from event_bus_manager.endpoint import Endpoint
 from rpc.events import RPCCallRequestEvent, RPCCallResponseEvent
 from user_operation.user_operation import UserOperation
 
-from utils.eth_client_utils import send_rpc_request_to_eth_client
-
 from .mempool_manager import MempoolManager
 from user_operation.user_operation_handler import UserOperationHandler
 from bundler.exceptions import (
     ValidationException,
-    ValidationExceptionCode,
     ExecutionException,
 )
 from .bundle_manager import BundlerManager
@@ -230,4 +223,3 @@ async def exception_handler_decorator(
         response.is_error = True
     finally:
         return response
-

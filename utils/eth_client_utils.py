@@ -1,6 +1,5 @@
 from aiohttp import ClientSession
 import json
-from eth_abi import decode
 from dataclasses import dataclass
 
 
