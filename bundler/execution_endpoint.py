@@ -9,6 +9,7 @@ from .mempool_manager import MempoolManager
 from user_operation.user_operation_handler import UserOperationHandler
 from bundler.exceptions import (
     ValidationException,
+    ValidationExceptionCode,
     ExecutionException,
 )
 from .bundle_manager import BundlerManager
@@ -119,7 +120,9 @@ class ExecutionEndpoint(Endpoint):
         self, rpc_request: RPCCallRequestEvent
     ) -> RPCCallResponseEvent:
         user_operation: UserOperation = rpc_request.req_arguments[0]
-        entrypoint = rpc_request.req_arguments[1]
+        entrypoint_address = rpc_request.req_arguments[1]
+
+        self._verify_entrypoint(entrypoint_address)
 
         (
             return_info,
@@ -153,6 +156,8 @@ class ExecutionEndpoint(Endpoint):
     ) -> RPCCallResponseEvent:
         user_operation: UserOperation = rpc_request.req_arguments[0]
         entrypoint_address = rpc_request.req_arguments[1]
+
+        self._verify_entrypoint(entrypoint_address)
 
         user_operation_hash = await self.mempool_manager.add_user_operation(
             user_operation
@@ -211,6 +216,14 @@ class ExecutionEndpoint(Endpoint):
         )
 
         return RPCCallResponseEvent(user_operation_receipt_info_json)
+    
+    def _verify_entrypoint(self, entrypoint):
+        if entrypoint != self.entrypoint:
+                raise ValidationException(
+                        ValidationExceptionCode.InvalidFields,
+                        "Unsupported entrypoint",
+                        "",
+                    )
 
 
 async def exception_handler_decorator(
