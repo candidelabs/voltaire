@@ -413,6 +413,13 @@ class ValidationManager:
         ):
             raise ValueError("simulateValidation didn't revert!")
 
+        elif("data" not in result["error"] or len(result["error"]["data"]) < 10):
+            raise ValidationException(
+                        ValidationExceptionCode.SimulateValidation,
+                        result["error"]["message"],
+                        "",
+                    )
+    
         error_data = result["error"]["data"]
 
         solidity_error_selector = str(error_data[:10])
@@ -645,7 +652,7 @@ class ValidationManager:
                 "",
             )
 
-        if call_gas_limit is not "0x" and user_operation.call_gas_limit < int(
+        if call_gas_limit != "0x" and user_operation.call_gas_limit < int(
             call_gas_limit, 16
         ):
             raise ValidationException(
