@@ -155,16 +155,22 @@ def verify_and_get_address(value) -> str:
 
 
 def verify_and_get_uint(value) -> int:
-    if value is None:
+    if value is None or value == "0x":
         return 0
 
-    uint_pattern = "^0x([1-9a-f]+[0-9a-f]*|0)$"
     if isinstance(value, int):
         return value
-    elif isinstance(value, str) and re.match(uint_pattern, value) is not None:
-        return int(value, 16)
     elif isinstance(value, str) and value.isdigit():
         return int(value)
+    elif isinstance(value, str):
+        try:
+            return int(value, 16)
+        except ValueError as exp:
+            raise ValidationException(
+            ValidationExceptionCode.InvalidFields,
+            f"Invalide uint value : {value}",
+            "",
+        )
     else:
         raise ValidationException(
             ValidationExceptionCode.InvalidFields,
@@ -179,7 +185,14 @@ def verify_and_get_bytes(value) -> bytes:
 
     bytes_pattern = "(^$|^0x|0x([1-9a-f]+[0-9a-f]*|0)$)"
     if isinstance(value, str) and re.match(bytes_pattern, value) is not None:
-        return bytes.fromhex(value[2:])
+        try:
+            return bytes.fromhex(value[2:])
+        except ValueError as exp:
+            raise ValidationException(
+            ValidationExceptionCode.InvalidFields,
+            f"Invalide bytes value : {value}",
+            "",
+        )
     else:
         raise ValidationException(
             ValidationExceptionCode.InvalidFields,
