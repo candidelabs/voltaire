@@ -124,6 +124,14 @@ class ExecutionEndpoint(Endpoint):
 
         self._verify_entrypoint(entrypoint_address)
 
+        #set high verification_gas_limit for validtion to succeed while estimating gas
+        if user_operation.verification_gas_limit < 1000000000000000000:
+            user_operation.verification_gas_limit = 1000000000000000000
+
+        #set gas fee to zero to ignore paying for prefund error while estimating gas
+        user_operation.max_fee_per_gas = 0
+        user_operation.max_priority_fee_per_gas = 0
+
         (
             return_info,
             _,
