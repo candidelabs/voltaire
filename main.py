@@ -33,7 +33,7 @@ async def main() -> None:
         )
         task_group.create_task(execution_endpoint.start_execution_endpoint())
         task_group.create_task(
-            run_rpc_http_server(host=initData.rpc_url, port=initData.rpc_port)
+            run_rpc_http_server(host=initData.rpc_url, port=initData.rpc_port, is_debug=initData.is_debug)
         )
 
 

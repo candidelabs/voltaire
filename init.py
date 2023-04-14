@@ -27,6 +27,7 @@ class InitData:
     bundler_address: str
     bundler_helper_byte_code: str
     chain_id: int
+    is_debug: bool
 
 
 def address(ep):
@@ -115,6 +116,14 @@ def initialize() -> InitData:
         default=False,
     )
 
+    parser.add_argument(
+        "--debug",
+        help="expose _debug rpc namespace for testing",
+        nargs="?",
+        const=True,
+        default=False,
+    )
+
     args = parser.parse_args()
 
     bundler_address="" 
@@ -141,6 +150,7 @@ def initialize() -> InitData:
         bundler_address,
         bundler_helper_byte_code,
         args.chain_id,
+        args.debug
     )
 
     logging.basicConfig(

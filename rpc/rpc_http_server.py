@@ -1,5 +1,5 @@
-import asyncio
 import logging
+from functools import partial
 from aiohttp import web
 from jsonrpcserver import (
     method,
@@ -164,17 +164,35 @@ async def debug_bundler_dumpMempool(entrypoint) -> Result:
     return result
 
 
-async def handle(request):
+async def handle(is_debug, request):
     res = await request.text()
+    methods={
+        "eth_chainId": eth_chainId,
+        "eth_supportedEntryPoints": eth_supportedEntryPoints,
+        "eth_estimateUserOperationGas": eth_estimateUserOperationGas,
+        "eth_sendUserOperation": eth_sendUserOperation,
+        "eth_getUserOperationReceipt": eth_getUserOperationReceipt,
+        "eth_getUserOperationByHash": eth_getUserOperationByHash,
+    }
+    debug_methods={
+        "debug_bundler_sendBundleNow": debug_bundler_sendBundleNow,
+        "debug_bundler_clearState": debug_bundler_clearState,
+        "debug_bundler_dumpMempool": debug_bundler_dumpMempool
+    }
+
+    if is_debug:
+        methods.update(debug_methods)
+
     return web.Response(
-        text=await async_dispatch(res), content_type="application/json"
+        text=await async_dispatch(res, methods=methods), content_type="application/json"
     )
 
 
-async def run_rpc_http_server(host="localhost", port=3000):
+async def run_rpc_http_server(host="localhost", port=3000, is_debug=False):
     logging.info(f"Starting HTTP RPC Server at: {host}:{port}/rpc")
     app = web.Application()
-    app.router.add_post("/rpc", handle)
+    handle_func = partial(handle, is_debug)
+    app.router.add_post("/rpc", handle_func)
 
     runner = web.AppRunner(app)
     await runner.setup()
