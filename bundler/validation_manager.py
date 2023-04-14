@@ -409,7 +409,7 @@ class ValidationManager:
         )
         if (
             "error" not in result
-            or result["error"]["message"] != "execution reverted"
+            or "execution reverted" not in result["error"]["message"]
         ):
             raise ValueError("simulateValidation didn't revert!")
 
@@ -637,6 +637,7 @@ class ValidationManager:
         sigFailed = return_info.sigFailed
         validAfter = return_info.validAfter
         deadline = return_info.validUntil
+        max_fee_per_gas = user_operation.max_fee_per_gas
 
         (
             call_gas_limit,
@@ -691,3 +692,17 @@ class ValidationManager:
                 "Transaction will expire shortly or has expired.",
                 "",
             )
+        
+        baseFee = int(await self.getBaseFee(), 16)
+        if(max_fee_per_gas < baseFee):
+            raise ValidationException(
+                ValidationExceptionCode.SimulateValidation,
+                f"Max fee per gas is too low. it should be minimum : {baseFee}",
+                "",
+            )
+        
+    async def getBaseFee(self):
+        res = await send_rpc_request_to_eth_client(
+                self.geth_rpc_url, "eth_getBlockByNumber", ['pending', False]
+            )
+        return res["result"]["baseFeePerGas"]
