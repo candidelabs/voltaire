@@ -278,6 +278,7 @@ class UserOperationHandler:
                     USER_OPERATIOM_EVENT_DISCRIPTOR,
                     user_operation_hash,
                 ],
+                "fromBlock":"earliest",
             }
         ]
 
@@ -343,6 +344,7 @@ class UserOperationHandler:
             {
                 "address": _from,
                 "transactionHash": transaction_hash,
+                "fromBlock":"earliest",
             }
         ]
 
