@@ -174,13 +174,13 @@ async def handle(is_debug, request):
         "eth_getUserOperationReceipt": eth_getUserOperationReceipt,
         "eth_getUserOperationByHash": eth_getUserOperationByHash,
     }
-    debug_methods={
-        "debug_bundler_sendBundleNow": debug_bundler_sendBundleNow,
-        "debug_bundler_clearState": debug_bundler_clearState,
-        "debug_bundler_dumpMempool": debug_bundler_dumpMempool
-    }
-
+    
     if is_debug:
+        debug_methods={
+            "debug_bundler_sendBundleNow": debug_bundler_sendBundleNow,
+            "debug_bundler_clearState": debug_bundler_clearState,
+            "debug_bundler_dumpMempool": debug_bundler_dumpMempool
+        }
         methods.update(debug_methods)
 
     return web.Response(
