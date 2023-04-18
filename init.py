@@ -28,6 +28,9 @@ class InitData:
     bundler_helper_byte_code: str
     chain_id: int
     is_debug: bool
+    is_unsafe: bool
+    is_gas_estimation_without_simulation: bool
+    is_send_raw_transaction_conditional: bool
 
 
 def address(ep):
@@ -124,6 +127,30 @@ def initialize() -> InitData:
         default=False,
     )
 
+    parser.add_argument(
+        "--unsafe",
+        help="UNSAFE mode: no storage or opcode checks - when debug_traceCall is not available",
+        nargs="?",
+        const=True,
+        default=False,
+    )
+
+    parser.add_argument(
+        "--gas_estimation_without_simulation",
+        help="perform gas estimation without calling simulateValidation to be compatible with optimism rollup before the bedrock update",
+        nargs="?",
+        const=True,
+        default=False,
+    )
+
+    parser.add_argument(
+        "--send_raw_transaction_conditional",
+        help="use eth_SendRawTransactionConditional with comptaible rollups",
+        nargs="?",
+        const=True,
+        default=False,
+    )
+
     args = parser.parse_args()
 
     bundler_address="" 
@@ -150,7 +177,10 @@ def initialize() -> InitData:
         bundler_address,
         bundler_helper_byte_code,
         args.chain_id,
-        args.debug
+        args.debug,
+        args.unsafe,
+        args.gas_estimation_without_simulation,
+        args.send_raw_transaction_conditional
     )
 
     logging.basicConfig(

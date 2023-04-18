@@ -28,6 +28,7 @@ class ValidationManager:
     bundler_collector_tracer: str
     banned_opcodes: list()
     bundler_helper_byte_code: str
+    is_unsafe: bool
 
     def __init__(
         self,
@@ -37,6 +38,7 @@ class ValidationManager:
         bundler_address: str,
         entrypoint: str,
         bundler_helper_byte_code: str,
+        is_unsafe: bool,
     ):
         self.user_operation_handler = user_operation_handler
         self.geth_rpc_url = geth_rpc_url
@@ -44,6 +46,7 @@ class ValidationManager:
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
         self.bundler_helper_byte_code = bundler_helper_byte_code
+        self.is_unsafe = is_unsafe
 
         path = "utils/BundlerCollectorTracer.js"
         with open(path) as keyfile:
@@ -76,6 +79,9 @@ class ValidationManager:
         factory_stake_info: StakeInfo,
         paymaster_stake_info: StakeInfo,
     ) -> None:
+        if self.is_unsafe:
+            return
+        
         debug_data: DebugTraceCallData = await self.get_debug_traceCall_data(
             user_operation
         )

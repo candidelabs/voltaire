@@ -30,6 +30,9 @@ async def main() -> None:
             initData.entrypoint,
             initData.bundler_helper_byte_code,
             initData.chain_id,
+            initData.is_unsafe,
+            initData.is_gas_estimation_without_simulation,
+            initData.is_send_raw_transaction_conditional
         )
         task_group.create_task(execution_endpoint.start_execution_endpoint())
         task_group.create_task(

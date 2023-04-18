@@ -21,6 +21,7 @@ class BundlerManager:
     user_operation_handler: UserOperationHandler
     reputation_manager: ReputationManager
     chain_id: int
+    is_send_raw_transaction_conditional: bool
 
     def __init__(
         self,
@@ -32,6 +33,7 @@ class BundlerManager:
         bundler_address: str,
         entrypoint: str,
         chain_id: str,
+        is_send_raw_transaction_conditional: bool
     ):
         self.mempool_manager = mempool_manager
         self.user_operation_handler = user_operation_handler
@@ -41,6 +43,7 @@ class BundlerManager:
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
         self.chain_id = chain_id
+        self.is_send_raw_transaction_conditional = is_send_raw_transaction_conditional
 
     async def send_next_bundle(self) -> None:
         user_operations = (
@@ -108,9 +111,13 @@ class BundlerManager:
         sign_store_txn = Account.sign_transaction(
             txnDict, private_key=self.bundler_private_key
         )
+        rpc_call = "eth_sendRawTransaction"
+        if self.is_send_raw_transaction_conditional:
+            rpc_call = "eth_sendRawTransactionConditional"
+
         result = await send_rpc_request_to_eth_client(
             self.geth_rpc_url,
-            "eth_sendRawTransaction",
+            rpc_call,
             [sign_store_txn.rawTransaction.hex()],
         )
         if "error" in result:

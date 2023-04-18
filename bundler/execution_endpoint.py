@@ -31,6 +31,9 @@ class ExecutionEndpoint(Endpoint):
     reputation_manager: ReputationManager
     bundler_helper_byte_code: str
     chain_id: int
+    is_unsafe: bool
+    is_gas_estimation_without_simulation: bool
+    is_send_raw_transaction_conditional: bool
 
     def __init__(
         self,
@@ -40,6 +43,9 @@ class ExecutionEndpoint(Endpoint):
         entrypoint: str,
         bundler_helper_byte_code: str,
         chain_id: str,
+        is_unsafe: bool,
+        is_gas_estimation_without_simulation: bool,
+        is_send_raw_transaction_conditional: bool
     ):
         super().__init__("bundler_endpoint")
         self.geth_rpc_url = geth_rpc_url
@@ -48,11 +54,13 @@ class ExecutionEndpoint(Endpoint):
         self.entrypoint = entrypoint
         self.bundler_helper_byte_code = bundler_helper_byte_code
         self.chain_id = chain_id
+        self.is_unsafe = is_unsafe
+        self.is_gas_estimation_without_simulation = is_gas_estimation_without_simulation
+        self.is_send_raw_transaction_conditional = is_send_raw_transaction_conditional
 
         self.reputation_manager = ReputationManager()
 
         self.user_operation_handler = UserOperationHandler(
-            # self.validation_manager,
             geth_rpc_url,
             bundler_private_key,
             bundler_address,
@@ -66,6 +74,7 @@ class ExecutionEndpoint(Endpoint):
             bundler_address,
             entrypoint,
             bundler_helper_byte_code,
+            is_unsafe,
         )
 
         self.mempool_manager = MempoolManager(
@@ -87,6 +96,7 @@ class ExecutionEndpoint(Endpoint):
             bundler_address,
             entrypoint,
             chain_id,
+            is_send_raw_transaction_conditional
         )
 
         asyncio.ensure_future(self.execute_bundle_cron_job())
@@ -132,17 +142,21 @@ class ExecutionEndpoint(Endpoint):
         user_operation.max_fee_per_gas = 0
         user_operation.max_priority_fee_per_gas = 0
 
-        (
-            return_info,
-            _,
-            _,
-            _,
-        ) = await self.validation_manager.simulate_validation_and_decode_result(
-            user_operation
-        )
+        if self.is_gas_estimation_without_simulation:
+            pre_operation_gas = 60000
+            deadline = 10000000000000000
+        else:
+            (
+                return_info,
+                _,
+                _,
+                _,
+            ) = await self.validation_manager.simulate_validation_and_decode_result(
+                user_operation
+            )
 
-        pre_operation_gas = return_info.preOpGas
-        deadline = return_info.validUntil
+            pre_operation_gas = return_info.preOpGas
+            deadline = return_info.validUntil
 
         estimated_gas_json = (
             await self.user_operation_handler.estimate_user_operation_gas_rpc(
