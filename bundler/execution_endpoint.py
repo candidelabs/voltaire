@@ -233,7 +233,7 @@ class ExecutionEndpoint(Endpoint):
 
         user_operation_receipt_info_json = (
             await self.user_operation_handler.get_user_operation_receipt_rpc(
-                user_operation_hash
+                user_operation_hash, self.is_optimism_gas_estimation
             )
         )
 

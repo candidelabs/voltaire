@@ -137,7 +137,7 @@ def initialize() -> InitData:
 
     parser.add_argument(
         "--optimism_gas_estimation",
-        help="perform gas estimation without calling simulateValidation to be compatible with optimism rollup before the bedrock update",
+        help="perform gas estimation without calling simulateValidation and modify receipt return to be compatible with optimism rollup before the bedrock update",
         nargs="?",
         const=True,
         default=False,

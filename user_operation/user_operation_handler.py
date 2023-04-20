@@ -233,7 +233,7 @@ class UserOperationHandler:
         return receiptInfo, userOperationReceiptInfo
 
     async def get_user_operation_receipt_rpc(
-        self, user_operation_hash: str
+        self, user_operation_hash: str, is_optimism_gas_estimation:bool
     ) -> dict:
         (
             receipt_info,
@@ -250,8 +250,14 @@ class UserOperationHandler:
             "logsBloom": receipt_info.logsBloom,
             "transactionHash": receipt_info.transactionHash,
             "transactionIndex": receipt_info.transactionIndex,
-            "effectiveGasPrice": receipt_info.effectiveGasPrice,
         }
+
+        if not is_optimism_gas_estimation:
+            gas_info = {
+                "effectiveGasPrice": receipt_info.effectiveGasPrice
+            }
+            receipt_info_json.update(gas_info)
+
         user_operation_receipt_rpc_json = {
             "userOpHash": user_operation_receipt_info.userOpHash,
             "entryPoint": self.entrypoint,
