@@ -29,7 +29,7 @@ class InitData:
     chain_id: int
     is_debug: bool
     is_unsafe: bool
-    is_gas_estimation_without_simulation: bool
+    is_optimism_gas_estimation: bool
     is_send_raw_transaction_conditional: bool
 
 
@@ -136,7 +136,7 @@ def initialize() -> InitData:
     )
 
     parser.add_argument(
-        "--gas_estimation_without_simulation",
+        "--optimism_gas_estimation",
         help="perform gas estimation without calling simulateValidation to be compatible with optimism rollup before the bedrock update",
         nargs="?",
         const=True,
@@ -179,7 +179,7 @@ def initialize() -> InitData:
         args.chain_id,
         args.debug,
         args.unsafe,
-        args.gas_estimation_without_simulation,
+        args.optimism_gas_estimation,
         args.send_raw_transaction_conditional
     )
 

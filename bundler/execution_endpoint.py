@@ -32,7 +32,7 @@ class ExecutionEndpoint(Endpoint):
     bundler_helper_byte_code: str
     chain_id: int
     is_unsafe: bool
-    is_gas_estimation_without_simulation: bool
+    is_optimism_gas_estimation: bool
     is_send_raw_transaction_conditional: bool
 
     def __init__(
@@ -44,7 +44,7 @@ class ExecutionEndpoint(Endpoint):
         bundler_helper_byte_code: str,
         chain_id: str,
         is_unsafe: bool,
-        is_gas_estimation_without_simulation: bool,
+        is_optimism_gas_estimation: bool,
         is_send_raw_transaction_conditional: bool
     ):
         super().__init__("bundler_endpoint")
@@ -55,7 +55,7 @@ class ExecutionEndpoint(Endpoint):
         self.bundler_helper_byte_code = bundler_helper_byte_code
         self.chain_id = chain_id
         self.is_unsafe = is_unsafe
-        self.is_gas_estimation_without_simulation = is_gas_estimation_without_simulation
+        self.is_optimism_gas_estimation = is_optimism_gas_estimation
         self.is_send_raw_transaction_conditional = is_send_raw_transaction_conditional
 
         self.reputation_manager = ReputationManager()
@@ -142,7 +142,7 @@ class ExecutionEndpoint(Endpoint):
         user_operation.max_fee_per_gas = 0
         user_operation.max_priority_fee_per_gas = 0
 
-        if self.is_gas_estimation_without_simulation:
+        if self.is_optimism_gas_estimation:
             pre_operation_gas = 60000
             deadline = 10000000000000000
         else:
