@@ -180,7 +180,7 @@ class UserOperationHandler:
         return user_operation_by_hash_json
 
     async def get_user_operation_receipt(
-        self, user_operation_hash: str
+        self, user_operation_hash: str, is_optimism_gas_estimation:bool
     ) -> tuple[ReceiptInfo, UserOperationReceiptInfo]:
         (
             log_object,
@@ -211,8 +211,10 @@ class UserOperationHandler:
             logsBloom=transaction["logsBloom"],
             # root=transaction['root'],
             status=transaction["status"],
-            effectiveGasPrice=transaction["effectiveGasPrice"],
+            effectiveGasPrice="0",
         )
+        if not is_optimism_gas_estimation:
+            receiptInfo.effectiveGasPrice = transaction["effectiveGasPrice"]
 
         logs = await self.get_logs(
             log_object.transactionHash, receiptInfo._from
@@ -238,7 +240,7 @@ class UserOperationHandler:
         (
             receipt_info,
             user_operation_receipt_info,
-        ) = await self.get_user_operation_receipt(user_operation_hash)
+        ) = await self.get_user_operation_receipt(user_operation_hash, is_optimism_gas_estimation)
 
         receipt_info_json = {
             "blockHash": receipt_info.blockHash,
