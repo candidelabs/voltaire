@@ -43,7 +43,7 @@ class MempoolManager:
     def clear_user_operations(self) -> None:
         self.senders.clear()
 
-    async def add_user_operation(self, user_operation: UserOperation) -> str:
+    async def add_user_operation(self, user_operation: UserOperation, is_unsafe: bool) -> str:
         self._verify_entities_reputation(
             user_operation.sender,
             user_operation.factory_address,
@@ -56,25 +56,26 @@ class MempoolManager:
             )
         )
 
-        (
-            return_info,
-            sender_stake_info,
-            factory_stake_info,
-            paymaster_stake_info,
-        ) = await self.validation_manager.simulate_validation_and_decode_result(
-            user_operation
-        )
+        if not is_unsafe:
+            (
+                return_info,
+                sender_stake_info,
+                factory_stake_info,
+                paymaster_stake_info,
+            ) = await self.validation_manager.simulate_validation_and_decode_result(
+                user_operation
+            )
 
-        await self.validation_manager.verify_gas_and_return_info(
-            user_operation, return_info
-        )
+            await self.validation_manager.verify_gas_and_return_info(
+                user_operation, return_info
+            )
 
-        await self.validation_manager.validate_user_operation(
-            user_operation,
-            sender_stake_info,
-            factory_stake_info,
-            paymaster_stake_info,
-        )
+            await self.validation_manager.validate_user_operation(
+                user_operation,
+                sender_stake_info,
+                factory_stake_info,
+                paymaster_stake_info,
+            )
 
         new_sender = None
         new_sender_address = user_operation.sender
@@ -108,31 +109,34 @@ class MempoolManager:
 
         return user_operation_hash
 
-    async def get_user_operations_to_bundle(self) -> list[UserOperation]:
+    async def get_user_operations_to_bundle(self, is_unsafe: bool) -> list[UserOperation]:
         bundle = []
         validation_operations = []
         for sender_address in list(self.senders):
             sender = self.senders[sender_address]
             if len(sender.user_operations) > 0:
                 user_operation = sender.user_operations.pop(0)
-                (
-                    _,
-                    sender_stake_info,
-                    factory_stake_info,
-                    paymaster_stake_info,
-                ) = await self.validation_manager.simulate_validation_and_decode_result(
-                    user_operation
-                )
-
-                validation_operations.append(
-                    self.validation_manager.validate_user_operation(
-                        user_operation,
+                if not is_unsafe:
+                    (
+                        _,
                         sender_stake_info,
                         factory_stake_info,
                         paymaster_stake_info,
+                    ) = await self.validation_manager.simulate_validation_and_decode_result(
+                        user_operation
                     )
-                )
-                bundle.append(user_operation)
+
+                    validation_operations.append(
+                        self.validation_manager.validate_user_operation(
+                            user_operation,
+                            sender_stake_info,
+                            factory_stake_info,
+                            paymaster_stake_info,
+                        )
+                    )
+                    bundle.append(user_operation)
+                else:
+                    bundle.append(user_operation)
                 if len(sender.user_operations) == 0:
                     del self.senders[sender.address]
 

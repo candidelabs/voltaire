@@ -104,7 +104,7 @@ class ExecutionEndpoint(Endpoint):
     async def execute_bundle_cron_job(self) -> None:
         while True:
             try:
-                await self.bundle_manager.send_next_bundle()
+                await self.bundle_manager.send_next_bundle(self.is_unsafe, self.is_optimism_gas_estimation)
             except (ValidationException, ExecutionException) as excp:
                 logging.exception(excp.message)
 
@@ -143,7 +143,7 @@ class ExecutionEndpoint(Endpoint):
         user_operation.max_priority_fee_per_gas = 0
 
         if self.is_optimism_gas_estimation:
-            pre_operation_gas = 60000
+            pre_operation_gas = 110000
             deadline = 10000000000000000
         else:
             (
@@ -182,14 +182,15 @@ class ExecutionEndpoint(Endpoint):
         self._verify_entrypoint(entrypoint_address)
 
         user_operation_hash = await self.mempool_manager.add_user_operation(
-            user_operation
+            user_operation,
+            self.is_unsafe
         )
         return RPCCallResponseEvent(user_operation_hash)
 
     async def _event_debug_bundler_sendBundleNow(
         self, rpc_request: RPCCallRequestEvent
     ) -> RPCCallResponseEvent:
-        res = await self.bundle_manager.send_next_bundle()
+        res = await self.bundle_manager.send_next_bundle(self.is_unsafe, self.is_optimism_gas_estimation)
 
         return RPCCallResponseEvent(res)
 

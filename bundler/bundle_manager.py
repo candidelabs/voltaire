@@ -45,19 +45,19 @@ class BundlerManager:
         self.chain_id = chain_id
         self.is_send_raw_transaction_conditional = is_send_raw_transaction_conditional
 
-    async def send_next_bundle(self) -> None:
+    async def send_next_bundle(self, is_unsafe: bool, is_optimism_gas_estimation: bool) -> None:
         user_operations = (
-            await self.mempool_manager.get_user_operations_to_bundle()
+            await self.mempool_manager.get_user_operations_to_bundle(is_unsafe)
         )
         numbder_of_user_operations = len(user_operations)
 
         if numbder_of_user_operations > 0:
-            await self.send_bundle(user_operations)
+            await self.send_bundle(user_operations, is_optimism_gas_estimation)
             logging.info(
                 f"Sending bundle with {len(user_operations)} user operations"
             )
 
-    async def send_bundle(self, user_operations: list[UserOperation]) -> None:
+    async def send_bundle(self, user_operations: list[UserOperation], is_optimism_gas_estimation: bool) -> None:
         user_operations_list = []
         for user_operation in user_operations:
             user_operations_list.append(user_operation.to_list())
@@ -103,10 +103,18 @@ class BundlerManager:
             "to": self.entrypoint,
             "nonce": nonce,
             "gas": int(gas_estimation, 16),
-            "maxFeePerGas": gas_price,
-            "maxPriorityFeePerGas": gas_price,
             "data": call_data,
         }
+
+        if not is_optimism_gas_estimation:
+            txnDict.update({
+                "maxFeePerGas": gas_price,
+                "maxPriorityFeePerGas": gas_price,
+            })
+        else:
+            txnDict.update({
+                "gasPrice": gas_price,
+            })
 
         sign_store_txn = Account.sign_transaction(
             txnDict, private_key=self.bundler_private_key
@@ -159,7 +167,7 @@ class BundlerManager:
                 del user_operations[operation_index]
 
                 if len(user_operations) > 0:
-                    self.send_bundle(user_operations)
+                    self.send_bundle(user_operations, is_optimism_gas_estimation)
             else:
                 logging.info("Failed to send bundle.")
                 for user_operation in user_operations:
