@@ -22,7 +22,7 @@ class InitData:
     entrypoint: list()
     rpc_url: str
     rpc_port: int
-    geth_url: str
+    ethereum_node_url: str
     bundler_pk: str
     bundler_address: str
     bundler_helper_byte_code: str
@@ -96,7 +96,7 @@ def initialize() -> InitData:
     )
 
     parser.add_argument(
-        "--geth_url",
+        "--ethereum_node_url",
         type=str,
         help="Geth Client Http Url - defaults to http://0.0.0.0:8545",
         nargs="?",
@@ -172,7 +172,7 @@ def initialize() -> InitData:
         args.entrypoint,
         args.rpc_url,
         args.rpc_port,
-        args.geth_url,
+        args.ethereum_node_url,
         bundler_pk,
         bundler_address,
         bundler_helper_byte_code,

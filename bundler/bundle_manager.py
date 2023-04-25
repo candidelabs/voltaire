@@ -13,7 +13,7 @@ from .validation_manager import ValidationManager
 
 
 class BundlerManager:
-    geth_rpc_url: str
+    ethereum_node_url: str
     bundler_private_key: str
     bundler_address: str
     entrypoint: str
@@ -28,7 +28,7 @@ class BundlerManager:
         mempool_manager: MempoolManager,
         user_operation_handler: UserOperationHandler,
         reputation_manager: ReputationManager,
-        geth_rpc_url: str,
+        ethereum_node_url: str,
         bundler_private_key: str,
         bundler_address: str,
         entrypoint: str,
@@ -38,7 +38,7 @@ class BundlerManager:
         self.mempool_manager = mempool_manager
         self.user_operation_handler = user_operation_handler
         self.reputation_manager = reputation_manager
-        self.geth_rpc_url = geth_rpc_url
+        self.ethereum_node_url = ethereum_node_url
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
@@ -82,11 +82,11 @@ class BundlerManager:
         )
 
         gas_price_op = send_rpc_request_to_eth_client(
-            self.geth_rpc_url, "eth_gasPrice"
+            self.ethereum_node_url, "eth_gasPrice"
         )
 
         nonce_op = send_rpc_request_to_eth_client(
-            self.geth_rpc_url,
+            self.ethereum_node_url,
             "eth_getTransactionCount",
             [self.bundler_address, "latest"],
         )
@@ -116,7 +116,7 @@ class BundlerManager:
             rpc_call = "eth_sendRawTransactionConditional"
 
         result = await send_rpc_request_to_eth_client(
-            self.geth_rpc_url,
+            self.ethereum_node_url,
             rpc_call,
             [sign_store_txn.rawTransaction.hex()],
         )

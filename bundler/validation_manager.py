@@ -21,7 +21,7 @@ from utils.eth_client_utils import (
 
 class ValidationManager:
     user_operation_handler: UserOperationHandler
-    geth_rpc_url: str
+    ethereum_node_url: str
     bundler_private_key: str
     bundler_address: str
     entrypoint: str
@@ -33,7 +33,7 @@ class ValidationManager:
     def __init__(
         self,
         user_operation_handler: UserOperationHandler,
-        geth_rpc_url: str,
+        ethereum_node_url: str,
         bundler_private_key: str,
         bundler_address: str,
         entrypoint: str,
@@ -41,7 +41,7 @@ class ValidationManager:
         is_unsafe: bool,
     ):
         self.user_operation_handler = user_operation_handler
-        self.geth_rpc_url = geth_rpc_url
+        self.ethereum_node_url = ethereum_node_url
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
@@ -411,7 +411,7 @@ class ValidationManager:
         ]
 
         result = await send_rpc_request_to_eth_client(
-            self.geth_rpc_url, "eth_call", params
+            self.ethereum_node_url, "eth_call", params
         )
         if (
             "error" not in result
@@ -475,7 +475,7 @@ class ValidationManager:
         ]
 
         res = await send_rpc_request_to_eth_client(
-            self.geth_rpc_url, "debug_traceCall", params
+            self.ethereum_node_url, "debug_traceCall", params
         )
         debug_data = res["result"]
         factory_data = DebugEntityData(
@@ -546,7 +546,7 @@ class ValidationManager:
             "latest",
         ]
         result = await send_rpc_request_to_eth_client(
-            self.geth_rpc_url, "eth_call", params
+            self.ethereum_node_url, "eth_call", params
         )
         if "error" not in result:
             raise ValueError("BundlerHelper should revert")
@@ -709,6 +709,6 @@ class ValidationManager:
         
     async def getBaseFee(self):
         res = await send_rpc_request_to_eth_client(
-                self.geth_rpc_url, "eth_getBlockByNumber", ['pending', False]
+                self.ethereum_node_url, "eth_getBlockByNumber", ['pending', False]
             )
         return res["result"]["baseFeePerGas"]

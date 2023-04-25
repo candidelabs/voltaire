@@ -18,19 +18,19 @@ from user_operation.models import (
 
 
 class UserOperationHandler:
-    geth_rpc_url: str
+    ethereum_node_url: str
     bundler_private_key: str
     bundler_address: str
     entrypoint: str
 
     def __init__(
         self,
-        geth_rpc_url,
+        ethereum_node_url,
         bundler_private_key,
         bundler_address,
         entrypoint,
     ):
-        self.geth_rpc_url = geth_rpc_url
+        self.ethereum_node_url = ethereum_node_url
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
@@ -77,7 +77,7 @@ class UserOperationHandler:
         params = [{"from": _from, "to": to, "data": call_data}]
 
         result = await send_rpc_request_to_eth_client(
-            self.geth_rpc_url, "eth_estimateGas", params
+            self.ethereum_node_url, "eth_estimateGas", params
         )
         if "error" in result:
             errorMessage = result["error"]["message"]
@@ -289,7 +289,7 @@ class UserOperationHandler:
         ]
 
         res = await send_rpc_request_to_eth_client(
-            self.geth_rpc_url, "eth_getLogs", params
+            self.ethereum_node_url, "eth_getLogs", params
         )
 
         if len(res["result"]) < 1:
@@ -341,7 +341,7 @@ class UserOperationHandler:
     async def get_transaction_receipt(self, transaction_hash: str) -> dict:
         params = [transaction_hash]
         res = await send_rpc_request_to_eth_client(
-            self.geth_rpc_url, "eth_getTransactionReceipt", params
+            self.ethereum_node_url, "eth_getTransactionReceipt", params
         )
         return res["result"]
 
@@ -355,14 +355,14 @@ class UserOperationHandler:
         ]
 
         res = await send_rpc_request_to_eth_client(
-            self.geth_rpc_url, "eth_getLogs", params
+            self.ethereum_node_url, "eth_getLogs", params
         )
         return res["result"]
 
     async def get_transaction_by_hash(self, transaction_hash) -> dict:
         params = [transaction_hash]
         res = await send_rpc_request_to_eth_client(
-            self.geth_rpc_url, "eth_getTransactionByHash", params
+            self.ethereum_node_url, "eth_getTransactionByHash", params
         )
         return res["result"]
 
@@ -388,7 +388,7 @@ class UserOperationHandler:
         ]
 
         result = await send_rpc_request_to_eth_client(
-            self.geth_rpc_url, "eth_call", params
+            self.ethereum_node_url, "eth_call", params
         )
         return result["result"]
 

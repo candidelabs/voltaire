@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 
 async def send_rpc_request_to_eth_client(
-    geth_rpc_url, method, params=None
+    ethereum_node_url, method, params=None
 ) -> None:
     json_request = {
         "jsonrpc": "2.0",
@@ -17,7 +17,7 @@ async def send_rpc_request_to_eth_client(
         json_request["params"] = params
     async with ClientSession() as session:
         async with session.post(
-            geth_rpc_url,
+            ethereum_node_url,
             data=json.dumps(json_request),
             headers={"content-type": "application/json"},
         ) as response:

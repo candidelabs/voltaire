@@ -21,11 +21,11 @@ class Sender:
         new_user_operation: UserOperation,
         entrypoint_address: str,
         bundler_address: str,
-        geth_rpc_url: str,
+        ethereum_node_url: str,
     ):
         sender_operations_num = len(self.user_operations)
         is_staked = await self._check_if_stacked(
-            entrypoint_address, bundler_address, geth_rpc_url
+            entrypoint_address, bundler_address, ethereum_node_url
         )
 
         if sender_operations_num == 0:
@@ -109,7 +109,7 @@ class Sender:
         return None
 
     async def _check_if_stacked(
-        self, entrypoint_address: str, bundler_address: str, geth_rpc_url: str
+        self, entrypoint_address: str, bundler_address: str, ethereum_node_url: str
     ) -> bool:
         function_selector = "0x5287ce12"  # getDepositInfo
         params = encode(["address"], [self.address])
@@ -126,7 +126,7 @@ class Sender:
         ]
 
         response = await send_rpc_request_to_eth_client(
-            geth_rpc_url, "eth_call", params
+            ethereum_node_url, "eth_call", params
         )
         result = response["result"]
         deposit_info: DepositInfo = Sender._decode_deposit_info(result[2:])

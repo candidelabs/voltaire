@@ -24,7 +24,7 @@ async def main() -> None:
     # loop.set_debug(True)
     async with asyncio.TaskGroup() as task_group:
         execution_endpoint: ExecutionEndpoint = ExecutionEndpoint(
-            initData.geth_url,
+            initData.ethereum_node_url,
             initData.bundler_pk,
             initData.bundler_address,
             initData.entrypoint,

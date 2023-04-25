@@ -13,7 +13,7 @@ class MempoolManager:
     validation_manager: ValidationManager
     user_operation_handler: UserOperationHandler
     reputation_manager: ReputationManager
-    geth_rpc_url: str
+    ethereum_node_url: str
     bundler_private_key: str
     bundler_address: str
     entrypoint: str
@@ -25,7 +25,7 @@ class MempoolManager:
         validation_manager: ValidationManager,
         user_operation_handler: UserOperationHandler,
         reputation_manager: ReputationManager,
-        geth_rpc_url: str,
+        ethereum_node_url: str,
         bundler_private_key: str,
         bundler_address: str,
         entrypoint: str,
@@ -33,7 +33,7 @@ class MempoolManager:
         self.validation_manager = validation_manager
         self.user_operation_handler = user_operation_handler
         self.reputation_manager = reputation_manager
-        self.geth_rpc_url = geth_rpc_url
+        self.ethereum_node_url = ethereum_node_url
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
@@ -88,7 +88,7 @@ class MempoolManager:
             user_operation,
             self.entrypoint,
             self.bundler_address,
-            self.geth_rpc_url,
+            self.ethereum_node_url,
         )
         self.update_all_seen_status(
             user_operation.sender,

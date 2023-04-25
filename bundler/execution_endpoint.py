@@ -20,7 +20,7 @@ BUNDLE_INTERVAL = 10  # in seconds
 
 
 class ExecutionEndpoint(Endpoint):
-    geth_rpc_url: str
+    ethereum_node_url: str
     bundler_private_key: str
     bundler_address: str
     entrypoint: str
@@ -37,7 +37,7 @@ class ExecutionEndpoint(Endpoint):
 
     def __init__(
         self,
-        geth_rpc_url: str,
+        ethereum_node_url: str,
         bundler_private_key: str,
         bundler_address: str,
         entrypoint: str,
@@ -48,7 +48,7 @@ class ExecutionEndpoint(Endpoint):
         is_send_raw_transaction_conditional: bool
     ):
         super().__init__("bundler_endpoint")
-        self.geth_rpc_url = geth_rpc_url
+        self.ethereum_node_url = ethereum_node_url
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
@@ -61,7 +61,7 @@ class ExecutionEndpoint(Endpoint):
         self.reputation_manager = ReputationManager()
 
         self.user_operation_handler = UserOperationHandler(
-            geth_rpc_url,
+            ethereum_node_url,
             bundler_private_key,
             bundler_address,
             entrypoint,
@@ -69,7 +69,7 @@ class ExecutionEndpoint(Endpoint):
 
         self.validation_manager = ValidationManager(
             self.user_operation_handler,
-            geth_rpc_url,
+            ethereum_node_url,
             bundler_private_key,
             bundler_address,
             entrypoint,
@@ -81,7 +81,7 @@ class ExecutionEndpoint(Endpoint):
             self.validation_manager,
             self.user_operation_handler,
             self.reputation_manager,
-            geth_rpc_url,
+            ethereum_node_url,
             bundler_private_key,
             bundler_address,
             entrypoint,
@@ -91,7 +91,7 @@ class ExecutionEndpoint(Endpoint):
             self.mempool_manager,
             self.user_operation_handler,
             self.reputation_manager,
-            geth_rpc_url,
+            ethereum_node_url,
             bundler_private_key,
             bundler_address,
             entrypoint,
