@@ -65,6 +65,7 @@ class ExecutionEndpoint(Endpoint):
             bundler_private_key,
             bundler_address,
             entrypoint,
+            is_optimism_gas_estimation
         )
 
         self.validation_manager = ValidationManager(
@@ -85,6 +86,7 @@ class ExecutionEndpoint(Endpoint):
             bundler_private_key,
             bundler_address,
             entrypoint,
+            is_unsafe
         )
 
         self.bundle_manager = BundlerManager(
@@ -96,6 +98,7 @@ class ExecutionEndpoint(Endpoint):
             bundler_address,
             entrypoint,
             chain_id,
+            is_optimism_gas_estimation,
             is_send_raw_transaction_conditional
         )
 
@@ -104,7 +107,7 @@ class ExecutionEndpoint(Endpoint):
     async def execute_bundle_cron_job(self) -> None:
         while True:
             try:
-                await self.bundle_manager.send_next_bundle(self.is_unsafe, self.is_optimism_gas_estimation)
+                await self.bundle_manager.send_next_bundle()
             except (ValidationException, ExecutionException) as excp:
                 logging.exception(excp.message)
 
@@ -143,7 +146,7 @@ class ExecutionEndpoint(Endpoint):
         user_operation.max_priority_fee_per_gas = 0
 
         if self.is_optimism_gas_estimation:
-            pre_operation_gas = 110000
+            pre_operation_gas = 80000
             deadline = 10000000000000000
         else:
             (
@@ -183,14 +186,13 @@ class ExecutionEndpoint(Endpoint):
 
         user_operation_hash = await self.mempool_manager.add_user_operation(
             user_operation,
-            self.is_unsafe
         )
         return RPCCallResponseEvent(user_operation_hash)
 
     async def _event_debug_bundler_sendBundleNow(
         self, rpc_request: RPCCallRequestEvent
     ) -> RPCCallResponseEvent:
-        res = await self.bundle_manager.send_next_bundle(self.is_unsafe, self.is_optimism_gas_estimation)
+        res = await self.bundle_manager.send_next_bundle()
 
         return RPCCallResponseEvent(res)
 
@@ -234,7 +236,7 @@ class ExecutionEndpoint(Endpoint):
 
         user_operation_receipt_info_json = (
             await self.user_operation_handler.get_user_operation_receipt_rpc(
-                user_operation_hash, self.is_optimism_gas_estimation
+                user_operation_hash
             )
         )
 

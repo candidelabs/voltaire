@@ -22,6 +22,7 @@ class UserOperationHandler:
     bundler_private_key: str
     bundler_address: str
     entrypoint: str
+    is_optimism_gas_estimation: bool
 
     def __init__(
         self,
@@ -29,11 +30,13 @@ class UserOperationHandler:
         bundler_private_key,
         bundler_address,
         entrypoint,
+        is_optimism_gas_estimation,
     ):
         self.ethereum_node_url = ethereum_node_url
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
+        self.is_optimism_gas_estimation = is_optimism_gas_estimation
 
     async def estimate_user_operation_gas(self, user_operation: UserOperation):
         tasks = await asyncio.gather(
@@ -180,7 +183,7 @@ class UserOperationHandler:
         return user_operation_by_hash_json
 
     async def get_user_operation_receipt(
-        self, user_operation_hash: str, is_optimism_gas_estimation:bool
+        self, user_operation_hash: str
     ) -> tuple[ReceiptInfo, UserOperationReceiptInfo]:
         (
             log_object,
@@ -213,7 +216,7 @@ class UserOperationHandler:
             status=transaction["status"],
             effectiveGasPrice="0",
         )
-        if not is_optimism_gas_estimation:
+        if not self.is_optimism_gas_estimation:
             receiptInfo.effectiveGasPrice = transaction["effectiveGasPrice"]
 
         logs = await self.get_logs(
@@ -235,12 +238,12 @@ class UserOperationHandler:
         return receiptInfo, userOperationReceiptInfo
 
     async def get_user_operation_receipt_rpc(
-        self, user_operation_hash: str, is_optimism_gas_estimation:bool
+        self, user_operation_hash: str
     ) -> dict:
         (
             receipt_info,
             user_operation_receipt_info,
-        ) = await self.get_user_operation_receipt(user_operation_hash, is_optimism_gas_estimation)
+        ) = await self.get_user_operation_receipt(user_operation_hash)
 
         receipt_info_json = {
             "blockHash": receipt_info.blockHash,
@@ -254,7 +257,7 @@ class UserOperationHandler:
             "transactionIndex": receipt_info.transactionIndex,
         }
 
-        if not is_optimism_gas_estimation:
+        if not self.is_optimism_gas_estimation:
             gas_info = {
                 "effectiveGasPrice": receipt_info.effectiveGasPrice
             }

@@ -18,6 +18,7 @@ class MempoolManager:
     bundler_address: str
     entrypoint: str
     senders: dict[str, Sender]
+    is_unsafe: bool
     entity_no_of_ops_in_mempool: dict[str, int]  # factory and paymaster
 
     def __init__(
@@ -29,6 +30,7 @@ class MempoolManager:
         bundler_private_key: str,
         bundler_address: str,
         entrypoint: str,
+        is_unsafe: bool,
     ):
         self.validation_manager = validation_manager
         self.user_operation_handler = user_operation_handler
@@ -37,13 +39,14 @@ class MempoolManager:
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
+        self.is_unsafe = is_unsafe
         self.senders = {}
         self.entity_no_of_ops_in_mempool = {}
 
     def clear_user_operations(self) -> None:
         self.senders.clear()
 
-    async def add_user_operation(self, user_operation: UserOperation, is_unsafe: bool) -> str:
+    async def add_user_operation(self, user_operation: UserOperation) -> str:
         self._verify_entities_reputation(
             user_operation.sender,
             user_operation.factory_address,
@@ -56,7 +59,7 @@ class MempoolManager:
             )
         )
 
-        if not is_unsafe:
+        if not self.is_unsafe:
             (
                 return_info,
                 sender_stake_info,
@@ -109,14 +112,14 @@ class MempoolManager:
 
         return user_operation_hash
 
-    async def get_user_operations_to_bundle(self, is_unsafe: bool) -> list[UserOperation]:
+    async def get_user_operations_to_bundle(self) -> list[UserOperation]:
         bundle = []
         validation_operations = []
         for sender_address in list(self.senders):
             sender = self.senders[sender_address]
             if len(sender.user_operations) > 0:
                 user_operation = sender.user_operations.pop(0)
-                if not is_unsafe:
+                if not self.is_unsafe:
                     (
                         _,
                         sender_stake_info,
