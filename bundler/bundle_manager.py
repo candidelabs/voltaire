@@ -21,6 +21,7 @@ class BundlerManager:
     user_operation_handler: UserOperationHandler
     reputation_manager: ReputationManager
     chain_id: int
+    is_optimism_gas_estimation: bool
     is_send_raw_transaction_conditional: bool
 
     def __init__(
@@ -33,6 +34,7 @@ class BundlerManager:
         bundler_address: str,
         entrypoint: str,
         chain_id: str,
+        is_optimism_gas_estimation: bool,
         is_send_raw_transaction_conditional: bool
     ):
         self.mempool_manager = mempool_manager
@@ -43,21 +45,22 @@ class BundlerManager:
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
         self.chain_id = chain_id
+        self.is_optimism_gas_estimation = is_optimism_gas_estimation
         self.is_send_raw_transaction_conditional = is_send_raw_transaction_conditional
 
-    async def send_next_bundle(self, is_unsafe: bool, is_optimism_gas_estimation: bool) -> None:
+    async def send_next_bundle(self) -> None:
         user_operations = (
-            await self.mempool_manager.get_user_operations_to_bundle(is_unsafe)
+            await self.mempool_manager.get_user_operations_to_bundle()
         )
         numbder_of_user_operations = len(user_operations)
 
         if numbder_of_user_operations > 0:
-            await self.send_bundle(user_operations, is_optimism_gas_estimation)
+            await self.send_bundle(user_operations)
             logging.info(
                 f"Sending bundle with {len(user_operations)} user operations"
             )
 
-    async def send_bundle(self, user_operations: list[UserOperation], is_optimism_gas_estimation: bool) -> None:
+    async def send_bundle(self, user_operations: list[UserOperation]) -> None:
         user_operations_list = []
         for user_operation in user_operations:
             user_operations_list.append(user_operation.to_list())
@@ -106,7 +109,7 @@ class BundlerManager:
             "data": call_data,
         }
 
-        if not is_optimism_gas_estimation:
+        if not self.is_optimism_gas_estimation:
             txnDict.update({
                 "maxFeePerGas": gas_price,
                 "maxPriorityFeePerGas": gas_price,
@@ -167,7 +170,7 @@ class BundlerManager:
                 del user_operations[operation_index]
 
                 if len(user_operations) > 0:
-                    self.send_bundle(user_operations, is_optimism_gas_estimation)
+                    self.send_bundle(user_operations)
             else:
                 logging.info("Failed to send bundle.")
                 for user_operation in user_operations:
