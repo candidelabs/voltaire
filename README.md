@@ -28,7 +28,7 @@
 Deploy Voltaire using the latest docker image
 
 ```
-docker run --rm -ti sherifahmed990/voltaire-bundler:latest --entrypoint $ENTRYPOINT --bundler_secret $BUNDLER_SECRET --rpc_url $RPC_URL --ethereum_node_url $ethereum_node_url --chain_id $CHAIN_ID --verbose
+docker run --net=host --rm -ti sherifahmed990/voltaire-bundler:latest --entrypoint $ENTRYPOINT --bundler_secret $BUNDLER_SECRET --rpc_url $RPC_URL --rpc_port $PORT --ethereum_node_url $ETHEREUM_NODE_URL --chain_id $CHAIN_ID --verbose
 ```
 
 # Development
@@ -36,16 +36,6 @@ docker run --rm -ti sherifahmed990/voltaire-bundler:latest --entrypoint $ENTRYPO
 The information provided is only a rough estimate based on the current implementation. We plan on publishing more documentation for different developer audiences as we move forward.
 
 ## Ubuntu: Get started testing the bundler in 5 minutes 
-
-Voltaire requires `Python3.11` or above well as some tools to compile its dependencies. On Ubuntu, the `python3.11-dev` & `libpython3.11-dev` package contains everything we need
-
-```
-apt-get install python3.11-dev
-```
-
-```
-apt-get install libpython3.11-dev
-```
 
 ### Install Poetry
 ```
