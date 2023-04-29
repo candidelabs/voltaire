@@ -16,9 +16,6 @@ from .bundle_manager import BundlerManager
 from .validation_manager import ValidationManager
 from .reputation_manager import ReputationManager
 
-BUNDLE_INTERVAL = 10  # in seconds
-
-
 class ExecutionEndpoint(Endpoint):
     ethereum_node_url: str
     bundler_private_key: str
@@ -34,6 +31,7 @@ class ExecutionEndpoint(Endpoint):
     is_unsafe: bool
     is_optimism_gas_estimation: bool
     is_send_raw_transaction_conditional: bool
+    bundle_interval:int
 
     def __init__(
         self,
@@ -45,7 +43,8 @@ class ExecutionEndpoint(Endpoint):
         chain_id: str,
         is_unsafe: bool,
         is_optimism_gas_estimation: bool,
-        is_send_raw_transaction_conditional: bool
+        is_send_raw_transaction_conditional: bool,
+        bundle_interval:int
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_url = ethereum_node_url
@@ -57,6 +56,7 @@ class ExecutionEndpoint(Endpoint):
         self.is_unsafe = is_unsafe
         self.is_optimism_gas_estimation = is_optimism_gas_estimation
         self.is_send_raw_transaction_conditional = is_send_raw_transaction_conditional
+        self.bundle_interval = bundle_interval
 
         self.reputation_manager = ReputationManager()
 
@@ -101,8 +101,8 @@ class ExecutionEndpoint(Endpoint):
             is_optimism_gas_estimation,
             is_send_raw_transaction_conditional
         )
-
-        asyncio.ensure_future(self.execute_bundle_cron_job())
+        if self.bundle_interval > 0:
+            asyncio.ensure_future(self.execute_bundle_cron_job())
 
     async def execute_bundle_cron_job(self) -> None:
         while True:
@@ -111,7 +111,7 @@ class ExecutionEndpoint(Endpoint):
             except (ValidationException, ExecutionException) as excp:
                 logging.exception(excp.message)
 
-            await asyncio.sleep(BUNDLE_INTERVAL)
+            await asyncio.sleep(self.bundle_interval)
 
     async def start_execution_endpoint(self) -> None:
         self.add_events_and_response_functions_by_prefix(

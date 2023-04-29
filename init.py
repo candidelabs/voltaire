@@ -31,6 +31,7 @@ class InitData:
     is_unsafe: bool
     is_optimism_gas_estimation: bool
     is_send_raw_transaction_conditional: bool
+    bundle_interval:int
 
 
 def address(ep):
@@ -151,6 +152,15 @@ def initialize() -> InitData:
         default=False,
     )
 
+    parser.add_argument(
+        "--bundle_interval",
+        type=int,
+        help="set the bundle interval in seconds for the auto bundle mode - set to zero for manual mode",
+        nargs="?",
+        const=1,
+        default=1,
+    )
+
     args = parser.parse_args()
 
     bundler_address="" 
@@ -180,7 +190,8 @@ def initialize() -> InitData:
         args.debug,
         args.unsafe,
         args.optimism_gas_estimation,
-        args.send_raw_transaction_conditional
+        args.send_raw_transaction_conditional,
+        args.bundle_interval
     )
 
     logging.basicConfig(

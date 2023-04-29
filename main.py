@@ -32,7 +32,8 @@ async def main() -> None:
             initData.chain_id,
             initData.is_unsafe,
             initData.is_optimism_gas_estimation,
-            initData.is_send_raw_transaction_conditional
+            initData.is_send_raw_transaction_conditional,
+            initData.bundle_interval
         )
         task_group.create_task(execution_endpoint.start_execution_endpoint())
         task_group.create_task(
