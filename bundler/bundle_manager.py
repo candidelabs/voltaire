@@ -172,13 +172,8 @@ class BundlerManager:
                 if len(user_operations) > 0:
                     self.send_bundle(user_operations)
             else:
-                logging.info("Failed to send bundle.")
-                for user_operation in user_operations:
-                    sender = self.mempool_manager.senders[
-                        user_operation.sender
-                    ]
-                    sender.user_operations.append(user_operation)
-
+                logging.info("Failed to send bundle. Dropping all user operations")
+            
         else:
             transaction_hash = result["result"]
             logging.info(
