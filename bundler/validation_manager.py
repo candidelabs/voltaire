@@ -345,12 +345,13 @@ class ValidationManager:
                 VALIDATION_RESULT_ABI, bytes.fromhex(solidity_error_params)
             )
         except Exception as err:
+            operation_index, reason = ValidationManager.decode_FailedOp_event(solidity_error_params)
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
-                bytearray.fromhex(solidity_error_params).decode(),
+                reason,
                 "",
             )
-
+        # print(str(validation_result_decoded))
         return_info_arr = validation_result_decoded[0]
         return_info = ReturnInfo(
             preOpGas=return_info_arr[0],
@@ -427,7 +428,6 @@ class ValidationManager:
                     )
     
         error_data = result["error"]["data"]
-
         solidity_error_selector = str(error_data[:10])
         solidity_error_params = error_data[10:]
 

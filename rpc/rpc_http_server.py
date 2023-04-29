@@ -38,7 +38,10 @@ async def _handle_rpc_request(
         error_code = error.exception_code.value
         error_message = str(error.message)
         revert_message = bytes.fromhex(error.data[-64:]).decode("ascii")
-        return Error(error_code, error_message + " " + revert_message)
+        if revert_message == "":
+            return Error(error_code, error_message)
+        else:
+            return Error(error_code, error_message + " " + revert_message)
     else:
         return Success(resp.payload)
 

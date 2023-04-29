@@ -84,8 +84,10 @@ class UserOperationHandler:
         )
         if "error" in result:
             errorMessage = result["error"]["message"]
-            errorData = result["error"]["data"]
-            errorParams = errorData[10:]
+            errorParams = ""
+            if "data" in result["error"]:
+                errorData = result["error"]["data"]
+                errorParams = errorData[10:]
             raise ExecutionException(
                 ExecutionExceptionCode.EXECUTION_REVERTED,
                 errorMessage,
