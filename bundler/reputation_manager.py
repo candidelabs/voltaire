@@ -31,6 +31,14 @@ class ReputationEntry:
         self.ops_seen = ops_seen
         self.ops_included = ops_included
         self.status = status
+    
+    def get_reputation_entry_json(self):
+        return {
+            "ops_seen": self.ops_seen,
+            "ops_included": self.ops_included,
+            "status": self.status.value
+        }
+
 
 
 class ReputationManager:
@@ -111,3 +119,16 @@ class ReputationManager:
             return ReputationStatus.THROTTLED
         else:
             return ReputationStatus.BANNED
+        
+    def set_reputation(
+        self, entitiy:str, ops_seen: int, ops_included: int, status: int
+        ):
+        reputation_entry = ReputationEntry(ops_seen, ops_included, status)
+        self.entities_reputation[entitiy] = reputation_entry
+
+    def get_entities_reputation_json(self):
+        entities_reputation_json = {}
+        for entity_address in self.entities_reputation.keys():
+            entities_reputation_json[entity_address] = self.entities_reputation[entity_address].get_reputation_entry_json()
+
+        return entities_reputation_json

@@ -163,6 +163,33 @@ async def debug_bundler_dumpMempool(entrypoint) -> Result:
     )
     return result
 
+@method
+async def debug_bundler_setReputation(
+    entitiy:str,
+    ops_seen: int,
+    ops_included: int,
+    status: int) -> Result:
+    result = await _handle_rpc_request(
+        endpoint_id="bundler_endpoint",
+        request_type="debug_bundler_setReputation",
+        request_arguments=[entitiy,ops_seen, ops_included, status],
+    )
+    return result
+
+@method
+async def debug_bundler_dumpReputation(entrypoint) -> Result:
+    try:
+        verify_and_get_address(entrypoint)
+    except ValidationException as exp:
+        return InvalidParams(exp.message)
+
+    result = await _handle_rpc_request(
+        endpoint_id="bundler_endpoint",
+        request_type="debug_bundler_dumpReputation",
+        request_arguments=[entrypoint],
+    )
+    return result
+
 
 async def handle(is_debug, request):
     res = await request.text()
@@ -179,7 +206,9 @@ async def handle(is_debug, request):
         debug_methods={
             "debug_bundler_sendBundleNow": debug_bundler_sendBundleNow,
             "debug_bundler_clearState": debug_bundler_clearState,
-            "debug_bundler_dumpMempool": debug_bundler_dumpMempool
+            "debug_bundler_dumpMempool": debug_bundler_dumpMempool,
+            "debug_bundler_setReputation": debug_bundler_clearState,
+            "debug_bundler_dumpReputation": debug_bundler_dumpReputation
         }
         methods.update(debug_methods)
 

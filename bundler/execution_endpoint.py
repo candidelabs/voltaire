@@ -189,6 +189,32 @@ class ExecutionEndpoint(Endpoint):
         )
         return RPCCallResponseEvent(user_operation_hash)
 
+    async def _event_rpc_getUserOperationByHash(
+        self, rpc_request: RPCCallRequestEvent
+    ) -> RPCCallResponseEvent:
+        user_operation_hash = rpc_request.req_arguments[0]
+
+        user_operation_by_hash_json = (
+            await self.user_operation_handler.get_user_operation_by_hash_rpc(
+                user_operation_hash
+            )
+        )
+
+        return RPCCallResponseEvent(user_operation_by_hash_json)
+
+    async def _event_rpc_getUserOperationReceipt(
+        self, rpc_request: RPCCallRequestEvent
+    ) -> RPCCallResponseEvent:
+        user_operation_hash = rpc_request.req_arguments[0]
+
+        user_operation_receipt_info_json = (
+            await self.user_operation_handler.get_user_operation_receipt_rpc(
+                user_operation_hash
+            )
+        )
+
+        return RPCCallResponseEvent(user_operation_receipt_info_json)
+    
     async def _event_debug_bundler_sendBundleNow(
         self, rpc_request: RPCCallRequestEvent
     ) -> RPCCallResponseEvent:
@@ -216,31 +242,27 @@ class ExecutionEndpoint(Endpoint):
         ]
         return RPCCallResponseEvent(user_operations_json)
 
-    async def _event_rpc_getUserOperationByHash(
+    async def _event_debug_bundler_setReputation(
         self, rpc_request: RPCCallRequestEvent
     ) -> RPCCallResponseEvent:
-        user_operation_hash = rpc_request.req_arguments[0]
+        entitiy = rpc_request.req_arguments[0]
+        ops_seen = rpc_request.req_arguments[0]
+        ops_included = rpc_request.req_arguments[0]
+        status = rpc_request.req_arguments[0]
 
-        user_operation_by_hash_json = (
-            await self.user_operation_handler.get_user_operation_by_hash_rpc(
-                user_operation_hash
-            )
-        )
+        self.reputation_manager.set_reputation(
+            entitiy, ops_seen, ops_included, status)
 
-        return RPCCallResponseEvent(user_operation_by_hash_json)
-
-    async def _event_rpc_getUserOperationReceipt(
+        return RPCCallResponseEvent("ok")
+    
+    async def  _event_debug_bundler_dumpReputation(
         self, rpc_request: RPCCallRequestEvent
     ) -> RPCCallResponseEvent:
-        user_operation_hash = rpc_request.req_arguments[0]
+        entrypoint_address = rpc_request.req_arguments[0]
 
-        user_operation_receipt_info_json = (
-            await self.user_operation_handler.get_user_operation_receipt_rpc(
-                user_operation_hash
-            )
-        )
+        entities_reputation_json = self.reputation_manager.get_entities_reputation_json()
+        return RPCCallResponseEvent(entities_reputation_json)
 
-        return RPCCallResponseEvent(user_operation_receipt_info_json)
     
     def _verify_entrypoint(self, entrypoint):
         if entrypoint != self.entrypoint:
