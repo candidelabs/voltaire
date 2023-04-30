@@ -463,12 +463,17 @@ class ValidationManager:
 
         call_data = function_selector + params.hex()
 
+        gas_price = await send_rpc_request_to_eth_client(
+            self.ethereum_node_url, "eth_gasPrice"
+        )
+
         params = [
             {
                 "from": self.bundler_address,
                 "to": self.entrypoint,
                 "data": call_data,
                 "gasLimit": simultion_gas,
+                "gasPrice": gas_price["result"],
             },
             "latest",
             {"tracer": self.bundler_collector_tracer},
