@@ -714,6 +714,6 @@ class ValidationManager:
         
     async def getBaseFee(self):
         res = await send_rpc_request_to_eth_client(
-                self.ethereum_node_url, "eth_getBlockByNumber", ['pending', False]
+                self.ethereum_node_url, "eth_getBlockByNumber", ['latest', False]
             )
         return res["result"]["baseFeePerGas"]
