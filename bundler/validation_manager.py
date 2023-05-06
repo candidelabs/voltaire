@@ -660,7 +660,7 @@ class ValidationManager:
         if sigFailed:
             raise ValidationException(
                 ValidationExceptionCode.InvalidSignature,
-                "Invalide Signature",
+                "Invalid UserOp signature or paymaster signature",
                 "",
             )
 
