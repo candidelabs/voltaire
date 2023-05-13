@@ -132,13 +132,13 @@ class BundlerManager:
             [sign_store_txn.rawTransaction.hex()],
         )
         if "error" in result:
-            # raise ValueError("simulateValidation didn't revert!")
-            error_data = result["error"]["data"]
-
-            solidity_error_selector = str(error_data[:10])
-            if ValidationManager.check_if_failed_op_error(
+            if "data" in result["error"] and ValidationManager.check_if_failed_op_error(
                 solidity_error_selector
             ):
+                # raise ValueError("simulateValidation didn't revert!")
+                error_data = result["error"]["data"]
+                solidity_error_selector = str(error_data[:10])
+
                 solidity_error_params = error_data[10:]
                 (
                     operation_index,
