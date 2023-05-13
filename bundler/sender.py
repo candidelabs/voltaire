@@ -109,7 +109,10 @@ class Sender:
         return None
 
     async def _check_if_stacked(
-        self, entrypoint_address: str, bundler_address: str, ethereum_node_url: str
+        self,
+        entrypoint_address: str,
+        bundler_address: str,
+        ethereum_node_url: str,
     ) -> bool:
         function_selector = "0x5287ce12"  # getDepositInfo
         params = encode(["address"], [self.address])

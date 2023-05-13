@@ -167,10 +167,10 @@ def verify_and_get_uint(value) -> int:
             return int(value, 16)
         except ValueError as exp:
             raise ValidationException(
-            ValidationExceptionCode.InvalidFields,
-            f"Invalide uint value : {value}",
-            "",
-        )
+                ValidationExceptionCode.InvalidFields,
+                f"Invalide uint value : {value}",
+                "",
+            )
     else:
         raise ValidationException(
             ValidationExceptionCode.InvalidFields,
@@ -189,10 +189,10 @@ def verify_and_get_bytes(value) -> bytes:
             return bytes.fromhex(value[2:])
         except ValueError as exp:
             raise ValidationException(
-            ValidationExceptionCode.InvalidFields,
-            f"Invalide bytes value : {value}",
-            "",
-        )
+                ValidationExceptionCode.InvalidFields,
+                f"Invalide bytes value : {value}",
+                "",
+            )
     else:
         raise ValidationException(
             ValidationExceptionCode.InvalidFields,

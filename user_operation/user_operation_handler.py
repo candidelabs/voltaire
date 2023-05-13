@@ -260,9 +260,7 @@ class UserOperationHandler:
         }
 
         if not self.is_optimism_gas_estimation:
-            gas_info = {
-                "effectiveGasPrice": receipt_info.effectiveGasPrice
-            }
+            gas_info = {"effectiveGasPrice": receipt_info.effectiveGasPrice}
             receipt_info_json.update(gas_info)
 
         user_operation_receipt_rpc_json = {
@@ -291,7 +289,7 @@ class UserOperationHandler:
                     USER_OPERATIOM_EVENT_DISCRIPTOR,
                     user_operation_hash,
                 ],
-                "fromBlock":"earliest",
+                "fromBlock": "earliest",
             }
         ]
 
@@ -357,7 +355,7 @@ class UserOperationHandler:
             {
                 "address": _from,
                 "transactionHash": transaction_hash,
-                "fromBlock":"earliest",
+                "fromBlock": "earliest",
             }
         ]
 

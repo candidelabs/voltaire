@@ -166,18 +166,18 @@ async def debug_bundler_dumpMempool(entrypoint) -> Result:
     )
     return result
 
+
 @method
 async def debug_bundler_setReputation(
-    entitiy:str,
-    ops_seen: int,
-    ops_included: int,
-    status: int) -> Result:
+    entitiy: str, ops_seen: int, ops_included: int, status: int
+) -> Result:
     result = await _handle_rpc_request(
         endpoint_id="bundler_endpoint",
         request_type="debug_bundler_setReputation",
-        request_arguments=[entitiy,ops_seen, ops_included, status],
+        request_arguments=[entitiy, ops_seen, ops_included, status],
     )
     return result
+
 
 @method
 async def debug_bundler_dumpReputation(entrypoint) -> Result:
@@ -196,7 +196,7 @@ async def debug_bundler_dumpReputation(entrypoint) -> Result:
 
 async def handle(is_debug, request):
     res = await request.text()
-    methods={
+    methods = {
         "eth_chainId": eth_chainId,
         "eth_supportedEntryPoints": eth_supportedEntryPoints,
         "eth_estimateUserOperationGas": eth_estimateUserOperationGas,
@@ -204,19 +204,20 @@ async def handle(is_debug, request):
         "eth_getUserOperationReceipt": eth_getUserOperationReceipt,
         "eth_getUserOperationByHash": eth_getUserOperationByHash,
     }
-    
+
     if is_debug:
-        debug_methods={
+        debug_methods = {
             "debug_bundler_sendBundleNow": debug_bundler_sendBundleNow,
             "debug_bundler_clearState": debug_bundler_clearState,
             "debug_bundler_dumpMempool": debug_bundler_dumpMempool,
             "debug_bundler_setReputation": debug_bundler_clearState,
-            "debug_bundler_dumpReputation": debug_bundler_dumpReputation
+            "debug_bundler_dumpReputation": debug_bundler_dumpReputation,
         }
         methods.update(debug_methods)
 
     return web.Response(
-        text=await async_dispatch(res, methods=methods), content_type="application/json"
+        text=await async_dispatch(res, methods=methods),
+        content_type="application/json",
     )
 
 

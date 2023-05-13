@@ -16,6 +16,7 @@ from .bundle_manager import BundlerManager
 from .validation_manager import ValidationManager
 from .reputation_manager import ReputationManager
 
+
 class ExecutionEndpoint(Endpoint):
     ethereum_node_url: str
     bundler_private_key: str
@@ -31,7 +32,7 @@ class ExecutionEndpoint(Endpoint):
     is_unsafe: bool
     is_optimism_gas_estimation: bool
     is_send_raw_transaction_conditional: bool
-    bundle_interval:int
+    bundle_interval: int
 
     def __init__(
         self,
@@ -44,7 +45,7 @@ class ExecutionEndpoint(Endpoint):
         is_unsafe: bool,
         is_optimism_gas_estimation: bool,
         is_send_raw_transaction_conditional: bool,
-        bundle_interval:int
+        bundle_interval: int,
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_url = ethereum_node_url
@@ -55,7 +56,9 @@ class ExecutionEndpoint(Endpoint):
         self.chain_id = chain_id
         self.is_unsafe = is_unsafe
         self.is_optimism_gas_estimation = is_optimism_gas_estimation
-        self.is_send_raw_transaction_conditional = is_send_raw_transaction_conditional
+        self.is_send_raw_transaction_conditional = (
+            is_send_raw_transaction_conditional
+        )
         self.bundle_interval = bundle_interval
 
         self.reputation_manager = ReputationManager()
@@ -65,7 +68,7 @@ class ExecutionEndpoint(Endpoint):
             bundler_private_key,
             bundler_address,
             entrypoint,
-            is_optimism_gas_estimation
+            is_optimism_gas_estimation,
         )
 
         self.validation_manager = ValidationManager(
@@ -86,7 +89,7 @@ class ExecutionEndpoint(Endpoint):
             bundler_private_key,
             bundler_address,
             entrypoint,
-            is_unsafe
+            is_unsafe,
         )
 
         self.bundle_manager = BundlerManager(
@@ -99,7 +102,7 @@ class ExecutionEndpoint(Endpoint):
             entrypoint,
             chain_id,
             is_optimism_gas_estimation,
-            is_send_raw_transaction_conditional
+            is_send_raw_transaction_conditional,
         )
         if self.bundle_interval > 0:
             asyncio.ensure_future(self.execute_bundle_cron_job())
@@ -137,11 +140,11 @@ class ExecutionEndpoint(Endpoint):
 
         self._verify_entrypoint(entrypoint_address)
 
-        #set high verification_gas_limit for validtion to succeed while estimating gas
+        # set high verification_gas_limit for validtion to succeed while estimating gas
         if user_operation.verification_gas_limit < 1000000000000000000:
             user_operation.verification_gas_limit = 1000000000000000000
 
-        #set gas fee to zero to ignore paying for prefund error while estimating gas
+        # set gas fee to zero to ignore paying for prefund error while estimating gas
         user_operation.max_fee_per_gas = 0
         user_operation.max_priority_fee_per_gas = 0
 
@@ -214,7 +217,7 @@ class ExecutionEndpoint(Endpoint):
         )
 
         return RPCCallResponseEvent(user_operation_receipt_info_json)
-    
+
     async def _event_debug_bundler_sendBundleNow(
         self, rpc_request: RPCCallRequestEvent
     ) -> RPCCallResponseEvent:
@@ -251,26 +254,28 @@ class ExecutionEndpoint(Endpoint):
         status = rpc_request.req_arguments[0]
 
         self.reputation_manager.set_reputation(
-            entitiy, ops_seen, ops_included, status)
+            entitiy, ops_seen, ops_included, status
+        )
 
         return RPCCallResponseEvent("ok")
-    
-    async def  _event_debug_bundler_dumpReputation(
+
+    async def _event_debug_bundler_dumpReputation(
         self, rpc_request: RPCCallRequestEvent
     ) -> RPCCallResponseEvent:
         entrypoint_address = rpc_request.req_arguments[0]
 
-        entities_reputation_json = self.reputation_manager.get_entities_reputation_json()
+        entities_reputation_json = (
+            self.reputation_manager.get_entities_reputation_json()
+        )
         return RPCCallResponseEvent(entities_reputation_json)
 
-    
     def _verify_entrypoint(self, entrypoint):
         if entrypoint != self.entrypoint:
-                raise ValidationException(
-                        ValidationExceptionCode.InvalidFields,
-                        "Unsupported entrypoint",
-                        "",
-                    )
+            raise ValidationException(
+                ValidationExceptionCode.InvalidFields,
+                "Unsupported entrypoint",
+                "",
+            )
 
 
 async def exception_handler_decorator(

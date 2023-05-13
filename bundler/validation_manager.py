@@ -69,7 +69,7 @@ class ValidationManager:
             # "CREATE2",
             "SELFDESTRUCT",
             "RANDOM",
-            "PREVRANDAO"
+            "PREVRANDAO",
         ]
 
     async def validate_user_operation(
@@ -81,7 +81,7 @@ class ValidationManager:
     ) -> None:
         if self.is_unsafe:
             return
-        
+
         debug_data: DebugTraceCallData = await self.get_debug_traceCall_data(
             user_operation
         )
@@ -345,7 +345,9 @@ class ValidationManager:
                 VALIDATION_RESULT_ABI, bytes.fromhex(solidity_error_params)
             )
         except Exception as err:
-            operation_index, reason = ValidationManager.decode_FailedOp_event(solidity_error_params)
+            operation_index, reason = ValidationManager.decode_FailedOp_event(
+                solidity_error_params
+            )
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
                 reason,
@@ -420,13 +422,15 @@ class ValidationManager:
         ):
             raise ValueError("simulateValidation didn't revert!")
 
-        elif("data" not in result["error"] or len(result["error"]["data"]) < 10):
+        elif (
+            "data" not in result["error"] or len(result["error"]["data"]) < 10
+        ):
             raise ValidationException(
-                        ValidationExceptionCode.SimulateValidation,
-                        result["error"]["message"],
-                        "",
-                    )
-    
+                ValidationExceptionCode.SimulateValidation,
+                result["error"]["message"],
+                "",
+            )
+
         error_data = result["error"]["data"]
         solidity_error_selector = str(error_data[:10])
         solidity_error_params = error_data[10:]
@@ -703,17 +707,17 @@ class ValidationManager:
                 "Transaction will expire shortly or has expired.",
                 "",
             )
-        
+
         baseFee = int(await self.getBaseFee(), 16)
-        if(max_fee_per_gas < baseFee):
+        if max_fee_per_gas < baseFee:
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
                 f"Max fee per gas is too low. it should be minimum : {baseFee}",
                 "",
             )
-        
+
     async def getBaseFee(self):
         res = await send_rpc_request_to_eth_client(
-                self.ethereum_node_url, "eth_getBlockByNumber", ['latest', False]
-            )
+            self.ethereum_node_url, "eth_getBlockByNumber", ["latest", False]
+        )
         return res["result"]["baseFeePerGas"]

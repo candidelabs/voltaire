@@ -35,7 +35,7 @@ class BundlerManager:
         entrypoint: str,
         chain_id: str,
         is_optimism_gas_estimation: bool,
-        is_send_raw_transaction_conditional: bool
+        is_send_raw_transaction_conditional: bool,
     ):
         self.mempool_manager = mempool_manager
         self.user_operation_handler = user_operation_handler
@@ -46,7 +46,9 @@ class BundlerManager:
         self.entrypoint = entrypoint
         self.chain_id = chain_id
         self.is_optimism_gas_estimation = is_optimism_gas_estimation
-        self.is_send_raw_transaction_conditional = is_send_raw_transaction_conditional
+        self.is_send_raw_transaction_conditional = (
+            is_send_raw_transaction_conditional
+        )
 
     async def send_next_bundle(self) -> None:
         user_operations = (
@@ -110,14 +112,18 @@ class BundlerManager:
         }
 
         if not self.is_optimism_gas_estimation:
-            txnDict.update({
-                "maxFeePerGas": gas_price,
-                "maxPriorityFeePerGas": gas_price,
-            })
+            txnDict.update(
+                {
+                    "maxFeePerGas": gas_price,
+                    "maxPriorityFeePerGas": gas_price,
+                }
+            )
         else:
-            txnDict.update({
-                "gasPrice": gas_price,
-            })
+            txnDict.update(
+                {
+                    "gasPrice": gas_price,
+                }
+            )
 
         sign_store_txn = Account.sign_transaction(
             txnDict, private_key=self.bundler_private_key
@@ -132,7 +138,9 @@ class BundlerManager:
             [sign_store_txn.rawTransaction.hex()],
         )
         if "error" in result:
-            if "data" in result["error"] and ValidationManager.check_if_failed_op_error(
+            if "data" in result[
+                "error"
+            ] and ValidationManager.check_if_failed_op_error(
                 solidity_error_selector
             ):
                 # raise ValueError("simulateValidation didn't revert!")
@@ -172,8 +180,10 @@ class BundlerManager:
                 if len(user_operations) > 0:
                     self.send_bundle(user_operations)
             else:
-                logging.info("Failed to send bundle. Dropping all user operations")
-            
+                logging.info(
+                    "Failed to send bundle. Dropping all user operations"
+                )
+
         else:
             transaction_hash = result["result"]
             logging.info(
