@@ -356,7 +356,7 @@ class ValidationManager:
                 reason,
                 "",
             )
-        # print(str(validation_result_decoded))
+
         return_info_arr = validation_result_decoded[0]
         return_info = ReturnInfo(
             preOpGas=return_info_arr[0],
@@ -455,12 +455,11 @@ class ValidationManager:
     async def get_debug_traceCall_data(
         self, user_operation: UserOperation
     ) -> DebugTraceCallData:
-        
         simultion_gas = (
             user_operation.pre_verification_gas
             + user_operation.verification_gas_limit
         )
-        
+
         function_selector = "0xee219423"  # simulateValidation
         params = encode(
             [
@@ -474,7 +473,7 @@ class ValidationManager:
         gas_price = await send_rpc_request_to_eth_client(
             self.ethereum_node_url, "eth_gasPrice"
         )
-        # print(str(gas_price))
+
         params = [
             {
                 "from": self.bundler_address,
@@ -523,7 +522,8 @@ class ValidationManager:
         elif "error" in res and "message" in res["error"]:
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
-                res["error"]["message"] + " - Try reducing maxFeePerGas or contact the bundler maintainer if the bundler account is not sufficiently funded",
+                res["error"]["message"]
+                + " - Try reducing maxFeePerGas or contact the bundler maintainer if the bundler account is not sufficiently funded",
                 "",
             )
         else:
@@ -680,8 +680,10 @@ class ValidationManager:
                 "",
             )
 
-        gas_estimation_op = self.user_operation_handler.estimate_user_operation_gas(
-            user_operation
+        gas_estimation_op = (
+            self.user_operation_handler.estimate_user_operation_gas(
+                user_operation
+            )
         )
 
         base_plus_tip_fee_gas_price_op = send_rpc_request_to_eth_client(

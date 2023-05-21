@@ -96,8 +96,12 @@ class BundlerManager:
             [self.bundler_address, "latest"],
         )
 
-        tasks_arr = [gas_estimation_op, base_plus_tip_fee_gas_price_op, nonce_op]
-        
+        tasks_arr = [
+            gas_estimation_op,
+            base_plus_tip_fee_gas_price_op,
+            nonce_op,
+        ]
+
         if not self.is_legacy_mode:
             tip_fee_gas_price_op = send_rpc_request_to_eth_client(
                 self.ethereum_node_url, "eth_maxPriorityFeePerGas"
@@ -135,7 +139,7 @@ class BundlerManager:
                     "maxFeePerGas": base_plus_tip_fee_gas_price,
                     "maxPriorityFeePerGas": tip_fee_gas_price,
                 }
-            )           
+            )
 
         sign_store_txn = Account.sign_transaction(
             txnDict, private_key=self.bundler_private_key
