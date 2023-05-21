@@ -31,7 +31,7 @@ async def main() -> None:
             initData.bundler_helper_byte_code,
             initData.chain_id,
             initData.is_unsafe,
-            initData.is_optimism_gas_estimation,
+            initData.is_legacy_mode,
             initData.is_send_raw_transaction_conditional,
             initData.bundle_interval
         )

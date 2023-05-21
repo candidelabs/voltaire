@@ -22,7 +22,7 @@ class UserOperationHandler:
     bundler_private_key: str
     bundler_address: str
     entrypoint: str
-    is_optimism_gas_estimation: bool
+    is_legacy_mode: bool
 
     def __init__(
         self,
@@ -30,13 +30,13 @@ class UserOperationHandler:
         bundler_private_key,
         bundler_address,
         entrypoint,
-        is_optimism_gas_estimation,
+        is_legacy_mode,
     ):
         self.ethereum_node_url = ethereum_node_url
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
-        self.is_optimism_gas_estimation = is_optimism_gas_estimation
+        self.is_legacy_mode = is_legacy_mode
 
     async def estimate_user_operation_gas(self, user_operation: UserOperation):
         tasks = await asyncio.gather(
@@ -218,7 +218,7 @@ class UserOperationHandler:
             status=transaction["status"],
             effectiveGasPrice="0",
         )
-        if not self.is_optimism_gas_estimation:
+        if not self.is_legacy_mode:
             receiptInfo.effectiveGasPrice = transaction["effectiveGasPrice"]
 
         logs = await self.get_logs(
@@ -259,7 +259,7 @@ class UserOperationHandler:
             "transactionIndex": receipt_info.transactionIndex,
         }
 
-        if not self.is_optimism_gas_estimation:
+        if not self.is_legacy_mode:
             gas_info = {"effectiveGasPrice": receipt_info.effectiveGasPrice}
             receipt_info_json.update(gas_info)
 

@@ -21,7 +21,7 @@ class BundlerManager:
     user_operation_handler: UserOperationHandler
     reputation_manager: ReputationManager
     chain_id: int
-    is_optimism_gas_estimation: bool
+    is_legacy_mode: bool
     is_send_raw_transaction_conditional: bool
 
     def __init__(
@@ -34,7 +34,7 @@ class BundlerManager:
         bundler_address: str,
         entrypoint: str,
         chain_id: str,
-        is_optimism_gas_estimation: bool,
+        is_legacy_mode: bool,
         is_send_raw_transaction_conditional: bool,
     ):
         self.mempool_manager = mempool_manager
@@ -45,7 +45,7 @@ class BundlerManager:
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
         self.chain_id = chain_id
-        self.is_optimism_gas_estimation = is_optimism_gas_estimation
+        self.is_legacy_mode = is_legacy_mode
         self.is_send_raw_transaction_conditional = (
             is_send_raw_transaction_conditional
         )
@@ -98,7 +98,7 @@ class BundlerManager:
 
         tasks_arr = [gas_estimation_op, base_fee_gas_price_op, nonce_op]
         
-        if not self.is_optimism_gas_estimation:
+        if not self.is_legacy_mode:
             tip_fee_gas_price_op = send_rpc_request_to_eth_client(
                 self.ethereum_node_url, "eth_maxPriorityFeePerGas"
             )
@@ -111,7 +111,7 @@ class BundlerManager:
         nonce = tasks[2]["result"]
 
         tip_fee_gas_price = 0
-        if not self.is_optimism_gas_estimation:
+        if not self.is_legacy_mode:
             tip_fee_gas_price = tasks[3]["result"]
 
         txnDict = {
@@ -123,7 +123,7 @@ class BundlerManager:
             "data": call_data,
         }
 
-        if self.is_optimism_gas_estimation:
+        if self.is_legacy_mode:
             txnDict.update(
                 {
                     "gasPrice": base_fee_gas_price,

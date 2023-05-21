@@ -29,7 +29,7 @@ class InitData:
     chain_id: int
     is_debug: bool
     is_unsafe: bool
-    is_optimism_gas_estimation: bool
+    is_legacy_mode: bool
     is_send_raw_transaction_conditional: bool
     bundle_interval:int
 
@@ -137,8 +137,8 @@ def initialize() -> InitData:
     )
 
     parser.add_argument(
-        "--optimism_gas_estimation",
-        help="perform gas estimation without calling simulateValidation and modify receipt return to be compatible with optimism rollup before the bedrock update",
+        "--legacy_mode",
+        help="for netwroks that doesn't support EIP-1559",
         nargs="?",
         const=True,
         default=False,
@@ -189,7 +189,7 @@ def initialize() -> InitData:
         args.chain_id,
         args.debug,
         args.unsafe,
-        args.optimism_gas_estimation,
+        args.legacy_mode,
         args.send_raw_transaction_conditional,
         args.bundle_interval
     )

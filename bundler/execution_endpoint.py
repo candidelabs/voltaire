@@ -30,7 +30,7 @@ class ExecutionEndpoint(Endpoint):
     bundler_helper_byte_code: str
     chain_id: int
     is_unsafe: bool
-    is_optimism_gas_estimation: bool
+    is_legacy_mode: bool
     is_send_raw_transaction_conditional: bool
     bundle_interval: int
 
@@ -43,7 +43,7 @@ class ExecutionEndpoint(Endpoint):
         bundler_helper_byte_code: str,
         chain_id: str,
         is_unsafe: bool,
-        is_optimism_gas_estimation: bool,
+        is_legacy_mode: bool,
         is_send_raw_transaction_conditional: bool,
         bundle_interval: int,
     ):
@@ -55,7 +55,7 @@ class ExecutionEndpoint(Endpoint):
         self.bundler_helper_byte_code = bundler_helper_byte_code
         self.chain_id = chain_id
         self.is_unsafe = is_unsafe
-        self.is_optimism_gas_estimation = is_optimism_gas_estimation
+        self.is_legacy_mode = is_legacy_mode
         self.is_send_raw_transaction_conditional = (
             is_send_raw_transaction_conditional
         )
@@ -68,7 +68,7 @@ class ExecutionEndpoint(Endpoint):
             bundler_private_key,
             bundler_address,
             entrypoint,
-            is_optimism_gas_estimation,
+            is_legacy_mode,
         )
 
         self.validation_manager = ValidationManager(
@@ -101,7 +101,7 @@ class ExecutionEndpoint(Endpoint):
             bundler_address,
             entrypoint,
             chain_id,
-            is_optimism_gas_estimation,
+            is_legacy_mode,
             is_send_raw_transaction_conditional,
         )
         if self.bundle_interval > 0:
@@ -148,7 +148,7 @@ class ExecutionEndpoint(Endpoint):
         user_operation.max_fee_per_gas = 0
         user_operation.max_priority_fee_per_gas = 0
 
-        if self.is_optimism_gas_estimation:
+        if self.is_legacy_mode:
             pre_operation_gas = 80000
             deadline = 10000000000000000
         else:
