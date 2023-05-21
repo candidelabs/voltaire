@@ -1,4 +1,4 @@
-FROM python:3.11.2-alpine3.17
+FROM python:3.11.3-alpine3.18
 
 ENV PIP_DEFAULT_TIMEOUT=100 \
     # Allow statements and log messages to immediately appear
