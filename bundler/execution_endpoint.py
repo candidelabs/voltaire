@@ -79,6 +79,7 @@ class ExecutionEndpoint(Endpoint):
             entrypoint,
             bundler_helper_byte_code,
             is_unsafe,
+            is_legacy_mode,
         )
 
         self.mempool_manager = MempoolManager(

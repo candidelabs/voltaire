@@ -29,6 +29,7 @@ class ValidationManager:
     banned_opcodes: list()
     bundler_helper_byte_code: str
     is_unsafe: bool
+    is_legacy_mode: bool
 
     def __init__(
         self,
@@ -39,6 +40,7 @@ class ValidationManager:
         entrypoint: str,
         bundler_helper_byte_code: str,
         is_unsafe: bool,
+        is_legacy_mode: bool,
     ):
         self.user_operation_handler = user_operation_handler
         self.ethereum_node_url = ethereum_node_url
@@ -47,6 +49,7 @@ class ValidationManager:
         self.entrypoint = entrypoint
         self.bundler_helper_byte_code = bundler_helper_byte_code
         self.is_unsafe = is_unsafe
+        self.is_legacy_mode = is_legacy_mode
 
         path = "utils/BundlerCollectorTracer.js"
         with open(path) as keyfile:
@@ -668,13 +671,7 @@ class ValidationManager:
         validAfter = return_info.validAfter
         deadline = return_info.validUntil
         max_fee_per_gas = user_operation.max_fee_per_gas
-
-        (
-            call_gas_limit,
-            preverification_gas,
-        ) = await self.user_operation_handler.estimate_user_operation_gas(
-            user_operation
-        )
+        max_priority_fee_per_gas = user_operation.max_priority_fee_per_gas
 
         if sigFailed:
             raise ValidationException(
@@ -682,6 +679,31 @@ class ValidationManager:
                 "Invalid UserOp signature or paymaster signature",
                 "",
             )
+
+        gas_estimation_op = self.user_operation_handler.estimate_user_operation_gas(
+            user_operation
+        )
+
+        base_plus_tip_fee_gas_price_op = send_rpc_request_to_eth_client(
+            self.ethereum_node_url, "eth_gasPrice"
+        )
+
+        tasks_arr = [gas_estimation_op, base_plus_tip_fee_gas_price_op]
+
+        if not self.is_legacy_mode:
+            tip_fee_gas_price_op = send_rpc_request_to_eth_client(
+                self.ethereum_node_url, "eth_maxPriorityFeePerGas"
+            )
+            tasks_arr.append(tip_fee_gas_price_op)
+
+        tasks = await asyncio.gather(*tasks_arr)
+
+        (call_gas_limit, preverification_gas) = tasks[0]
+        base_plus_tip_fee_gas_price = int(tasks[1]["result"], 16)
+
+        tip_fee_gas_price = base_plus_tip_fee_gas_price
+        if not self.is_legacy_mode:
+            tip_fee_gas_price = int(tasks[2]["result"], 16)
 
         if call_gas_limit != "0x" and user_operation.call_gas_limit < int(
             call_gas_limit, 16
@@ -723,16 +745,16 @@ class ValidationManager:
                 "",
             )
 
-        baseFee = int(await self.getBaseFee(), 16)
-        if max_fee_per_gas < baseFee:
+        if max_fee_per_gas < base_plus_tip_fee_gas_price:
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
-                f"Max fee per gas is too low. it should be minimum : {baseFee}",
+                f"Max fee per gas is too low. it should be minimum : {base_plus_tip_fee_gas_price}",
                 "",
             )
 
-    async def getBaseFee(self):
-        res = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_getBlockByNumber", ["latest", False]
-        )
-        return res["result"]["baseFeePerGas"]
+        if max_priority_fee_per_gas < tip_fee_gas_price:
+            raise ValidationException(
+                ValidationExceptionCode.SimulateValidation,
+                f"Max priority fee per gas is too low. it should be minimum : {tip_fee_gas_price}",
+                "",
+            )
