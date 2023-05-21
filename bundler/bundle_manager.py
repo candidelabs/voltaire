@@ -86,7 +86,7 @@ class BundlerManager:
             )
         )
 
-        base_fee_gas_price_op = send_rpc_request_to_eth_client(
+        base_plus_tip_fee_gas_price_op = send_rpc_request_to_eth_client(
             self.ethereum_node_url, "eth_gasPrice"
         )
 
@@ -96,7 +96,7 @@ class BundlerManager:
             [self.bundler_address, "latest"],
         )
 
-        tasks_arr = [gas_estimation_op, base_fee_gas_price_op, nonce_op]
+        tasks_arr = [gas_estimation_op, base_plus_tip_fee_gas_price_op, nonce_op]
         
         if not self.is_legacy_mode:
             tip_fee_gas_price_op = send_rpc_request_to_eth_client(
@@ -107,7 +107,7 @@ class BundlerManager:
         tasks = await asyncio.gather(*tasks_arr)
 
         gas_estimation = tasks[0]
-        base_fee_gas_price = tasks[1]["result"]
+        base_plus_tip_fee_gas_price = tasks[1]["result"]
         nonce = tasks[2]["result"]
 
         tip_fee_gas_price = 0
@@ -126,13 +126,13 @@ class BundlerManager:
         if self.is_legacy_mode:
             txnDict.update(
                 {
-                    "gasPrice": base_fee_gas_price,
+                    "gasPrice": base_plus_tip_fee_gas_price,
                 }
             )
         else:
             txnDict.update(
                 {
-                    "maxFeePerGas": base_fee_gas_price,
+                    "maxFeePerGas": base_plus_tip_fee_gas_price,
                     "maxPriorityFeePerGas": tip_fee_gas_price,
                 }
             )           
