@@ -86,7 +86,7 @@ class BundlerManager:
             )
         )
 
-        gas_price_op = send_rpc_request_to_eth_client(
+        base_fee_gas_price_op = send_rpc_request_to_eth_client(
             self.ethereum_node_url, "eth_gasPrice"
         )
 
@@ -96,11 +96,23 @@ class BundlerManager:
             [self.bundler_address, "latest"],
         )
 
-        tasks = await asyncio.gather(gas_estimation_op, gas_price_op, nonce_op)
+        tasks_arr = [gas_estimation_op, base_fee_gas_price_op, nonce_op]
+        
+        if not self.is_optimism_gas_estimation:
+            tip_fee_gas_price_op = send_rpc_request_to_eth_client(
+                self.ethereum_node_url, "eth_maxPriorityFeePerGas"
+            )
+            tasks_arr.append(tip_fee_gas_price_op)
+
+        tasks = await asyncio.gather(*tasks_arr)
 
         gas_estimation = tasks[0]
-        gas_price = tasks[1]["result"]
+        base_fee_gas_price = tasks[1]["result"]
         nonce = tasks[2]["result"]
+
+        tip_fee_gas_price = 0
+        if not self.is_optimism_gas_estimation:
+            tip_fee_gas_price = tasks[3]["result"]
 
         txnDict = {
             "chainId": self.chain_id,
@@ -111,19 +123,19 @@ class BundlerManager:
             "data": call_data,
         }
 
-        if not self.is_optimism_gas_estimation:
+        if self.is_optimism_gas_estimation:
             txnDict.update(
                 {
-                    "maxFeePerGas": gas_price,
-                    "maxPriorityFeePerGas": gas_price,
+                    "gasPrice": base_fee_gas_price,
                 }
             )
         else:
             txnDict.update(
                 {
-                    "gasPrice": gas_price,
+                    "maxFeePerGas": base_fee_gas_price,
+                    "maxPriorityFeePerGas": tip_fee_gas_price,
                 }
-            )
+            )           
 
         sign_store_txn = Account.sign_transaction(
             txnDict, private_key=self.bundler_private_key
