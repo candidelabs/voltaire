@@ -452,11 +452,12 @@ class ValidationManager:
     async def get_debug_traceCall_data(
         self, user_operation: UserOperation
     ) -> DebugTraceCallData:
+        
         simultion_gas = (
             user_operation.pre_verification_gas
             + user_operation.verification_gas_limit
         )
-
+        
         function_selector = "0xee219423"  # simulateValidation
         params = encode(
             [
@@ -470,13 +471,13 @@ class ValidationManager:
         gas_price = await send_rpc_request_to_eth_client(
             self.ethereum_node_url, "eth_gasPrice"
         )
-
+        # print(str(gas_price))
         params = [
             {
                 "from": self.bundler_address,
                 "to": self.entrypoint,
                 "data": call_data,
-                "gasLimit": simultion_gas,
+                "gasLimit": 0,
                 "gasPrice": gas_price["result"],
             },
             "latest",
@@ -486,34 +487,48 @@ class ValidationManager:
         res = await send_rpc_request_to_eth_client(
             self.ethereum_node_url, "debug_traceCall", params
         )
-        debug_data = res["result"]
-        factory_data = DebugEntityData(
-            debug_data["numberLevels"][0]["access"],
-            debug_data["numberLevels"][0]["opcodes"],
-            debug_data["numberLevels"][0]["contractSize"],
-        )
-        account_data = DebugEntityData(
-            debug_data["numberLevels"][1]["access"],
-            debug_data["numberLevels"][1]["opcodes"],
-            debug_data["numberLevels"][1]["contractSize"],
-        )
-        paymaster_data = DebugEntityData(
-            debug_data["numberLevels"][2]["access"],
-            debug_data["numberLevels"][2]["opcodes"],
-            debug_data["numberLevels"][2]["contractSize"],
-        )
 
-        debug_trace_call_data = DebugTraceCallData(
-            factory_data,
-            account_data,
-            paymaster_data,
-            debug_data["keccak"],
-            debug_data["logs"],
-            debug_data["calls"],
-            debug_data["debug"],
-        )
+        if "result" in res:
+            debug_data = res["result"]
+            factory_data = DebugEntityData(
+                debug_data["numberLevels"][0]["access"],
+                debug_data["numberLevels"][0]["opcodes"],
+                debug_data["numberLevels"][0]["contractSize"],
+            )
+            account_data = DebugEntityData(
+                debug_data["numberLevels"][1]["access"],
+                debug_data["numberLevels"][1]["opcodes"],
+                debug_data["numberLevels"][1]["contractSize"],
+            )
+            paymaster_data = DebugEntityData(
+                debug_data["numberLevels"][2]["access"],
+                debug_data["numberLevels"][2]["opcodes"],
+                debug_data["numberLevels"][2]["contractSize"],
+            )
 
-        return debug_trace_call_data
+            debug_trace_call_data = DebugTraceCallData(
+                factory_data,
+                account_data,
+                paymaster_data,
+                debug_data["keccak"],
+                debug_data["logs"],
+                debug_data["calls"],
+                debug_data["debug"],
+            )
+
+            return debug_trace_call_data
+        elif "error" in res and "message" in res["error"]:
+            raise ValidationException(
+                ValidationExceptionCode.SimulateValidation,
+                res["error"]["message"] + " - Try reducing maxFeePerGas or contact the bundler maintainer if the bundler account is not sufficiently funded",
+                "",
+            )
+        else:
+            raise ValidationException(
+                ValidationExceptionCode.SimulateValidation,
+                "Invalide Validation result from debug_traceCall",
+                "",
+            )
 
     async def verify_banned_opcodes(
         self,
