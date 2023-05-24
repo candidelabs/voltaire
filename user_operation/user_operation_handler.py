@@ -128,16 +128,8 @@ class UserOperationHandler:
     async def get_user_operation_by_hash(
         self, user_operation_hash: str
     ) -> tuple:
-        (
-            log_object,
-            _,
-            _,
-            _,
-            _,
-            _,
-            _,
-            _,
-        ) = await self.get_user_operation_event_log_info(user_operation_hash)
+        event_log_info = await self.get_user_operation_event_log_info(user_operation_hash)
+        log_object = event_log_info[0]
         transaction_hash = log_object.transactionHash
 
         transaction = await self.get_transaction_by_hash(transaction_hash)
@@ -196,6 +188,7 @@ class UserOperationHandler:
             success,
             actualGasCost,
             actualGasUsed,
+            logs,
         ) = await self.get_user_operation_event_log_info(user_operation_hash)
 
         transaction = await self.get_transaction_receipt(
@@ -220,10 +213,6 @@ class UserOperationHandler:
         )
         if not self.is_legacy_mode:
             receiptInfo.effectiveGasPrice = transaction["effectiveGasPrice"]
-
-        logs = await self.get_logs(
-            log_object.transactionHash, receiptInfo._from
-        )
 
         userOperationReceiptInfo = UserOperationReceiptInfo(
             userOpHash=userOpHash,
@@ -281,21 +270,7 @@ class UserOperationHandler:
     async def get_user_operation_event_log_info(
         self, user_operation_hash: str
     ) -> tuple:
-        USER_OPERATIOM_EVENT_DISCRIPTOR = "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
-        params = [
-            {
-                "address": self.entrypoint,
-                "topics": [
-                    USER_OPERATIOM_EVENT_DISCRIPTOR,
-                    user_operation_hash,
-                ],
-                "fromBlock": "earliest",
-            }
-        ]
-
-        res = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_getLogs", params
-        )
+        res = await self.get_user_operation_logs(user_operation_hash)
 
         if "result" not in res or len(res["result"]) < 1:
             raise ValidationException(
@@ -303,7 +278,7 @@ class UserOperationHandler:
                 "can't find user operation with hash : " + user_operation_hash,
                 "",
             )
-
+        logs = res["result"]
         log = res["result"][0]
 
         log_object = Log(
@@ -341,6 +316,7 @@ class UserOperationHandler:
             success,
             actualGasCost,
             actualGasUsed,
+            logs,
         )
 
     async def get_transaction_receipt(self, transaction_hash: str) -> dict:
@@ -350,19 +326,24 @@ class UserOperationHandler:
         )
         return res["result"]
 
-    async def get_logs(self, transaction_hash, _from):
+    async def get_user_operation_logs(self, user_operation_hash:str):
+        USER_OPERATIOM_EVENT_DISCRIPTOR = "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
+        
         params = [
             {
-                "address": _from,
-                "transactionHash": transaction_hash,
+                "address": self.entrypoint,
+                "topics": [
+                    USER_OPERATIOM_EVENT_DISCRIPTOR,
+                    user_operation_hash,
+                ],
                 "fromBlock": "earliest",
             }
         ]
-
         res = await send_rpc_request_to_eth_client(
             self.ethereum_node_url, "eth_getLogs", params
         )
-        return res["result"]
+
+        return res
 
     async def get_transaction_by_hash(self, transaction_hash) -> dict:
         params = [transaction_hash]
