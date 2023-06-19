@@ -50,7 +50,7 @@ class MempoolManager:
         self._verify_entities_reputation(
             user_operation.sender,
             user_operation.factory_address,
-            user_operation.factory_address,
+            user_operation.paymaster_address,
         )
 
         self.validation_manager.verify_preverification_gas(user_operation)
