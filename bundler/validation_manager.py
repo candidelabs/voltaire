@@ -662,16 +662,13 @@ class ValidationManager:
 
         return results, paymaster_call
 
-    async def verify_gas_and_return_info(
+    def verify_sig_and_pre_operation_gas_and_timestamp(
         self, user_operation: UserOperation, return_info: ReturnInfo
     ) -> None:
         pre_operation_gas = return_info.preOpGas
-        # prefund=return_info.prefund
         sigFailed = return_info.sigFailed
         validAfter = return_info.validAfter
         deadline = return_info.validUntil
-        max_fee_per_gas = user_operation.max_fee_per_gas
-        max_priority_fee_per_gas = user_operation.max_priority_fee_per_gas
 
         if sigFailed:
             raise ValidationException(
@@ -680,48 +677,6 @@ class ValidationManager:
                 "",
             )
 
-        gas_estimation_op = (
-            self.user_operation_handler.estimate_user_operation_gas(
-                user_operation
-            )
-        )
-
-        base_plus_tip_fee_gas_price_op = send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_gasPrice"
-        )
-
-        tasks_arr = [gas_estimation_op, base_plus_tip_fee_gas_price_op]
-
-        if not self.is_legacy_mode:
-            tip_fee_gas_price_op = send_rpc_request_to_eth_client(
-                self.ethereum_node_url, "eth_maxPriorityFeePerGas"
-            )
-            tasks_arr.append(tip_fee_gas_price_op)
-
-        tasks = await asyncio.gather(*tasks_arr)
-
-        (call_gas_limit, preverification_gas) = tasks[0]
-        base_plus_tip_fee_gas_price = int(tasks[1]["result"], 16)
-
-        tip_fee_gas_price = base_plus_tip_fee_gas_price
-        if not self.is_legacy_mode:
-            tip_fee_gas_price = int(tasks[2]["result"], 16)
-
-        if call_gas_limit != "0x" and user_operation.call_gas_limit < int(
-            call_gas_limit, 16
-        ):
-            raise ValidationException(
-                ValidationExceptionCode.SimulateValidation,
-                "Call gas limit is too low. it should be minimum :"
-                + call_gas_limit,
-                "",
-            )
-        if user_operation.pre_verification_gas < preverification_gas:
-            raise ValidationException(
-                ValidationExceptionCode.SimulateValidation,
-                f"Preverification gas is too low. it should be minimum : {preverification_gas}",
-                "",
-            )
         if (
             user_operation.verification_gas_limit
             + user_operation.pre_verification_gas
@@ -746,6 +701,32 @@ class ValidationManager:
                 "Transaction will expire shortly or has expired.",
                 "",
             )
+        
+    async def verify_gas_fees(
+        self, user_operation: UserOperation
+    ) -> None:
+        max_fee_per_gas = user_operation.max_fee_per_gas
+        max_priority_fee_per_gas = user_operation.max_priority_fee_per_gas
+        
+        base_plus_tip_fee_gas_price_op = send_rpc_request_to_eth_client(
+            self.ethereum_node_url, "eth_gasPrice"
+        )
+
+        tasks_arr = [base_plus_tip_fee_gas_price_op]
+
+        if not self.is_legacy_mode:
+            tip_fee_gas_price_op = send_rpc_request_to_eth_client(
+                self.ethereum_node_url, "eth_maxPriorityFeePerGas"
+            )
+            tasks_arr.append(tip_fee_gas_price_op)
+
+        tasks = await asyncio.gather(*tasks_arr)
+
+        base_plus_tip_fee_gas_price = int(tasks[0]["result"], 16)
+
+        tip_fee_gas_price = base_plus_tip_fee_gas_price
+        if not self.is_legacy_mode:
+            tip_fee_gas_price = int(tasks[1]["result"], 16)
 
         if max_fee_per_gas < base_plus_tip_fee_gas_price:
             raise ValidationException(
@@ -758,5 +739,18 @@ class ValidationManager:
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
                 f"Max priority fee per gas is too low. it should be minimum : {tip_fee_gas_price}",
+                "",
+            )
+        
+    def verify_preverification_gas(
+        self, user_operation: UserOperation
+    ) -> None:    
+        preverification_gas = self.user_operation_handler.calc_preverification_gas(
+            user_operation)
+        
+        if user_operation.pre_verification_gas < preverification_gas:
+            raise ValidationException(
+                ValidationExceptionCode.SimulateValidation,
+                f"Preverification gas is too low. it should be minimum : {preverification_gas}",
                 "",
             )

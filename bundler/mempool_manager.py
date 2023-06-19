@@ -53,26 +53,22 @@ class MempoolManager:
             user_operation.factory_address,
         )
 
-        user_operation_hash = (
-            await self.user_operation_handler.get_user_operation_hash(
-                user_operation
-            )
+        self.validation_manager.verify_preverification_gas(user_operation)
+        await self.validation_manager.verify_gas_fees(user_operation)
+        
+        (
+            return_info,
+            sender_stake_info,
+            factory_stake_info,
+            paymaster_stake_info,
+        ) = await self.validation_manager.simulate_validation_and_decode_result(
+            user_operation
         )
 
-        if not self.is_unsafe:
-            (
-                return_info,
-                sender_stake_info,
-                factory_stake_info,
-                paymaster_stake_info,
-            ) = await self.validation_manager.simulate_validation_and_decode_result(
-                user_operation
-            )
-
-            await self.validation_manager.verify_gas_and_return_info(
+        self.validation_manager.verify_sig_and_pre_operation_gas_and_timestamp(
                 user_operation, return_info
             )
-
+        if not self.is_unsafe:
             await self.validation_manager.validate_user_operation(
                 user_operation,
                 sender_stake_info,
@@ -110,6 +106,11 @@ class MempoolManager:
                 user_operation.paymaster_address
             )
 
+        user_operation_hash = (
+            await self.user_operation_handler.get_user_operation_hash(
+                user_operation
+            )
+        )
         return user_operation_hash
 
     async def get_user_operations_to_bundle(self) -> list[UserOperation]:
