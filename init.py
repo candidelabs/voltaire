@@ -32,6 +32,7 @@ class InitData:
     is_legacy_mode: bool
     is_send_raw_transaction_conditional: bool
     bundle_interval:int
+    whitelist_entity_storage_access: list()
 
 
 def address(ep):
@@ -161,6 +162,14 @@ def initialize() -> InitData:
         default=1,
     )
 
+    parser.add_argument(
+        "--whitelist_entity_storage_access",
+        type=address,
+        nargs="+",
+        help="list of entities to whitelist for storage access rules",
+        default=[],
+    )
+
     args = parser.parse_args()
 
     bundler_address="" 
@@ -191,7 +200,8 @@ def initialize() -> InitData:
         args.unsafe,
         args.legacy_mode,
         args.send_raw_transaction_conditional,
-        args.bundle_interval
+        args.bundle_interval,
+        args.whitelist_entity_storage_access
     )
 
     logging.basicConfig(

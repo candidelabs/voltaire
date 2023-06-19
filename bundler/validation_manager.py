@@ -30,6 +30,7 @@ class ValidationManager:
     bundler_helper_byte_code: str
     is_unsafe: bool
     is_legacy_mode: bool
+    whitelist_entity_storage_access: list()
 
     def __init__(
         self,
@@ -41,6 +42,7 @@ class ValidationManager:
         bundler_helper_byte_code: str,
         is_unsafe: bool,
         is_legacy_mode: bool,
+        whitelist_entity_storage_access: list(),
     ):
         self.user_operation_handler = user_operation_handler
         self.ethereum_node_url = ethereum_node_url
@@ -50,6 +52,7 @@ class ValidationManager:
         self.bundler_helper_byte_code = bundler_helper_byte_code
         self.is_unsafe = is_unsafe
         self.is_legacy_mode = is_legacy_mode
+        self.whitelist_entity_storage_access = whitelist_entity_storage_access
 
         path = "utils/BundlerCollectorTracer.js"
         with open(path) as keyfile:
@@ -232,6 +235,9 @@ class ValidationManager:
         access: dict[str, dict[str : list[str]]],
         is_init_code: bool,
     ) -> None:
+        if entity_address in self.whitelist_entity_storage_access:
+            return
+        
         is_staked = ValidationManager.is_staked(stake_info)
 
         for contract_address in access.keys():

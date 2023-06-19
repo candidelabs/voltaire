@@ -33,7 +33,8 @@ async def main() -> None:
             initData.is_unsafe,
             initData.is_legacy_mode,
             initData.is_send_raw_transaction_conditional,
-            initData.bundle_interval
+            initData.bundle_interval,
+            initData.whitelist_entity_storage_access,
         )
         task_group.create_task(execution_endpoint.start_execution_endpoint())
         task_group.create_task(

@@ -33,6 +33,7 @@ class ExecutionEndpoint(Endpoint):
     is_legacy_mode: bool
     is_send_raw_transaction_conditional: bool
     bundle_interval: int
+    whitelist_entity_storage_access: list()
 
     def __init__(
         self,
@@ -46,6 +47,7 @@ class ExecutionEndpoint(Endpoint):
         is_legacy_mode: bool,
         is_send_raw_transaction_conditional: bool,
         bundle_interval: int,
+        whitelist_entity_storage_access: list(),
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_url = ethereum_node_url
@@ -60,6 +62,7 @@ class ExecutionEndpoint(Endpoint):
             is_send_raw_transaction_conditional
         )
         self.bundle_interval = bundle_interval
+        self.whitelist_entity_storage_access = whitelist_entity_storage_access
 
         self.reputation_manager = ReputationManager()
 
@@ -80,6 +83,7 @@ class ExecutionEndpoint(Endpoint):
             bundler_helper_byte_code,
             is_unsafe,
             is_legacy_mode,
+            whitelist_entity_storage_access,
         )
 
         self.mempool_manager = MempoolManager(
