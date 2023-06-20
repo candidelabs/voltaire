@@ -17,6 +17,7 @@ class UserOperation:
     paymaster_and_data: bytes
     signature: bytes
     code_hash: str | None
+    associated_addresses:list()
     factory_address: str | None
     paymaster_address: str | None
     jsonRequestDict: InitVar[dict]
@@ -55,6 +56,8 @@ class UserOperation:
         self.signature = verify_and_get_bytes(jsonRequestDict["signature"])
 
         self.code_hash = None
+
+        self.associated_addresses = []
 
         self._set_factory_and_paymaster_address()
 

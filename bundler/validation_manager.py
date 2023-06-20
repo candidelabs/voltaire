@@ -179,24 +179,12 @@ class ValidationManager:
                 to_checksum_address(lower_case_address)
                 for lower_case_address in associated_addresses_lowercase
             ]
-
-        if user_operation.code_hash is None:
-            if len(associated_addresses) > 0:
-                user_operation.code_hash = await self.get_addresses_code_hash(
-                    associated_addresses
-                )
-        else:
-            new_code_hash = None
-            if len(associated_addresses) > 0:
-                new_code_hash = await self.get_addresses_code_hash(
-                    associated_addresses
-                )
-            if new_code_hash != user_operation.code_hash:
-                raise ValidationException(
-                    ValidationExceptionCode.OpcodeValidation,
-                    "modified code after first validation",
-                    "",
-                )
+      
+        if len(associated_addresses) > 0:
+            user_operation.code_hash = await self.get_addresses_code_hash(
+                associated_addresses
+            )
+            user_operation.associated_addresses = associated_addresses
 
     @staticmethod
     def is_slot_associated_with_address(

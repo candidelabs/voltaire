@@ -120,27 +120,14 @@ class MempoolManager:
             sender = self.senders[sender_address]
             if len(sender.user_operations) > 0:
                 user_operation = sender.user_operations.pop(0)
-                if not self.is_unsafe:
-                    (
-                        _,
-                        sender_stake_info,
-                        factory_stake_info,
-                        paymaster_stake_info,
-                    ) = await self.validation_manager.simulate_validation_and_decode_result(
-                        user_operation
-                    )
-
-                    validation_operations.append(
-                        self.validation_manager.validate_user_operation(
-                            user_operation,
-                            sender_stake_info,
-                            factory_stake_info,
-                            paymaster_stake_info,
-                        )
-                    )
-                    bundle.append(user_operation)
-                else:
-                    bundle.append(user_operation)
+               
+                new_code_hash =  await self.validation_manager.get_addresses_code_hash(
+                    user_operation.associated_addresses
+                )
+                if new_code_hash != user_operation.code_hash:
+                    continue
+                  
+                bundle.append(user_operation)
                 if len(sender.user_operations) == 0:
                     del self.senders[sender.address]
 
