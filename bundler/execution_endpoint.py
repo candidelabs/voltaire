@@ -157,7 +157,10 @@ class ExecutionEndpoint(Endpoint):
             pre_operation_gas = 80000
             deadline = 10000000000000000
         else:
-            _, solidity_error_params = await self.validation_manager.simulate_validation_without_tracing(
+            (
+                _,
+                solidity_error_params,
+            ) = await self.validation_manager.simulate_validation_without_tracing(
                 user_operation
             )
 

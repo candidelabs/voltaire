@@ -102,13 +102,15 @@ class MempoolManager:
             sender = self.senders[sender_address]
             if len(sender.user_operations) > 0:
                 user_operation = sender.user_operations.pop(0)
-               
-                new_code_hash =  await self.validation_manager.get_addresses_code_hash(
-                    user_operation.associated_addresses
+
+                new_code_hash = (
+                    await self.validation_manager.get_addresses_code_hash(
+                        user_operation.associated_addresses
+                    )
                 )
                 if new_code_hash != user_operation.code_hash:
                     continue
-                  
+
                 bundle.append(user_operation)
                 if len(sender.user_operations) == 0:
                     del self.senders[sender.address]

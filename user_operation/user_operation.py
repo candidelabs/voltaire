@@ -17,7 +17,7 @@ class UserOperation:
     paymaster_and_data: bytes
     signature: bytes
     code_hash: str | None
-    associated_addresses:list()
+    associated_addresses: list()
     factory_address: str | None
     paymaster_address: str | None
     jsonRequestDict: InitVar[dict]

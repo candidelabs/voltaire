@@ -81,21 +81,22 @@ class ValidationManager:
     async def validate_user_operation(
         self,
         user_operation: UserOperation,
-    ) -> None: 
+    ) -> None:
         self.verify_preverification_gas(user_operation)
         await self.verify_gas_fees(user_operation)
-        
+
         if self.is_unsafe:
-            selector, validation_result = await self.simulate_validation_without_tracing(
-                user_operation
-            )
+            (
+                selector,
+                validation_result,
+            ) = await self.simulate_validation_without_tracing(user_operation)
         else:
             debug_data: str = await self.simulate_validation_with_tracing(
                 user_operation
             )
-            selector = debug_data['debug'][-2]['REVERT'][:10]
-            validation_result = debug_data['debug'][-2]['REVERT'][10:]
-        
+            selector = debug_data["debug"][-2]["REVERT"][:10]
+            validation_result = debug_data["debug"][-2]["REVERT"][10:]
+
         if ValidationManager.check_if_failed_op_error(selector):
             _, reason = ValidationManager.decode_FailedOp_event(
                 validation_result
@@ -105,32 +106,30 @@ class ValidationManager:
                 "revert reason : " + reason,
                 validation_result,
             )
-        
+
         (
             return_info,
             sender_stake_info,
             factory_stake_info,
             paymaster_stake_info,
-        ) = ValidationManager.decode_validation_result(
-            validation_result
-        )
+        ) = ValidationManager.decode_validation_result(validation_result)
 
         self.verify_sig_and_pre_operation_gas_and_timestamp(
-                user_operation, return_info
-            )
+            user_operation, return_info
+        )
 
         debug_data_formated = ValidationManager.format_debug_traceCall_data(
             debug_data
-            )
+        )
         if not self.is_unsafe:
             await self.validate_trace_results(
                 user_operation,
                 sender_stake_info,
                 factory_stake_info,
                 paymaster_stake_info,
-                debug_data_formated
+                debug_data_formated,
             )
-    
+
     async def simulate_validation_without_tracing(
         self, user_operation: UserOperation
     ) -> tuple[str, str]:
@@ -177,7 +176,7 @@ class ValidationManager:
         solidity_error_params = error_data[10:]
 
         return solidity_error_selector, solidity_error_params
-    
+
     async def simulate_validation_with_tracing(
         self, user_operation: UserOperation
     ) -> str:
@@ -234,7 +233,6 @@ class ValidationManager:
                 "",
             )
 
-        
     async def validate_trace_results(
         self,
         user_operation: UserOperation,
@@ -243,7 +241,6 @@ class ValidationManager:
         paymaster_stake_info: StakeInfo,
         debug_data: DebugTraceCallData,
     ) -> None:
-        
         factory_opcodes = debug_data.factory_data.opcodes
         account_opcodes = debug_data.account_data.opcodes
         paymaster_opcodes = debug_data.paymaster_data.opcodes
@@ -331,7 +328,7 @@ class ValidationManager:
                 to_checksum_address(lower_case_address)
                 for lower_case_address in associated_addresses_lowercase
             ]
-      
+
         if len(associated_addresses) > 0:
             user_operation.code_hash = await self.get_addresses_code_hash(
                 associated_addresses
@@ -350,7 +347,7 @@ class ValidationManager:
     ) -> None:
         if entity_address in self.whitelist_entity_storage_access:
             return
-        
+
         is_staked = ValidationManager.is_staked(stake_info)
 
         for contract_address in access.keys():
@@ -418,7 +415,7 @@ class ValidationManager:
                         ),
                         "",
                     )
-    
+
     async def check_banned_op_codes(
         self,
         factory_opcodes: dict[str:int],
@@ -430,12 +427,8 @@ class ValidationManager:
             self.verify_banned_opcodes(account_opcodes, "account"),
             self.verify_banned_opcodes(paymaster_opcodes, "paymaster"),
         )
-    
-    
-        
-    def format_debug_traceCall_data(
-        debug_data: str
-    ) -> DebugEntityData:
+
+    def format_debug_traceCall_data(debug_data: str) -> DebugEntityData:
         factory_data = DebugEntityData(
             debug_data["numberLevels"][0]["access"],
             debug_data["numberLevels"][0]["opcodes"],
@@ -463,7 +456,7 @@ class ValidationManager:
         )
 
         return debug_trace_call_data
-    
+
     async def verify_banned_opcodes(
         self,
         opcodes: dict[str:int],
@@ -550,13 +543,11 @@ class ValidationManager:
                 "Transaction will expire shortly or has expired.",
                 "",
             )
-        
-    async def verify_gas_fees(
-        self, user_operation: UserOperation
-    ) -> None:
+
+    async def verify_gas_fees(self, user_operation: UserOperation) -> None:
         max_fee_per_gas = user_operation.max_fee_per_gas
         max_priority_fee_per_gas = user_operation.max_priority_fee_per_gas
-        
+
         base_plus_tip_fee_gas_price_op = send_rpc_request_to_eth_client(
             self.ethereum_node_url, "eth_gasPrice"
         )
@@ -590,20 +581,23 @@ class ValidationManager:
                 f"Max priority fee per gas is too low. it should be minimum : {tip_fee_gas_price}",
                 "",
             )
-        
+
     def verify_preverification_gas(
         self, user_operation: UserOperation
-    ) -> None:    
-        preverification_gas = self.user_operation_handler.calc_preverification_gas(
-            user_operation)
-        
+    ) -> None:
+        preverification_gas = (
+            self.user_operation_handler.calc_preverification_gas(
+                user_operation
+            )
+        )
+
         if user_operation.pre_verification_gas < preverification_gas:
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
                 f"Preverification gas is too low. it should be minimum : {preverification_gas}",
                 "",
             )
-        
+
     @staticmethod
     def is_slot_associated_with_address(
         slot, address: str, associated_slots: list[str]
@@ -777,4 +771,3 @@ class ValidationManager:
                 stack.append(call_to_stack)
 
         return results, paymaster_call
-    

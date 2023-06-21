@@ -128,7 +128,9 @@ class UserOperationHandler:
     async def get_user_operation_by_hash(
         self, user_operation_hash: str
     ) -> tuple:
-        event_log_info = await self.get_user_operation_event_log_info(user_operation_hash)
+        event_log_info = await self.get_user_operation_event_log_info(
+            user_operation_hash
+        )
         log_object = event_log_info[0]
         transaction_hash = log_object.transactionHash
 
@@ -326,9 +328,9 @@ class UserOperationHandler:
         )
         return res["result"]
 
-    async def get_user_operation_logs(self, user_operation_hash:str):
+    async def get_user_operation_logs(self, user_operation_hash: str):
         USER_OPERATIOM_EVENT_DISCRIPTOR = "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
-        
+
         params = [
             {
                 "address": self.entrypoint,
