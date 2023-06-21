@@ -53,28 +53,10 @@ class MempoolManager:
             user_operation.paymaster_address,
         )
 
-        self.validation_manager.verify_preverification_gas(user_operation)
-        await self.validation_manager.verify_gas_fees(user_operation)
-        
-        (
-            return_info,
-            sender_stake_info,
-            factory_stake_info,
-            paymaster_stake_info,
-        ) = await self.validation_manager.simulate_validation_and_decode_result(
-            user_operation
+        # if not self.is_unsafe:
+        await self.validation_manager.validate_user_operation(
+            user_operation,
         )
-
-        self.validation_manager.verify_sig_and_pre_operation_gas_and_timestamp(
-                user_operation, return_info
-            )
-        if not self.is_unsafe:
-            await self.validation_manager.validate_user_operation(
-                user_operation,
-                sender_stake_info,
-                factory_stake_info,
-                paymaster_stake_info,
-            )
 
         new_sender = None
         new_sender_address = user_operation.sender

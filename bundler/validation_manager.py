@@ -81,17 +81,169 @@ class ValidationManager:
     async def validate_user_operation(
         self,
         user_operation: UserOperation,
+    ) -> None: 
+        self.verify_preverification_gas(user_operation)
+        await self.verify_gas_fees(user_operation)
+        
+        if self.is_unsafe:
+            selector, validation_result = await self.simulate_validation_without_tracing(
+                user_operation
+            )
+        else:
+            debug_data: str = await self.simulate_validation_with_tracing(
+                user_operation
+            )
+            selector = debug_data['debug'][-2]['REVERT'][:10]
+            validation_result = debug_data['debug'][-2]['REVERT'][10:]
+        
+        if ValidationManager.check_if_failed_op_error(selector):
+            _, reason = ValidationManager.decode_FailedOp_event(
+                validation_result
+            )
+            raise ValidationException(
+                ValidationExceptionCode.SimulateValidation,
+                "revert reason : " + reason,
+                validation_result,
+            )
+        
+        (
+            return_info,
+            sender_stake_info,
+            factory_stake_info,
+            paymaster_stake_info,
+        ) = ValidationManager.decode_validation_result(
+            validation_result
+        )
+
+        self.verify_sig_and_pre_operation_gas_and_timestamp(
+                user_operation, return_info
+            )
+
+        debug_data_formated = ValidationManager.format_debug_traceCall_data(
+            debug_data
+            )
+        if not self.is_unsafe:
+            await self.validate_trace_results(
+                user_operation,
+                sender_stake_info,
+                factory_stake_info,
+                paymaster_stake_info,
+                debug_data_formated
+            )
+    
+    async def simulate_validation_without_tracing(
+        self, user_operation: UserOperation
+    ) -> tuple[str, str]:
+        # simulateValidation(entrypoint solidity function) will always revert
+        function_selector = "0xee219423"
+        params = encode(
+            [
+                "(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)"
+            ],
+            [user_operation.to_list()],
+        )
+
+        call_data = function_selector + params.hex()
+
+        params = [
+            {
+                "from": self.bundler_address,
+                "to": self.entrypoint,
+                "data": call_data,
+            },
+            "latest",
+        ]
+
+        result = await send_rpc_request_to_eth_client(
+            self.ethereum_node_url, "eth_call", params
+        )
+        if (
+            "error" not in result
+            or "execution reverted" not in result["error"]["message"]
+        ):
+            raise ValueError("simulateValidation didn't revert!")
+
+        elif (
+            "data" not in result["error"] or len(result["error"]["data"]) < 10
+        ):
+            raise ValidationException(
+                ValidationExceptionCode.SimulateValidation,
+                result["error"]["message"],
+                "",
+            )
+
+        error_data = result["error"]["data"]
+        solidity_error_selector = str(error_data[:10])
+        solidity_error_params = error_data[10:]
+
+        return solidity_error_selector, solidity_error_params
+    
+    async def simulate_validation_with_tracing(
+        self, user_operation: UserOperation
+    ) -> str:
+        simultion_gas = (
+            user_operation.pre_verification_gas
+            + user_operation.verification_gas_limit
+        )
+
+        function_selector = "0xee219423"  # simulateValidation
+        params = encode(
+            [
+                "(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)"
+            ],
+            [user_operation.to_list()],
+        )
+
+        call_data = function_selector + params.hex()
+
+        gas_price = await send_rpc_request_to_eth_client(
+            self.ethereum_node_url, "eth_gasPrice"
+        )
+
+        params = [
+            {
+                "from": self.bundler_address,
+                "to": self.entrypoint,
+                "data": call_data,
+                "gasLimit": 0,
+                "gasPrice": gas_price["result"],
+            },
+            "latest",
+            {"tracer": self.bundler_collector_tracer},
+        ]
+
+        res = await send_rpc_request_to_eth_client(
+            self.ethereum_node_url, "debug_traceCall", params
+        )
+
+        if "result" in res:
+            debug_data = res["result"]
+            return debug_data
+
+        elif "error" in res and "message" in res["error"]:
+            raise ValidationException(
+                ValidationExceptionCode.SimulateValidation,
+                res["error"]["message"]
+                + " - Try reducing maxFeePerGas or contact the bundler maintainer if the bundler account is not sufficiently funded",
+                "",
+            )
+        else:
+            raise ValidationException(
+                ValidationExceptionCode.SimulateValidation,
+                "Invalide Validation result from debug_traceCall",
+                "",
+            )
+
+        
+    async def validate_trace_results(
+        self,
+        user_operation: UserOperation,
         sender_stake_info: StakeInfo,
         factory_stake_info: StakeInfo,
         paymaster_stake_info: StakeInfo,
+        debug_data: DebugTraceCallData,
     ) -> None:
-        if self.is_unsafe:
-            return
-
-        debug_data: DebugTraceCallData = await self.get_debug_traceCall_data(
-            user_operation
-        )
-
+        
         factory_opcodes = debug_data.factory_data.opcodes
         account_opcodes = debug_data.account_data.opcodes
         paymaster_opcodes = debug_data.paymaster_data.opcodes
@@ -186,33 +338,6 @@ class ValidationManager:
             )
             user_operation.associated_addresses = associated_addresses
 
-    @staticmethod
-    def is_slot_associated_with_address(
-        slot, address: str, associated_slots: list[str]
-    ) -> bool:
-        address_lowercase = address[2:].lower()
-        address_padded = "0x000000000000000000000000" + address_lowercase
-        address_lowercase = "0x" + address_lowercase
-
-        if slot == address_padded:
-            return True
-
-        slot_int = int(slot, 16)
-
-        for associated_slot in associated_slots:
-            associated_slot_int = int(associated_slot, 16)
-            if (
-                slot_int >= associated_slot_int
-                and slot_int < associated_slot_int + 18
-            ):
-                return True
-
-        return False
-
-    @staticmethod
-    def is_staked(entity_stake: StakeInfo) -> bool:
-        return entity_stake.stake > 1 and entity_stake.unstakeDelaySec > 1
-
     def validate_entity_storage_access(
         self,
         entity_address: str,
@@ -293,147 +418,7 @@ class ValidationManager:
                         ),
                         "",
                     )
-
-    async def simulate_validation_and_decode_result(
-        self, user_operation: UserOperation
-    ) -> ReturnInfo:
-        # simulateValidation(entrypoint solidity function) will always revert
-        (
-            solidity_error_selector,
-            solidity_error_params,
-        ) = await self.simulate_validation(user_operation)
-
-        if ValidationManager.check_if_failed_op_error(solidity_error_selector):
-            _, reason = ValidationManager.decode_FailedOp_event(
-                solidity_error_params
-            )
-            raise ValidationException(
-                ValidationExceptionCode.SimulateValidation,
-                "revert reason : " + reason,
-                solidity_error_params,
-            )
-
-        (
-            return_info,
-            sender_info,
-            factory_info,
-            paymaster_info,
-        ) = ValidationManager.decode_validation_result_event(
-            solidity_error_params
-        )
-        return return_info, sender_info, factory_info, paymaster_info
-
-    @staticmethod
-    def check_if_failed_op_error(solidity_error_selector: str) -> bool:
-        return solidity_error_selector == FailedOpRevertData.SELECTOR
-
-    @staticmethod
-    def decode_validation_result_event(
-        solidity_error_params: str,
-    ) -> tuple[ReturnInfo, StakeInfo, StakeInfo, StakeInfo]:
-        VALIDATION_RESULT_ABI = [
-            "(uint256,uint256,bool,uint64,uint64,bytes)",
-            "(uint256,uint256)",
-            "(uint256,uint256)",
-            "(uint256,uint256)",
-        ]
-        try:
-            validation_result_decoded = decode(
-                VALIDATION_RESULT_ABI, bytes.fromhex(solidity_error_params)
-            )
-        except Exception as err:
-            operation_index, reason = ValidationManager.decode_FailedOp_event(
-                solidity_error_params
-            )
-            raise ValidationException(
-                ValidationExceptionCode.SimulateValidation,
-                reason,
-                "",
-            )
-
-        return_info_arr = validation_result_decoded[0]
-        return_info = ReturnInfo(
-            preOpGas=return_info_arr[0],
-            prefund=return_info_arr[1],
-            sigFailed=return_info_arr[2],
-            validAfter=return_info_arr[3],
-            validUntil=return_info_arr[4],
-        )
-
-        sender_info_arr = validation_result_decoded[1]
-        sender_info = StakeInfo(
-            stake=sender_info_arr[0], unstakeDelaySec=sender_info_arr[1]
-        )
-
-        factory_info_arr = validation_result_decoded[2]
-        factory_info = StakeInfo(
-            stake=factory_info_arr[0], unstakeDelaySec=factory_info_arr[1]
-        )
-
-        paymaster_info_arr = validation_result_decoded[3]
-        paymaster_info = StakeInfo(
-            stake=paymaster_info_arr[0], unstakeDelaySec=paymaster_info_arr[1]
-        )
-
-        return return_info, sender_info, factory_info, paymaster_info
-
-    @staticmethod
-    def decode_FailedOp_event(solidity_error_params: str) -> tuple[str, str]:
-        FAILED_OP_PARAMS_API = ["uint256", "string"]
-        failed_op_params_res = decode(
-            FAILED_OP_PARAMS_API, bytes.fromhex(solidity_error_params)
-        )
-        operation_index = failed_op_params_res[0]
-        reason = failed_op_params_res[1]
-
-        return operation_index, reason
-
-    async def simulate_validation(
-        self, user_operation: UserOperation
-    ) -> tuple[str, str]:
-        function_selector = "0xee219423"  # simulateValidation
-        params = encode(
-            [
-                "(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)"
-            ],
-            [user_operation.to_list()],
-        )
-
-        call_data = function_selector + params.hex()
-
-        params = [
-            {
-                "from": self.bundler_address,
-                "to": self.entrypoint,
-                "data": call_data,
-            },
-            "latest",
-        ]
-
-        result = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_call", params
-        )
-        if (
-            "error" not in result
-            or "execution reverted" not in result["error"]["message"]
-        ):
-            raise ValueError("simulateValidation didn't revert!")
-
-        elif (
-            "data" not in result["error"] or len(result["error"]["data"]) < 10
-        ):
-            raise ValidationException(
-                ValidationExceptionCode.SimulateValidation,
-                result["error"]["message"],
-                "",
-            )
-
-        error_data = result["error"]["data"]
-        solidity_error_selector = str(error_data[:10])
-        solidity_error_params = error_data[10:]
-
-        return solidity_error_selector, solidity_error_params
-
+    
     async def check_banned_op_codes(
         self,
         factory_opcodes: dict[str:int],
@@ -445,88 +430,40 @@ class ValidationManager:
             self.verify_banned_opcodes(account_opcodes, "account"),
             self.verify_banned_opcodes(paymaster_opcodes, "paymaster"),
         )
-
-    async def get_debug_traceCall_data(
-        self, user_operation: UserOperation
-    ) -> DebugTraceCallData:
-        simultion_gas = (
-            user_operation.pre_verification_gas
-            + user_operation.verification_gas_limit
+    
+    
+        
+    def format_debug_traceCall_data(
+        debug_data: str
+    ) -> DebugEntityData:
+        factory_data = DebugEntityData(
+            debug_data["numberLevels"][0]["access"],
+            debug_data["numberLevels"][0]["opcodes"],
+            debug_data["numberLevels"][0]["contractSize"],
+        )
+        account_data = DebugEntityData(
+            debug_data["numberLevels"][1]["access"],
+            debug_data["numberLevels"][1]["opcodes"],
+            debug_data["numberLevels"][1]["contractSize"],
+        )
+        paymaster_data = DebugEntityData(
+            debug_data["numberLevels"][2]["access"],
+            debug_data["numberLevels"][2]["opcodes"],
+            debug_data["numberLevels"][2]["contractSize"],
         )
 
-        function_selector = "0xee219423"  # simulateValidation
-        params = encode(
-            [
-                "(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)"
-            ],
-            [user_operation.to_list()],
+        debug_trace_call_data = DebugTraceCallData(
+            factory_data,
+            account_data,
+            paymaster_data,
+            debug_data["keccak"],
+            debug_data["logs"],
+            debug_data["calls"],
+            debug_data["debug"],
         )
 
-        call_data = function_selector + params.hex()
-
-        gas_price = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_gasPrice"
-        )
-
-        params = [
-            {
-                "from": self.bundler_address,
-                "to": self.entrypoint,
-                "data": call_data,
-                "gasLimit": 0,
-                "gasPrice": gas_price["result"],
-            },
-            "latest",
-            {"tracer": self.bundler_collector_tracer},
-        ]
-
-        res = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "debug_traceCall", params
-        )
-
-        if "result" in res:
-            debug_data = res["result"]
-            factory_data = DebugEntityData(
-                debug_data["numberLevels"][0]["access"],
-                debug_data["numberLevels"][0]["opcodes"],
-                debug_data["numberLevels"][0]["contractSize"],
-            )
-            account_data = DebugEntityData(
-                debug_data["numberLevels"][1]["access"],
-                debug_data["numberLevels"][1]["opcodes"],
-                debug_data["numberLevels"][1]["contractSize"],
-            )
-            paymaster_data = DebugEntityData(
-                debug_data["numberLevels"][2]["access"],
-                debug_data["numberLevels"][2]["opcodes"],
-                debug_data["numberLevels"][2]["contractSize"],
-            )
-
-            debug_trace_call_data = DebugTraceCallData(
-                factory_data,
-                account_data,
-                paymaster_data,
-                debug_data["keccak"],
-                debug_data["logs"],
-                debug_data["calls"],
-                debug_data["debug"],
-            )
-
-            return debug_trace_call_data
-        elif "error" in res and "message" in res["error"]:
-            raise ValidationException(
-                ValidationExceptionCode.SimulateValidation,
-                res["error"]["message"]
-                + " - Try reducing maxFeePerGas or contact the bundler maintainer if the bundler account is not sufficiently funded",
-                "",
-            )
-        else:
-            raise ValidationException(
-                ValidationExceptionCode.SimulateValidation,
-                "Invalide Validation result from debug_traceCall",
-                "",
-            )
-
+        return debug_trace_call_data
+    
     async def verify_banned_opcodes(
         self,
         opcodes: dict[str:int],
@@ -573,88 +510,6 @@ class ValidationManager:
             raise ValueError("BundlerHelper should revert")
 
         return result["error"]["data"]
-
-    @staticmethod
-    def parse_entity_slots(entities: list[str], keccak_list: list[str]):
-        entity_slots = dict()
-        for slot_keccak in keccak_list:
-            for address in entities:
-                address_lowercase = address[2:].lower()
-                address_padded = (
-                    "0x000000000000000000000000" + address_lowercase
-                )
-                address_lowercase = "0x" + address_lowercase
-                if address not in entity_slots:
-                    entity_slots[address] = []
-
-                current_entity_slot = entity_slots[address]
-                if address_padded in slot_keccak:
-                    keccak_hash = keccak(bytes.fromhex(slot_keccak[2:]))
-                    slot = keccak_hash.hex()
-                    if slot not in current_entity_slot:
-                        current_entity_slot.append(slot)
-        return entity_slots
-
-    @staticmethod
-    def parse_call_stack(
-        calls: list[dict[str, str]], paymaster_address: str
-    ) -> tuple[list[Call], Call | None]:
-        stack = []
-        top = Call()
-        results = []
-        paymaster_call = None
-        VALIDATE_PAYMASTER_USER_OP_METHOD_SELECTOR = "0xf465c77e"
-        for call in calls:
-            if call.get("type") == "RETURN" or call.get("type") == "REVERT":
-                if len(stack) == 0:
-                    top = Call()
-                    top._type = "top"
-                    top._method = "validateUserOp"
-                else:
-                    top = stack.pop()
-
-                return_data = call["data"]
-
-                result = Call()
-                result._to = top._to
-                result._from = top._from
-                result._type = top._type
-                result._gas = top._gas
-                result._gas_used = call.get("gasUsed")
-                if top._type == "CREATE":
-                    result._data = "len=" + str(len(return_data))
-                elif top._type == "REVERT":
-                    result._method = top._method
-                    result._data = call.get("data")
-                    result._return_type = "REVERT"
-                else:
-                    result._method = top._method
-                    result._data = call.get("data")
-                    result._return_type = "RETURN"
-
-                if (
-                    paymaster_address is not None
-                    and paymaster_address == result._to
-                    and VALIDATE_PAYMASTER_USER_OP_METHOD_SELECTOR
-                    == result._method
-                ):
-                    paymaster_call = result
-
-                results.append(result)
-            else:
-                call_to_stack = Call(
-                    _to=call.get("to"),
-                    _from=call.get("from"),
-                    _type=call.get("type"),
-                    _method=call.get("method"),
-                    _value=call.get("value"),
-                    _gas=call.get("gas"),
-                    _data=call.get("data"),
-                )
-
-                stack.append(call_to_stack)
-
-        return results, paymaster_call
 
     def verify_sig_and_pre_operation_gas_and_timestamp(
         self, user_operation: UserOperation, return_info: ReturnInfo
@@ -748,3 +603,178 @@ class ValidationManager:
                 f"Preverification gas is too low. it should be minimum : {preverification_gas}",
                 "",
             )
+        
+    @staticmethod
+    def is_slot_associated_with_address(
+        slot, address: str, associated_slots: list[str]
+    ) -> bool:
+        address_lowercase = address[2:].lower()
+        address_padded = "0x000000000000000000000000" + address_lowercase
+        address_lowercase = "0x" + address_lowercase
+
+        if slot == address_padded:
+            return True
+
+        slot_int = int(slot, 16)
+
+        for associated_slot in associated_slots:
+            associated_slot_int = int(associated_slot, 16)
+            if (
+                slot_int >= associated_slot_int
+                and slot_int < associated_slot_int + 18
+            ):
+                return True
+
+        return False
+
+    @staticmethod
+    def is_staked(entity_stake: StakeInfo) -> bool:
+        return entity_stake.stake > 1 and entity_stake.unstakeDelaySec > 1
+
+    @staticmethod
+    def check_if_failed_op_error(solidity_error_selector: str) -> bool:
+        return solidity_error_selector == FailedOpRevertData.SELECTOR
+
+    @staticmethod
+    def decode_validation_result(
+        solidity_error_params: str,
+    ) -> tuple[ReturnInfo, StakeInfo, StakeInfo, StakeInfo]:
+        VALIDATION_RESULT_ABI = [
+            "(uint256,uint256,bool,uint64,uint64,bytes)",
+            "(uint256,uint256)",
+            "(uint256,uint256)",
+            "(uint256,uint256)",
+        ]
+        try:
+            validation_result_decoded = decode(
+                VALIDATION_RESULT_ABI, bytes.fromhex(solidity_error_params)
+            )
+        except Exception as err:
+            operation_index, reason = ValidationManager.decode_FailedOp_event(
+                solidity_error_params
+            )
+            raise ValidationException(
+                ValidationExceptionCode.SimulateValidation,
+                reason,
+                "",
+            )
+
+        return_info_arr = validation_result_decoded[0]
+        return_info = ReturnInfo(
+            preOpGas=return_info_arr[0],
+            prefund=return_info_arr[1],
+            sigFailed=return_info_arr[2],
+            validAfter=return_info_arr[3],
+            validUntil=return_info_arr[4],
+        )
+
+        sender_info_arr = validation_result_decoded[1]
+        sender_info = StakeInfo(
+            stake=sender_info_arr[0], unstakeDelaySec=sender_info_arr[1]
+        )
+
+        factory_info_arr = validation_result_decoded[2]
+        factory_info = StakeInfo(
+            stake=factory_info_arr[0], unstakeDelaySec=factory_info_arr[1]
+        )
+
+        paymaster_info_arr = validation_result_decoded[3]
+        paymaster_info = StakeInfo(
+            stake=paymaster_info_arr[0], unstakeDelaySec=paymaster_info_arr[1]
+        )
+
+        return return_info, sender_info, factory_info, paymaster_info
+
+    @staticmethod
+    def decode_FailedOp_event(solidity_error_params: str) -> tuple[str, str]:
+        FAILED_OP_PARAMS_API = ["uint256", "string"]
+        failed_op_params_res = decode(
+            FAILED_OP_PARAMS_API, bytes.fromhex(solidity_error_params)
+        )
+        operation_index = failed_op_params_res[0]
+        reason = failed_op_params_res[1]
+
+        return operation_index, reason
+
+    @staticmethod
+    def parse_entity_slots(entities: list[str], keccak_list: list[str]):
+        entity_slots = dict()
+        for slot_keccak in keccak_list:
+            for address in entities:
+                address_lowercase = address[2:].lower()
+                address_padded = (
+                    "0x000000000000000000000000" + address_lowercase
+                )
+                address_lowercase = "0x" + address_lowercase
+                if address not in entity_slots:
+                    entity_slots[address] = []
+
+                current_entity_slot = entity_slots[address]
+                if address_padded in slot_keccak:
+                    keccak_hash = keccak(bytes.fromhex(slot_keccak[2:]))
+                    slot = keccak_hash.hex()
+                    if slot not in current_entity_slot:
+                        current_entity_slot.append(slot)
+        return entity_slots
+
+    @staticmethod
+    def parse_call_stack(
+        calls: list[dict[str, str]], paymaster_address: str
+    ) -> tuple[list[Call], Call | None]:
+        stack = []
+        top = Call()
+        results = []
+        paymaster_call = None
+        VALIDATE_PAYMASTER_USER_OP_METHOD_SELECTOR = "0xf465c77e"
+        for call in calls:
+            if call.get("type") == "RETURN" or call.get("type") == "REVERT":
+                if len(stack) == 0:
+                    top = Call()
+                    top._type = "top"
+                    top._method = "validateUserOp"
+                else:
+                    top = stack.pop()
+
+                return_data = call["data"]
+
+                result = Call()
+                result._to = top._to
+                result._from = top._from
+                result._type = top._type
+                result._gas = top._gas
+                result._gas_used = call.get("gasUsed")
+                if top._type == "CREATE":
+                    result._data = "len=" + str(len(return_data))
+                elif top._type == "REVERT":
+                    result._method = top._method
+                    result._data = call.get("data")
+                    result._return_type = "REVERT"
+                else:
+                    result._method = top._method
+                    result._data = call.get("data")
+                    result._return_type = "RETURN"
+
+                if (
+                    paymaster_address is not None
+                    and paymaster_address == result._to
+                    and VALIDATE_PAYMASTER_USER_OP_METHOD_SELECTOR
+                    == result._method
+                ):
+                    paymaster_call = result
+
+                results.append(result)
+            else:
+                call_to_stack = Call(
+                    _to=call.get("to"),
+                    _from=call.get("from"),
+                    _type=call.get("type"),
+                    _method=call.get("method"),
+                    _value=call.get("value"),
+                    _gas=call.get("gas"),
+                    _data=call.get("data"),
+                )
+
+                stack.append(call_to_stack)
+
+        return results, paymaster_call
+    
