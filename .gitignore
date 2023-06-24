@@ -5,3 +5,4 @@ keystore
 **/.env
 **/.aws
 **/.ssh
+dist
