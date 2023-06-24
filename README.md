@@ -75,17 +75,17 @@ docker run --rm -ti --name geth -p 8545:8545 ethereum/client-go:v1.10.26 \
 
 ### Deploy the EntryPoint and fund the signer (in another terminal)
 ```
-geth --exec 'loadScript("test/deploy.js")' attach http://0.0.0.0:8545
+geth --exec 'loadScript("scripts/deploy.js")' attach http://0.0.0.0:8545
 ```
 
 ### Set env values
 ```
-source test/init-params 
+source scripts/init-params 
 ```
 
 ### Run the bundler
 ```
-poetry run python3 main.py --entrypoint $ENTRYPOINT --bundler_secret $BUNDLER_SECRET --chain_id 1337 --verbos
+poetry run python3 -m voltaire_bundler --entrypoint $ENTRYPOINT --bundler_secret $BUNDLER_SECRET --chain_id 1337 --verbose
 ```
 
 ### Test the bundler by cloning `eth-infinitism/bundler-spec-tests`
