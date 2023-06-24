@@ -6,11 +6,11 @@ from eth_utils import to_checksum_address
 from eth_abi import encode, decode
 
 from .user_operation import UserOperation
-from bundler.exceptions import ValidationException, ValidationExceptionCode
-from bundler.exceptions import ExecutionException, ExecutionExceptionCode
-from utils.eth_client_utils import send_rpc_request_to_eth_client
+from voltaire_bundler.bundler.exceptions import ValidationException, ValidationExceptionCode
+from voltaire_bundler.bundler.exceptions import ExecutionException, ExecutionExceptionCode
+from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
 
-from user_operation.models import (
+from voltaire_bundler.user_operation.models import (
     Log,
     ReceiptInfo,
     UserOperationReceiptInfo,

@@ -1,17 +1,18 @@
 import asyncio
 import time
+import os
 
 from eth_utils import to_checksum_address, keccak
 from eth_abi import decode, encode
 
-from user_operation.user_operation_handler import UserOperationHandler
-from user_operation.user_operation import UserOperation
-from user_operation.models import ReturnInfo, StakeInfo, FailedOpRevertData
-from bundler.exceptions import (
+from voltaire_bundler.user_operation.user_operation_handler import UserOperationHandler
+from voltaire_bundler.user_operation.user_operation import UserOperation
+from voltaire_bundler.user_operation.models import ReturnInfo, StakeInfo, FailedOpRevertData
+from voltaire_bundler.bundler.exceptions import (
     ValidationException,
     ValidationExceptionCode,
 )
-from utils.eth_client_utils import (
+from voltaire_bundler.utils.eth_client_utils import (
     send_rpc_request_to_eth_client,
     DebugTraceCallData,
     DebugEntityData,
@@ -54,8 +55,9 @@ class ValidationManager:
         self.is_legacy_mode = is_legacy_mode
         self.whitelist_entity_storage_access = whitelist_entity_storage_access
 
-        path = "utils/BundlerCollectorTracer.js"
-        with open(path) as keyfile:
+        package_directory = os.path.dirname(os.path.abspath(__file__))
+        BundlerCollectorTracer_file = os.path.join(package_directory, "..", 'utils', 'BundlerCollectorTracer.js')
+        with open(BundlerCollectorTracer_file) as keyfile:
             self.bundler_collector_tracer = keyfile.read()
 
         self.banned_opcodes = [

@@ -1,10 +1,16 @@
+import os
 import logging
 import argparse
 import re
 import json
 from dataclasses import dataclass
+from importlib.metadata import version
 
-from utils.import_key import import_bundler_account, public_address_from_private_key
+from .utils.import_key import (
+    import_bundler_account,
+    public_address_from_private_key,
+)
+
 
 VOLTAIRE_HEADER = "\n".join(
     (
@@ -15,6 +21,7 @@ VOLTAIRE_HEADER = "\n".join(
         r"|___/\____/_____/_/ /_/  |_/___/_/ |_/_____/   ",
     )
 )
+__version__ = version("voltaire_bundler")
 
 
 @dataclass()
@@ -31,7 +38,7 @@ class InitData:
     is_unsafe: bool
     is_legacy_mode: bool
     is_send_raw_transaction_conditional: bool
-    bundle_interval:int
+    bundle_interval: int
     whitelist_entity_storage_access: list()
 
 
@@ -55,7 +62,7 @@ def initialize() -> InitData:
     )
 
     group = parser.add_mutually_exclusive_group(required=True)
-    
+
     group.add_argument(
         "--bundler_secret",
         type=str,
@@ -170,10 +177,12 @@ def initialize() -> InitData:
         default=[],
     )
 
+    parser.add_argument('--version', action='version', version='%(prog)s ' + "version " +__version__)
+
     args = parser.parse_args()
 
-    bundler_address="" 
-    bundler_pk=""
+    bundler_address = ""
+    bundler_pk = ""
 
     if args.keystore_file_path is not None:
         bundler_address, bundler_pk = import_bundler_account(
@@ -183,7 +192,12 @@ def initialize() -> InitData:
         bundler_pk = args.bundler_secret
         bundler_address = public_address_from_private_key(bundler_pk)
 
-    bundler_helper_byte_code_file = open("utils/BundlerHelper.json")
+    package_directory = os.path.dirname(os.path.abspath(__file__))
+    BundlerHelper_file = os.path.join(
+        package_directory, "utils", "BundlerHelper.json"
+    )
+
+    bundler_helper_byte_code_file = open(BundlerHelper_file)
     data = json.load(bundler_helper_byte_code_file)
     bundler_helper_byte_code = data["bytecode"]
 
@@ -201,7 +215,7 @@ def initialize() -> InitData:
         args.legacy_mode,
         args.send_raw_transaction_conditional,
         args.bundle_interval,
-        args.whitelist_entity_storage_access
+        args.whitelist_entity_storage_access,
     )
 
     logging.basicConfig(
@@ -213,6 +227,7 @@ def initialize() -> InitData:
     logger = logging.getLogger("Voltaire")
     if args.verbose:
         print(VOLTAIRE_HEADER)
+        print("version : " + __version__)
 
     logging.info("Starting *** Voltaire *** - Python 4337 Bundler")
 

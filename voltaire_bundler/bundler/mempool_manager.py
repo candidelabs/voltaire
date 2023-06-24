@@ -1,11 +1,11 @@
 from dataclasses import dataclass
 import asyncio
-from user_operation.user_operation import UserOperation
+from voltaire_bundler.user_operation.user_operation import UserOperation
 from .sender import Sender
-from user_operation.user_operation_handler import UserOperationHandler
+from voltaire_bundler.user_operation.user_operation_handler import UserOperationHandler
 from .validation_manager import ValidationManager
 from .reputation_manager import ReputationManager, ReputationStatus
-from bundler.exceptions import ValidationException, ValidationExceptionCode
+from voltaire_bundler.bundler.exceptions import ValidationException, ValidationExceptionCode
 
 
 @dataclass

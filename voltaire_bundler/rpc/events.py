@@ -1,4 +1,4 @@
-from event_bus_manager.events import RequestEvent, ResponseEvent
+from voltaire_bundler.event_bus_manager.events import RequestEvent, ResponseEvent
 
 
 class RPCCallResponseEvent(RequestEvent):

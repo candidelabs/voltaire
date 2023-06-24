@@ -1,10 +1,19 @@
 [tool.poetry]
-name = "Voltaire"
-version = "0.1.0"
+name = "voltaire_bundler"
+version = "v0.1.0-alpha.21"
 description = "EIP-4337 python Bundler"
 authors = ["Candide Wallet Team"]
 license = "LGPL"
 readme = "README.md"
+homepage = "https://github.com/candidelabs/voltaire"
+repository = "https://github.com/candidelabs/voltaire"
+keywords = ["4337", "account_abstraction", "ethereum", "bundler"]
+classifiers = [
+    "Environment :: Console",
+    "Operating System :: POSIX :: Linux",
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: GNU Library or Lesser General Public License (LGPL)",
+]
 
 [tool.poetry.dependencies]
 python = "^3.11"

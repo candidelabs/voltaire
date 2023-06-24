@@ -3,11 +3,10 @@ import uvloop
 from functools import partial
 from signal import SIGINT, SIGTERM
 
-from init import initialize
-from rpc.rpc_http_server import run_rpc_http_server
-from init import InitData
-from bundler.execution_endpoint import ExecutionEndpoint
-from utils.SignalHaltError import immediate_exit
+from .boot import initialize, InitData
+from .rpc.rpc_http_server import run_rpc_http_server
+from voltaire_bundler.bundler.execution_endpoint import ExecutionEndpoint
+from voltaire_bundler.utils.SignalHaltError import immediate_exit
 
 
 async def main() -> None:
@@ -38,9 +37,13 @@ async def main() -> None:
         )
         task_group.create_task(execution_endpoint.start_execution_endpoint())
         task_group.create_task(
-            run_rpc_http_server(host=initData.rpc_url, port=initData.rpc_port, is_debug=initData.is_debug)
+            run_rpc_http_server(
+                host=initData.rpc_url,
+                port=initData.rpc_port,
+                is_debug=initData.is_debug,
+            )
         )
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+# if __name__ == "__main__":
+#     asyncio.run(main())

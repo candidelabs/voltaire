@@ -1,13 +1,13 @@
 import asyncio
 import logging
 
-from event_bus_manager.endpoint import Endpoint
-from rpc.events import RPCCallRequestEvent, RPCCallResponseEvent
-from user_operation.user_operation import UserOperation
+from voltaire_bundler.event_bus_manager.endpoint import Endpoint
+from voltaire_bundler.rpc.events import RPCCallRequestEvent, RPCCallResponseEvent
+from voltaire_bundler.user_operation.user_operation import UserOperation
 
 from .mempool_manager import MempoolManager
-from user_operation.user_operation_handler import UserOperationHandler
-from bundler.exceptions import (
+from voltaire_bundler.user_operation.user_operation_handler import UserOperationHandler
+from voltaire_bundler.bundler.exceptions import (
     ValidationException,
     ValidationExceptionCode,
     ExecutionException,

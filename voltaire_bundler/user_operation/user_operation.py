@@ -1,5 +1,5 @@
 from dataclasses import dataclass, InitVar
-from bundler.exceptions import ValidationException, ValidationExceptionCode
+from voltaire_bundler.bundler.exceptions import ValidationException, ValidationExceptionCode
 import re
 
 

@@ -11,14 +11,14 @@ from jsonrpcserver import (
 )
 from typing import Any
 
-from event_bus_manager.endpoint import Client
-from rpc.events import RPCCallRequestEvent, RPCCallResponseEvent
-from user_operation.user_operation import (
+from voltaire_bundler.event_bus_manager.endpoint import Client
+from .events import RPCCallRequestEvent, RPCCallResponseEvent
+from voltaire_bundler.user_operation.user_operation import (
     UserOperation,
     verify_and_get_address,
     is_user_operation_hash,
 )
-from bundler.exceptions import (
+from voltaire_bundler.bundler.exceptions import (
     ValidationException,
     ExecutionException,
     ValidationExceptionCode,

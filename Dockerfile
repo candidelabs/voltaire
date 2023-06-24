@@ -1,4 +1,4 @@
-FROM python:3.11.3-alpine3.18
+FROM python:3.11.4-alpine3.18
 
 ENV PIP_DEFAULT_TIMEOUT=100 \
     # Allow statements and log messages to immediately appear
@@ -10,18 +10,18 @@ ENV PIP_DEFAULT_TIMEOUT=100 \
 
 # Set WORKDIR
 WORKDIR /app
+COPY . /app
 
 RUN set -ex \
     # Create a non-root user
     && addgroup --system --gid 1001 appgroup \
     && adduser --system --uid 1001 -G appgroup --no-create-home appuser \
     # Install dependencies
-    && pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir "aiohttp==3.8.3" "jsonrpcserver==5.0.9" "uvloop==0.17.0" "eth-abi==4.0.0" "eth-account==0.8.0"
+    && pip install --no-cache-dir --upgrade pip \
+    && pip install -e . --no-cache-dir
 
-RUN chown -R appuser:appgroup /app
+RUN chown -R appuser:appgroup /app 
 
 USER appuser
 
-COPY . /app
-ENTRYPOINT [ "python", "main.py" ]
+ENTRYPOINT [ "python", "-m", "voltaire_bundler" ]
