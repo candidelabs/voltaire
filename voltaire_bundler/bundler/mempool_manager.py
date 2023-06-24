@@ -53,8 +53,7 @@ class MempoolManager:
             user_operation.paymaster_address,
         )
 
-        # if not self.is_unsafe:
-        await self.validation_manager.validate_user_operation(
+        is_sender_staked = await self.validation_manager.validate_user_operation(
             user_operation,
         )
 
@@ -68,9 +67,7 @@ class MempoolManager:
 
         await new_sender.add_user_operation(
             user_operation,
-            self.entrypoint,
-            self.bundler_address,
-            self.ethereum_node_url,
+            is_sender_staked,
         )
         self.update_all_seen_status(
             user_operation.sender,

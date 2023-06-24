@@ -169,6 +169,7 @@ class ExecutionEndpoint(Endpoint):
                 _,
                 _,
                 _,
+                _,
             ) = ValidationManager.decode_validation_result(
                 solidity_error_params
             )

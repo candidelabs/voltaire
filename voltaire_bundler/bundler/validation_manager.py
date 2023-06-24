@@ -83,7 +83,7 @@ class ValidationManager:
     async def validate_user_operation(
         self,
         user_operation: UserOperation,
-    ) -> None:
+    ) -> bool:
         self.verify_preverification_gas(user_operation)
         await self.verify_gas_fees(user_operation)
 
@@ -114,6 +114,7 @@ class ValidationManager:
             sender_stake_info,
             factory_stake_info,
             paymaster_stake_info,
+            is_sender_staked,
         ) = ValidationManager.decode_validation_result(validation_result)
 
         self.verify_sig_and_pre_operation_gas_and_timestamp(
@@ -131,6 +132,7 @@ class ValidationManager:
                 paymaster_stake_info,
                 debug_data_formated,
             )
+        return is_sender_staked
 
     async def simulate_validation_without_tracing(
         self, user_operation: UserOperation
@@ -679,7 +681,9 @@ class ValidationManager:
             stake=paymaster_info_arr[0], unstakeDelaySec=paymaster_info_arr[1]
         )
 
-        return return_info, sender_info, factory_info, paymaster_info
+        is_sender_staked = ValidationManager.is_staked(sender_info)
+
+        return return_info, sender_info, factory_info, paymaster_info, is_sender_staked
 
     @staticmethod
     def decode_FailedOp_event(solidity_error_params: str) -> tuple[str, str]:

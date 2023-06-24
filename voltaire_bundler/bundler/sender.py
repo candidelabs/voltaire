@@ -6,6 +6,8 @@ from voltaire_bundler.user_operation.user_operation import UserOperation
 from .exceptions import ValidationException, ValidationExceptionCode
 from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
 from voltaire_bundler.user_operation.models import DepositInfo
+from voltaire_bundler.user_operation.models import StakeInfo
+from .validation_manager import ValidationManager
 
 MAX_MEMPOOL_USEROPS_PER_SENDER = 4
 MIN_PRICE_BUMP = 10
@@ -19,19 +21,14 @@ class Sender:
     async def add_user_operation(
         self,
         new_user_operation: UserOperation,
-        entrypoint_address: str,
-        bundler_address: str,
-        ethereum_node_url: str,
+        is_sender_staked: bool
     ):
         sender_operations_num = len(self.user_operations)
-        is_staked = await self._check_if_stacked(
-            entrypoint_address, bundler_address, ethereum_node_url
-        )
 
         if sender_operations_num == 0:
             self.user_operations.append(new_user_operation)
         elif (
-            is_staked
+            is_sender_staked
             or sender_operations_num <= MAX_MEMPOOL_USEROPS_PER_SENDER
         ):
             existing_user_operation_with_same_nonce = (
@@ -44,7 +41,7 @@ class Sender:
                     new_user_operation, existing_user_operation_with_same_nonce
                 )
             elif (
-                is_staked
+                is_sender_staked
                 or sender_operations_num < MAX_MEMPOOL_USEROPS_PER_SENDER
             ):
                 self.user_operations.append(new_user_operation)
@@ -107,34 +104,6 @@ class Sender:
             if user_operation.nonce == nonce:
                 return user_operation
         return None
-
-    async def _check_if_stacked(
-        self,
-        entrypoint_address: str,
-        bundler_address: str,
-        ethereum_node_url: str,
-    ) -> bool:
-        function_selector = "0x5287ce12"  # getDepositInfo
-        params = encode(["address"], [self.address])
-
-        call_data = function_selector + params.hex()
-
-        params = [
-            {
-                "from": bundler_address,
-                "to": entrypoint_address,
-                "data": call_data,
-            },
-            "latest",
-        ]
-
-        response = await send_rpc_request_to_eth_client(
-            ethereum_node_url, "eth_call", params
-        )
-        result = response["result"]
-        deposit_info: DepositInfo = Sender._decode_deposit_info(result[2:])
-
-        return deposit_info.staked
 
     @staticmethod
     def _decode_deposit_info(encodedInfo) -> DepositInfo:
