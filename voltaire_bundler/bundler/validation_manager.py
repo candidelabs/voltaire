@@ -85,7 +85,7 @@ class ValidationManager:
         user_operation: UserOperation,
     ) -> bool:
         self.verify_preverification_gas(user_operation)
-        await self.verify_gas_fees(user_operation)
+        gas_price_hex = await self.verify_gas_fees_and_get_price(user_operation)
 
         if self.is_unsafe:
             (
@@ -94,7 +94,8 @@ class ValidationManager:
             ) = await self.simulate_validation_without_tracing(user_operation)
         else:
             debug_data: str = await self.simulate_validation_with_tracing(
-                user_operation
+                user_operation,
+                gas_price_hex,
             )
             selector = debug_data["debug"][-2]["REVERT"][:10]
             validation_result = debug_data["debug"][-2]["REVERT"][10:]
@@ -182,7 +183,8 @@ class ValidationManager:
         return solidity_error_selector, solidity_error_params
 
     async def simulate_validation_with_tracing(
-        self, user_operation: UserOperation
+        self, user_operation: UserOperation,
+        gas_price_hex: int
     ) -> str:
         simultion_gas = (
             user_operation.pre_verification_gas
@@ -198,18 +200,14 @@ class ValidationManager:
         )
 
         call_data = function_selector + params.hex()
-
-        gas_price = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_gasPrice"
-        )
-
+        
         params = [
             {
                 "from": self.bundler_address,
                 "to": self.entrypoint,
                 "data": call_data,
                 "gasLimit": 0,
-                "gasPrice": gas_price["result"],
+                "gasPrice": gas_price_hex,
             },
             "latest",
             {"tracer": self.bundler_collector_tracer},
@@ -548,7 +546,7 @@ class ValidationManager:
                 "",
             )
 
-    async def verify_gas_fees(self, user_operation: UserOperation) -> None:
+    async def verify_gas_fees_and_get_price(self, user_operation: UserOperation) -> int:
         max_fee_per_gas = user_operation.max_fee_per_gas
         max_priority_fee_per_gas = user_operation.max_priority_fee_per_gas
 
@@ -566,6 +564,7 @@ class ValidationManager:
 
         tasks = await asyncio.gather(*tasks_arr)
 
+        base_plus_tip_fee_gas_price_hex = tasks[0]["result"]
         base_plus_tip_fee_gas_price = int(tasks[0]["result"], 16)
 
         tip_fee_gas_price = base_plus_tip_fee_gas_price
@@ -585,6 +584,7 @@ class ValidationManager:
                 f"Max priority fee per gas is too low. it should be minimum : {tip_fee_gas_price}",
                 "",
             )
+        return base_plus_tip_fee_gas_price_hex
 
     def verify_preverification_gas(
         self, user_operation: UserOperation
