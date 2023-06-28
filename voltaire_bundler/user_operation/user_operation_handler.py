@@ -2,7 +2,7 @@ import asyncio
 from functools import reduce
 import math
 
-from eth_utils import to_checksum_address
+from eth_utils import to_checksum_address, keccak
 from eth_abi import encode, decode
 
 from .user_operation import UserOperation
@@ -99,17 +99,20 @@ class UserOperationHandler:
 
     @staticmethod
     def calc_preverification_gas(user_operation: UserOperation) -> int:
-        userOp = user_operation
-
+        user_operation_list = user_operation.to_list()
+        
+        user_operation_list[6] = 21000 #pre_verification_gas
+        user_operation_list[10] = b'\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01' #signature
+        
         fixed = 21000
         per_user_operation = 18300
         per_user_operation_word = 4
         zero_byte = 4
         non_zero_byte = 16
         bundle_size = 1
-        sigSize = 65
+        # sigSize = 65
 
-        packed = UserOperationHandler.pack_user_operation(userOp.to_list())
+        packed = UserOperationHandler.pack_user_operation(user_operation_list, False)
 
         cost_list = list(
             map(lambda x: zero_byte if x == b"\x00" else non_zero_byte, packed)
@@ -353,51 +356,42 @@ class UserOperationHandler:
             self.ethereum_node_url, "eth_getTransactionByHash", params
         )
         return res["result"]
+    
+    @staticmethod
+    def get_user_operation_hash(user_operation_list: list(), entrypoint_addr:str, chain_id:int):
+        packed_user_operation = keccak(UserOperationHandler.pack_user_operation(user_operation_list))
 
-    async def get_user_operation_hash(
-        self, user_operation: UserOperation
-    ) -> str:
-        function_selector = "0xa6193531"  # getUserOpHash
-        params = encode(
-            [
-                "(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)"
-            ],
-            [user_operation.to_list()],
-        )
-
-        call_data = function_selector + params.hex()
-        params = [
-            {
-                "from": self.bundler_address,
-                "to": self.entrypoint,
-                "data": call_data,
-            },
-            "latest",
-        ]
-
-        result = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_call", params
-        )
-        return result["result"]
+        encoded_user_operation_hash = encode(
+                [
+                    "(bytes32,address,uint256)"
+                ],
+                [[packed_user_operation, entrypoint_addr, chain_id]],
+            )
+        user_operation_hash = "0x" + keccak(encoded_user_operation_hash).hex()
+        return user_operation_hash
 
     @staticmethod
-    def pack_user_operation(user_operation: UserOperation) -> bytes:
-        return encode(
-            [
-                "address",
-                "uint256",
-                "bytes",
-                "bytes",
-                "uint256",
-                "uint256",
-                "uint256",
-                "uint256",
-                "uint256",
-                "bytes",
-                "bytes",
-            ],
-            user_operation,
-        )[66:-64]
+    def pack_user_operation(user_operation_list: list(), for_signature:bool = True) -> bytes:
+        if for_signature:
+            user_operation_list[2] = keccak(user_operation_list[2])
+            user_operation_list[3] = keccak(user_operation_list[3])
+            user_operation_list[9] = keccak(user_operation_list[9])
+            user_operation_list_without_signature = user_operation_list[:-1]
+
+            packed_user_operation = encode(
+                    [
+                        "address","uint256","bytes32","bytes32","uint256","uint256","uint256","uint256","uint256","bytes32"
+                    ],
+                    user_operation_list_without_signature,
+                )
+        else:
+            packed_user_operation = encode(
+                    [
+                        "address","uint256","bytes","bytes","uint256","uint256","uint256","uint256","uint256","bytes","bytes"
+                    ],
+                    user_operation_list,
+                )
+        return packed_user_operation
 
     @staticmethod
     def decode_handle_op_input(handle_op_input) -> list:

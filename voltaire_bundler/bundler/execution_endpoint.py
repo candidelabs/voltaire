@@ -94,6 +94,7 @@ class ExecutionEndpoint(Endpoint):
             bundler_private_key,
             bundler_address,
             entrypoint,
+            chain_id,
             is_unsafe,
         )
 

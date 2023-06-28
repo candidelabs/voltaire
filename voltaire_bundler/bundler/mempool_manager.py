@@ -17,6 +17,7 @@ class MempoolManager:
     bundler_private_key: str
     bundler_address: str
     entrypoint: str
+    chain_id: int
     senders: dict[str, Sender]
     is_unsafe: bool
     entity_no_of_ops_in_mempool: dict[str, int]  # factory and paymaster
@@ -30,6 +31,7 @@ class MempoolManager:
         bundler_private_key: str,
         bundler_address: str,
         entrypoint: str,
+        chain_id: int,
         is_unsafe: bool,
     ):
         self.validation_manager = validation_manager
@@ -39,6 +41,7 @@ class MempoolManager:
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
+        self.chain_id = chain_id
         self.is_unsafe = is_unsafe
         self.senders = {}
         self.entity_no_of_ops_in_mempool = {}
@@ -65,10 +68,21 @@ class MempoolManager:
 
         new_sender = self.senders[new_sender_address]
 
-        await new_sender.add_user_operation(
-            user_operation,
-            is_sender_staked,
+        tasks = await asyncio.gather(
+            new_sender.add_user_operation(
+                user_operation,
+                is_sender_staked,
+            ),
+            asyncio.to_thread(
+                UserOperationHandler.get_user_operation_hash,
+                    user_operation.to_list(),
+                    self.entrypoint,
+                    self.chain_id
+            ),
         )
+
+        user_operation_hash = tasks[1]
+
         self.update_all_seen_status(
             user_operation.sender,
             user_operation.factory_address,
@@ -84,12 +98,7 @@ class MempoolManager:
             self._update_entity_no_of_ops_in_mempool(
                 user_operation.paymaster_address
             )
-
-        user_operation_hash = (
-            await self.user_operation_handler.get_user_operation_hash(
-                user_operation
-            )
-        )
+        
         return user_operation_hash
 
     async def get_user_operations_to_bundle(self) -> list[UserOperation]:
