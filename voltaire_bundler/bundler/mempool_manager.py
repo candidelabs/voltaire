@@ -51,9 +51,9 @@ class MempoolManager:
 
     async def add_user_operation(self, user_operation: UserOperation) -> str:
         self._verify_entities_reputation(
-            user_operation.sender,
-            user_operation.factory_address,
-            user_operation.paymaster_address,
+            user_operation.sender_address,
+            user_operation.factory_address_lowercase,
+            user_operation.paymaster_address_lowercase,
         )
 
         is_sender_staked, user_operation_hash = await self.validation_manager.validate_user_operation(
@@ -61,7 +61,7 @@ class MempoolManager:
         )
 
         new_sender = None
-        new_sender_address = user_operation.sender
+        new_sender_address = user_operation.sender_address
 
         if new_sender_address not in self.senders:
             self.senders[new_sender_address] = Sender(new_sender_address)
@@ -74,19 +74,19 @@ class MempoolManager:
         )
 
         self.update_all_seen_status(
-            user_operation.sender,
-            user_operation.factory_address,
-            user_operation.paymaster_address,
+            user_operation.sender_address,
+            user_operation.factory_address_lowercase,
+            user_operation.paymaster_address_lowercase,
         )
 
-        if user_operation.factory_address is not None:
+        if user_operation.factory_address_lowercase is not None:
             self._update_entity_no_of_ops_in_mempool(
-                user_operation.factory_address
+                user_operation.factory_address_lowercase
             )
 
-        if user_operation.paymaster_address is not None:
+        if user_operation.paymaster_address_lowercase is not None:
             self._update_entity_no_of_ops_in_mempool(
-                user_operation.paymaster_address
+                user_operation.paymaster_address_lowercase
             )
         
         return user_operation_hash

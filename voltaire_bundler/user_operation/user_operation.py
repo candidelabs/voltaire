@@ -5,7 +5,7 @@ import re
 
 @dataclass()
 class UserOperation:
-    sender: str
+    sender_address: str
     nonce: int
     init_code: bytes
     call_data: bytes
@@ -18,8 +18,8 @@ class UserOperation:
     signature: bytes
     code_hash: str | None
     associated_addresses: list()
-    factory_address: str | None
-    paymaster_address: str | None
+    factory_address_lowercase: str | None
+    paymaster_address_lowercase: str | None
     jsonRequestDict: InitVar[dict]
 
     def __init__(self, jsonRequestDict):
@@ -31,7 +31,7 @@ class UserOperation:
             )
         self.verify_fields_exist(jsonRequestDict)
 
-        self.sender = verify_and_get_address(jsonRequestDict["sender"])
+        self.sender_address = verify_and_get_address(jsonRequestDict["sender"])
         self.nonce = verify_and_get_uint(jsonRequestDict["nonce"])
         self.init_code = verify_and_get_bytes(jsonRequestDict["initCode"])
         self.call_data = verify_and_get_bytes(jsonRequestDict["callData"])
@@ -87,7 +87,7 @@ class UserOperation:
 
     def get_user_operation_dict(self) -> tuple:
         return {
-            "sender": self.sender,
+            "sender": self.sender_address,
             "nonce": self.nonce,
             "initCode": self.init_code,
             "callData": self.call_data,
@@ -102,7 +102,7 @@ class UserOperation:
 
     def get_user_operation_json(self):
         return {
-            "sender": self.sender,
+            "sender": self.sender_address,
             "nonce": hex(self.nonce),
             "initCode": "0x" + self.init_code.hex(),
             "callData": "0x" + self.call_data.hex(),
@@ -117,7 +117,7 @@ class UserOperation:
 
     def to_list(self) -> list:
         return [
-            self.sender,
+            self.sender_address,
             self.nonce,
             self.init_code,
             self.call_data,
@@ -132,14 +132,14 @@ class UserOperation:
 
     def _set_factory_and_paymaster_address(self):
         if len(self.init_code) > 20:
-            self.factory_address = "0x" + self.init_code[:20].hex()
+            self.factory_address_lowercase = "0x" + self.init_code[:20].hex()
         else:
-            self.factory_address = None
+            self.factory_address_lowercase = None
 
         if len(self.paymaster_and_data) > 20:
-            self.paymaster_address = "0x" + self.paymaster_and_data[:20].hex()
+            self.paymaster_address_lowercase = "0x" + self.paymaster_and_data[:20].hex()
         else:
-            self.paymaster_address = None
+            self.paymaster_address_lowercase = None
 
 
 def verify_and_get_address(value) -> str:

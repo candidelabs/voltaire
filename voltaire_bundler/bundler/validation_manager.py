@@ -261,31 +261,31 @@ class ValidationManager:
             factory_opcodes, account_opcodes, paymaster_opcodes
         )
 
-        sender = user_operation.sender
-        factory_address = user_operation.factory_address
-        paymaster_address = user_operation.paymaster_address
+        sender_address_lowercase = user_operation.sender_address.lower()
+        factory_address_lowercase = user_operation.factory_address_lowercase
+        paymaster_address_lowercase = user_operation.paymaster_address_lowercase
 
         is_init_code = len(user_operation.init_code) > 2
 
         entities_addreses = []
-        if factory_address is not None:
-            entities_addreses.append(factory_address)
+        if factory_address_lowercase is not None:
+            entities_addreses.append(factory_address_lowercase)
 
-        entities_addreses.append(sender)
+        entities_addreses.append(sender_address_lowercase)
 
-        if paymaster_address is not None:
-            entities_addreses.append(paymaster_address)
+        if paymaster_address_lowercase is not None:
+            entities_addreses.append(paymaster_address_lowercase)
 
         associated_slots_per_entity = ValidationManager.parse_entity_slots(
             entities_addreses, debug_data.keccak
         )
 
         self.validate_entity_storage_access(
-            sender,
+            sender_address_lowercase,
             "sender",
             associated_slots_per_entity,
             sender_stake_info,
-            sender,
+            sender_address_lowercase,
             debug_data.account_data.access,
             is_init_code,
         )
@@ -293,13 +293,13 @@ class ValidationManager:
             debug_data.account_data.contract_size.keys()
         )
 
-        if factory_address is not None:
+        if factory_address_lowercase is not None:
             self.validate_entity_storage_access(
-                factory_address,
+                factory_address_lowercase,
                 "factory",
                 associated_slots_per_entity,
                 factory_stake_info,
-                sender,
+                sender_address_lowercase,
                 debug_data.factory_data.access,
                 is_init_code,
             )
@@ -309,16 +309,16 @@ class ValidationManager:
             )
 
         _, paymaster_call = ValidationManager.parse_call_stack(
-            debug_data.calls, paymaster_address
+            debug_data.calls, paymaster_address_lowercase
         )
 
-        if paymaster_address is not None:
+        if paymaster_address_lowercase is not None:
             self.validate_entity_storage_access(
-                paymaster_address,
+                paymaster_address_lowercase,
                 "paymaster",
                 associated_slots_per_entity,
                 paymaster_stake_info,
-                sender,
+                sender_address_lowercase,
                 debug_data.paymaster_data.access,
                 is_init_code,
             )
@@ -354,7 +354,7 @@ class ValidationManager:
         entity_title: str,
         associated_slots_per_entity: list[str],
         stake_info: StakeInfo,
-        sender_address: str,
+        sender_address_lowercase: str,
         access: dict[str, dict[str : list[str]]],
         is_init_code: bool,
     ) -> None:
@@ -364,7 +364,7 @@ class ValidationManager:
         is_staked = ValidationManager.is_staked(stake_info)
 
         for contract_address in access.keys():
-            if contract_address == sender_address.lower():
+            if contract_address == sender_address_lowercase:
                 continue  # allowed to access sender's storage
             elif contract_address == self.entrypoint.lower():
                 continue
@@ -376,11 +376,11 @@ class ValidationManager:
                 require_stake_slot = None
 
                 if (
-                    sender_address in associated_slots_per_entity
+                    sender_address_lowercase in associated_slots_per_entity
                     and ValidationManager.is_slot_associated_with_address(
                         slot,
-                        sender_address,
-                        associated_slots_per_entity[sender_address],
+                        sender_address_lowercase,
+                        associated_slots_per_entity[sender_address_lowercase],
                     )
                 ):
                     if is_init_code:

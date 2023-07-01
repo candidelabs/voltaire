@@ -43,7 +43,7 @@ class UserOperationHandler:
             self.estimate_call_gas_limit(
                 call_data="0x" + user_operation.call_data.hex(),
                 _from=self.entrypoint,
-                to=user_operation.sender,
+                to=user_operation.sender_address,
             ),
             asyncio.to_thread(
                 UserOperationHandler.calc_preverification_gas, user_operation

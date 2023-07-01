@@ -173,19 +173,19 @@ class BundlerManager:
 
                 if (
                     "AA3" in reason
-                    and user_operation.paymaster_address is not None
+                    and user_operation.paymaster_address_lowercase is not None
                 ):
                     self.reputation_manager.ban_entity(
-                        user_operation.paymaster_address
+                        user_operation.paymaster_address_lowercase
                     )
                 elif "AA2" in reason:
-                    self.reputation_manager.ban_entity(user_operation.sender)
+                    self.reputation_manager.ban_entity(user_operation.sender_address)
                 elif (
                     "AA1" in reason
-                    and user_operation.factory_address is not None
+                    and user_operation.factory_address_lowercase is not None
                 ):
                     self.reputation_manager.ban_entity(
-                        user_operation.factory_address
+                        user_operation.factory_address_lowercase
                     )
 
                 logging.info(
@@ -209,9 +209,9 @@ class BundlerManager:
             # todo : check if bundle was included on chain
             for user_operation in user_operations:
                 self.update_included_status(
-                    user_operation.sender,
-                    user_operation.factory_address,
-                    user_operation.paymaster_address,
+                    user_operation.sender_address,
+                    user_operation.factory_address_lowercase,
+                    user_operation.paymaster_address_lowercase,
                 )
 
     def update_included_status(
