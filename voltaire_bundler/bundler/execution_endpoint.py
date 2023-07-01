@@ -16,6 +16,7 @@ from .bundle_manager import BundlerManager
 from .validation_manager import ValidationManager
 from .reputation_manager import ReputationManager
 
+MAX_VERIFICATION_GAS_LIMIT = 10000000
 
 class ExecutionEndpoint(Endpoint):
     ethereum_node_url: str
@@ -147,50 +148,43 @@ class ExecutionEndpoint(Endpoint):
 
         self._verify_entrypoint(entrypoint_address)
 
-        # set high verification_gas_limit for validtion to succeed while estimating gas
-        if user_operation.verification_gas_limit < 1000000000000000000:
-            user_operation.verification_gas_limit = 1000000000000000000
+        (
+            call_gas_limit,
+            preverification_gas,
+        ) = await self.user_operation_handler.estimate_user_operation_gas(
+            user_operation
+            )
+        call_gas_limit = int(call_gas_limit,16)
+        user_operation.verification_gas_limit = MAX_VERIFICATION_GAS_LIMIT
 
         # set gas fee to zero to ignore paying for prefund error while estimating gas
         user_operation.max_fee_per_gas = 0
         user_operation.max_priority_fee_per_gas = 0
 
-        if self.is_legacy_mode:
-            pre_operation_gas = 80000
-            deadline = 10000000000000000
-        else:
-            (
-                _,
-                solidity_error_params,
-            ) = await self.validation_manager.simulate_validation_without_tracing(
-                user_operation
-            )
-
-            (
-                return_info,
-                _,
-                _,
-                _,
-                _,
-            ) = ValidationManager.decode_validation_result(
-                solidity_error_params
-            )
-
-            pre_operation_gas = return_info.preOpGas
-            deadline = return_info.validUntil
-
-        estimated_gas_json = (
-            await self.user_operation_handler.estimate_user_operation_gas_rpc(
-                user_operation
-            )
+        user_operation.call_gas_limit = call_gas_limit
+        user_operation.pre_verification_gas = preverification_gas
+      
+        (
+            _,
+            solidity_error_params,
+        ) = await self.validation_manager.simulate_validation_without_tracing(
+            user_operation
         )
 
-        estimated_gas_json.update(
-            {
-                "verificationGas": pre_operation_gas,
-                "deadline": deadline,
-            }
+        decoded_validation_result = ValidationManager.decode_validation_result(
+            solidity_error_params
         )
+        return_info = decoded_validation_result[0]
+
+        pre_operation_gas = return_info.preOpGas
+        deadline = return_info.validUntil
+
+        estimated_gas_json = {
+            "callGasLimit": call_gas_limit,
+            "preVerificationGas": preverification_gas,
+            "verificationGas": pre_operation_gas,
+            "deadline": deadline,
+        }
 
         return RPCCallResponseEvent(estimated_gas_json)
 

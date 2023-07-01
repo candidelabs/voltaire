@@ -58,21 +58,6 @@ class UserOperationHandler:
             pre_verification_gas,
         )
 
-    async def estimate_user_operation_gas_rpc(
-        self, user_operation: UserOperation
-    ):
-        (
-            call_gas_limit,
-            preverification_gas,
-        ) = await self.estimate_user_operation_gas(user_operation)
-
-        response_params = {
-            "callGasLimit": call_gas_limit,
-            "preVerificationGas": preverification_gas,
-        }
-
-        return response_params
-
     async def estimate_call_gas_limit(self, call_data, _from, to):
         if call_data == "0x":
             return "0x"
