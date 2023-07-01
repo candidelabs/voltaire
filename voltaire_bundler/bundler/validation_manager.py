@@ -33,6 +33,7 @@ class ValidationManager:
     is_unsafe: bool
     is_legacy_mode: bool
     whitelist_entity_storage_access: list()
+    max_verification_gas_limit: int
 
     def __init__(
         self,
@@ -46,6 +47,7 @@ class ValidationManager:
         is_unsafe: bool,
         is_legacy_mode: bool,
         whitelist_entity_storage_access: list(),
+        max_verification_gas_limit: int,
     ):
         self.user_operation_handler = user_operation_handler
         self.ethereum_node_url = ethereum_node_url
@@ -57,6 +59,7 @@ class ValidationManager:
         self.is_unsafe = is_unsafe
         self.is_legacy_mode = is_legacy_mode
         self.whitelist_entity_storage_access = whitelist_entity_storage_access
+        self.max_verification_gas_limit = max_verification_gas_limit
 
         package_directory = os.path.dirname(os.path.abspath(__file__))
         BundlerCollectorTracer_file = os.path.join(package_directory, "..", 'utils', 'BundlerCollectorTracer.js')
@@ -121,7 +124,7 @@ class ValidationManager:
             is_sender_staked,
         ) = ValidationManager.decode_validation_result(validation_result)
 
-        self.verify_sig_and_pre_operation_gas_and_timestamp(
+        self.verify_sig_and_timestamp(
             user_operation, return_info
         )
 
@@ -517,7 +520,7 @@ class ValidationManager:
 
         return result["error"]["data"]
 
-    def verify_sig_and_pre_operation_gas_and_timestamp(
+    def verify_sig_and_timestamp(
         self, user_operation: UserOperation, return_info: ReturnInfo
     ) -> None:
         pre_operation_gas = return_info.preOpGas
@@ -529,17 +532,6 @@ class ValidationManager:
             raise ValidationException(
                 ValidationExceptionCode.InvalidSignature,
                 "Invalid UserOp signature or paymaster signature",
-                "",
-            )
-
-        if (
-            user_operation.verification_gas_limit
-            + user_operation.pre_verification_gas
-            < pre_operation_gas
-        ):
-            raise ValidationException(
-                ValidationExceptionCode.SimulateValidation,
-                f"verification gas + preverification gas is too low. it should be minimum : {pre_operation_gas}",
                 "",
             )
 
@@ -600,16 +592,23 @@ class ValidationManager:
     def verify_preverification_gas(
         self, user_operation: UserOperation
     ) -> None:
-        preverification_gas = (
+        expected_preverification_gas = (
             self.user_operation_handler.calc_preverification_gas(
                 user_operation
             )
         )
 
-        if user_operation.pre_verification_gas < preverification_gas:
+        if user_operation.pre_verification_gas < expected_preverification_gas:
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
-                f"Preverification gas is too low. it should be minimum : {preverification_gas}",
+                f"Preverification gas is too low. it should be minimum : {expected_preverification_gas}",
+                "",
+            )
+        
+        if user_operation.verification_gas_limit > self.max_verification_gas_limit:
+            raise ValidationException(
+                ValidationExceptionCode.SimulateValidation,
+                f"Verification gas is too high. it should be maximum : {self.max_verification_gas_limit}",
                 "",
             )
 

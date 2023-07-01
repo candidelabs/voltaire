@@ -86,6 +86,7 @@ class ExecutionEndpoint(Endpoint):
             is_unsafe,
             is_legacy_mode,
             whitelist_entity_storage_access,
+            MAX_VERIFICATION_GAS_LIMIT
         )
 
         self.mempool_manager = MempoolManager(
