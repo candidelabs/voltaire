@@ -80,6 +80,7 @@ class ExecutionEndpoint(Endpoint):
             bundler_private_key,
             bundler_address,
             entrypoint,
+            chain_id,
             bundler_helper_byte_code,
             is_unsafe,
             is_legacy_mode,

@@ -26,6 +26,7 @@ class ValidationManager:
     bundler_private_key: str
     bundler_address: str
     entrypoint: str
+    chain_id: int
     bundler_collector_tracer: str
     banned_opcodes: list()
     bundler_helper_byte_code: str
@@ -40,6 +41,7 @@ class ValidationManager:
         bundler_private_key: str,
         bundler_address: str,
         entrypoint: str,
+        chain_id: int,
         bundler_helper_byte_code: str,
         is_unsafe: bool,
         is_legacy_mode: bool,
@@ -50,6 +52,7 @@ class ValidationManager:
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
+        self.chain_id = chain_id
         self.bundler_helper_byte_code = bundler_helper_byte_code
         self.is_unsafe = is_unsafe
         self.is_legacy_mode = is_legacy_mode
@@ -122,10 +125,16 @@ class ValidationManager:
             user_operation, return_info
         )
 
-        debug_data_formated = ValidationManager.format_debug_traceCall_data(
-            debug_data
-        )
-        if not self.is_unsafe:
+        if self.is_unsafe:
+            user_operation_hash = UserOperationHandler.get_user_operation_hash(
+                user_operation.to_list(),
+                self.entrypoint,
+                self.chain_id
+            )
+        else:
+            debug_data_formated = ValidationManager.format_debug_traceCall_data(
+                debug_data
+            )
             await self.validate_trace_results(
                 user_operation,
                 sender_stake_info,
@@ -133,7 +142,9 @@ class ValidationManager:
                 paymaster_stake_info,
                 debug_data_formated,
             )
-        return is_sender_staked
+            user_operation_hash = ValidationManager.get_user_operation_hash_from_debug_data(debug_data)
+
+        return is_sender_staked, user_operation_hash
 
     async def simulate_validation_without_tracing(
         self, user_operation: UserOperation
@@ -777,3 +788,13 @@ class ValidationManager:
                 stack.append(call_to_stack)
 
         return results, paymaster_call
+    
+    @staticmethod
+    def get_user_operation_hash_from_debug_data(debug_data):
+        encodedInfo = next((inp["enter"]["in"] for inp in reversed(debug_data["debug"][:-2]) if "enter" in inp and "in" in inp["enter"] and "0x3a871cdd" in inp["enter"]["in"]), None)
+        decoded_result = decode(
+                ["bytes32", "bytes32", "uint256"],
+                bytes.fromhex(encodedInfo[10:]),
+            )
+        user_operation_hash = "0x" + decoded_result[1].hex()
+        return user_operation_hash

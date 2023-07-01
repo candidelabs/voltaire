@@ -56,7 +56,7 @@ class MempoolManager:
             user_operation.paymaster_address,
         )
 
-        is_sender_staked = await self.validation_manager.validate_user_operation(
+        is_sender_staked, user_operation_hash = await self.validation_manager.validate_user_operation(
             user_operation,
         )
 
@@ -68,20 +68,10 @@ class MempoolManager:
 
         new_sender = self.senders[new_sender_address]
 
-        tasks = await asyncio.gather(
-            new_sender.add_user_operation(
-                user_operation,
-                is_sender_staked,
-            ),
-            asyncio.to_thread(
-                UserOperationHandler.get_user_operation_hash,
-                    user_operation.to_list(),
-                    self.entrypoint,
-                    self.chain_id
-            ),
+        await new_sender.add_user_operation(
+            user_operation,
+            is_sender_staked,
         )
-
-        user_operation_hash = tasks[1]
 
         self.update_all_seen_status(
             user_operation.sender,
@@ -103,25 +93,23 @@ class MempoolManager:
 
     async def get_user_operations_to_bundle(self) -> list[UserOperation]:
         bundle = []
-        validation_operations = []
         for sender_address in list(self.senders):
             sender = self.senders[sender_address]
             if len(sender.user_operations) > 0:
                 user_operation = sender.user_operations.pop(0)
 
-                new_code_hash = (
-                    await self.validation_manager.get_addresses_code_hash(
-                        user_operation.associated_addresses
+                if not self.is_unsafe:
+                    new_code_hash = (
+                        await self.validation_manager.get_addresses_code_hash(
+                            user_operation.associated_addresses
+                        )
                     )
-                )
-                if new_code_hash != user_operation.code_hash:
-                    continue
+                    if new_code_hash != user_operation.code_hash:
+                        continue
 
                 bundle.append(user_operation)
                 if len(sender.user_operations) == 0:
                     del self.senders[sender.address]
-
-        await asyncio.gather(*validation_operations)
 
         return bundle
 
