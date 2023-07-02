@@ -2,11 +2,16 @@ import asyncio
 import logging
 
 from voltaire_bundler.event_bus_manager.endpoint import Endpoint
-from voltaire_bundler.rpc.events import RPCCallRequestEvent, RPCCallResponseEvent
+from voltaire_bundler.rpc.events import (
+    RPCCallRequestEvent,
+    RPCCallResponseEvent,
+)
 from voltaire_bundler.user_operation.user_operation import UserOperation
 
 from .mempool_manager import MempoolManager
-from voltaire_bundler.user_operation.user_operation_handler import UserOperationHandler
+from voltaire_bundler.user_operation.user_operation_handler import (
+    UserOperationHandler,
+)
 from voltaire_bundler.bundler.exceptions import (
     ValidationException,
     ValidationExceptionCode,
@@ -17,6 +22,7 @@ from .validation_manager import ValidationManager
 from .reputation_manager import ReputationManager
 
 MAX_VERIFICATION_GAS_LIMIT = 10000000
+
 
 class ExecutionEndpoint(Endpoint):
     ethereum_node_url: str
@@ -86,7 +92,7 @@ class ExecutionEndpoint(Endpoint):
             is_unsafe,
             is_legacy_mode,
             whitelist_entity_storage_access,
-            MAX_VERIFICATION_GAS_LIMIT
+            MAX_VERIFICATION_GAS_LIMIT,
         )
 
         self.mempool_manager = MempoolManager(
@@ -154,8 +160,8 @@ class ExecutionEndpoint(Endpoint):
             preverification_gas,
         ) = await self.user_operation_handler.estimate_user_operation_gas(
             user_operation
-            )
-        call_gas_limit = int(call_gas_limit,16)
+        )
+        call_gas_limit = int(call_gas_limit, 16)
         user_operation.verification_gas_limit = MAX_VERIFICATION_GAS_LIMIT
 
         # set gas fee to zero to ignore paying for prefund error while estimating gas
@@ -164,7 +170,7 @@ class ExecutionEndpoint(Endpoint):
 
         user_operation.call_gas_limit = call_gas_limit
         user_operation.pre_verification_gas = preverification_gas
-      
+
         (
             _,
             solidity_error_params,

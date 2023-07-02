@@ -2,10 +2,15 @@ from dataclasses import dataclass
 import asyncio
 from voltaire_bundler.user_operation.user_operation import UserOperation
 from .sender import Sender
-from voltaire_bundler.user_operation.user_operation_handler import UserOperationHandler
+from voltaire_bundler.user_operation.user_operation_handler import (
+    UserOperationHandler,
+)
 from .validation_manager import ValidationManager
 from .reputation_manager import ReputationManager, ReputationStatus
-from voltaire_bundler.bundler.exceptions import ValidationException, ValidationExceptionCode
+from voltaire_bundler.bundler.exceptions import (
+    ValidationException,
+    ValidationExceptionCode,
+)
 
 
 @dataclass
@@ -56,7 +61,10 @@ class MempoolManager:
             user_operation.paymaster_address_lowercase,
         )
 
-        is_sender_staked, user_operation_hash = await self.validation_manager.validate_user_operation(
+        (
+            is_sender_staked,
+            user_operation_hash,
+        ) = await self.validation_manager.validate_user_operation(
             user_operation,
         )
 
@@ -88,7 +96,7 @@ class MempoolManager:
             self._update_entity_no_of_ops_in_mempool(
                 user_operation.paymaster_address_lowercase
             )
-        
+
         return user_operation_hash
 
     async def get_user_operations_to_bundle(self) -> list[UserOperation]:

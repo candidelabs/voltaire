@@ -5,9 +5,15 @@ import os
 from eth_utils import to_checksum_address, keccak
 from eth_abi import decode, encode
 
-from voltaire_bundler.user_operation.user_operation_handler import UserOperationHandler
+from voltaire_bundler.user_operation.user_operation_handler import (
+    UserOperationHandler,
+)
 from voltaire_bundler.user_operation.user_operation import UserOperation
-from voltaire_bundler.user_operation.models import ReturnInfo, StakeInfo, FailedOpRevertData
+from voltaire_bundler.user_operation.models import (
+    ReturnInfo,
+    StakeInfo,
+    FailedOpRevertData,
+)
 from voltaire_bundler.bundler.exceptions import (
     ValidationException,
     ValidationExceptionCode,
@@ -62,7 +68,9 @@ class ValidationManager:
         self.max_verification_gas_limit = max_verification_gas_limit
 
         package_directory = os.path.dirname(os.path.abspath(__file__))
-        BundlerCollectorTracer_file = os.path.join(package_directory, "..", 'utils', 'BundlerCollectorTracer.js')
+        BundlerCollectorTracer_file = os.path.join(
+            package_directory, "..", "utils", "BundlerCollectorTracer.js"
+        )
         with open(BundlerCollectorTracer_file) as keyfile:
             self.bundler_collector_tracer = keyfile.read()
 
@@ -90,8 +98,12 @@ class ValidationManager:
         self,
         user_operation: UserOperation,
     ) -> bool:
-        self.verify_preverification_gas_and_verification_gas_limit(user_operation)
-        gas_price_hex = await self.verify_gas_fees_and_get_price(user_operation)
+        self.verify_preverification_gas_and_verification_gas_limit(
+            user_operation
+        )
+        gas_price_hex = await self.verify_gas_fees_and_get_price(
+            user_operation
+        )
 
         if self.is_unsafe:
             (
@@ -124,19 +136,15 @@ class ValidationManager:
             is_sender_staked,
         ) = ValidationManager.decode_validation_result(validation_result)
 
-        self.verify_sig_and_timestamp(
-            user_operation, return_info
-        )
+        self.verify_sig_and_timestamp(user_operation, return_info)
 
         if self.is_unsafe:
             user_operation_hash = UserOperationHandler.get_user_operation_hash(
-                user_operation.to_list(),
-                self.entrypoint,
-                self.chain_id
+                user_operation.to_list(), self.entrypoint, self.chain_id
             )
         else:
-            debug_data_formated = ValidationManager.format_debug_traceCall_data(
-                debug_data
+            debug_data_formated = (
+                ValidationManager.format_debug_traceCall_data(debug_data)
             )
             await self.validate_trace_results(
                 user_operation,
@@ -145,7 +153,11 @@ class ValidationManager:
                 paymaster_stake_info,
                 debug_data_formated,
             )
-            user_operation_hash = ValidationManager.get_user_operation_hash_from_debug_data(debug_data)
+            user_operation_hash = (
+                ValidationManager.get_user_operation_hash_from_debug_data(
+                    debug_data
+                )
+            )
 
         return is_sender_staked, user_operation_hash
 
@@ -197,8 +209,7 @@ class ValidationManager:
         return solidity_error_selector, solidity_error_params
 
     async def simulate_validation_with_tracing(
-        self, user_operation: UserOperation,
-        gas_price_hex: int
+        self, user_operation: UserOperation, gas_price_hex: int
     ) -> str:
         simultion_gas = (
             user_operation.pre_verification_gas
@@ -214,7 +225,7 @@ class ValidationManager:
         )
 
         call_data = function_selector + params.hex()
-        
+
         params = [
             {
                 "from": self.bundler_address,
@@ -266,7 +277,9 @@ class ValidationManager:
 
         sender_address_lowercase = user_operation.sender_address.lower()
         factory_address_lowercase = user_operation.factory_address_lowercase
-        paymaster_address_lowercase = user_operation.paymaster_address_lowercase
+        paymaster_address_lowercase = (
+            user_operation.paymaster_address_lowercase
+        )
 
         is_init_code = len(user_operation.init_code) > 2
 
@@ -549,7 +562,9 @@ class ValidationManager:
                 "",
             )
 
-    async def verify_gas_fees_and_get_price(self, user_operation: UserOperation) -> int:
+    async def verify_gas_fees_and_get_price(
+        self, user_operation: UserOperation
+    ) -> int:
         max_fee_per_gas = user_operation.max_fee_per_gas
         max_priority_fee_per_gas = user_operation.max_priority_fee_per_gas
 
@@ -581,7 +596,9 @@ class ValidationManager:
 
         else:
             tip_fee_gas_price = int(tasks[1]["result"], 16)
-            estimated_base_fee = max(base_plus_tip_fee_gas_price - tip_fee_gas_price, 1)
+            estimated_base_fee = max(
+                base_plus_tip_fee_gas_price - tip_fee_gas_price, 1
+            )
 
             if max_fee_per_gas < estimated_base_fee:
                 raise ValidationException(
@@ -595,7 +612,13 @@ class ValidationManager:
                     f"Max priority fee per gas is too low. it should be minimum : 1",
                     "",
                 )
-            if max(max_fee_per_gas, estimated_base_fee+max_priority_fee_per_gas) < base_plus_tip_fee_gas_price:
+            if (
+                max(
+                    max_fee_per_gas,
+                    estimated_base_fee + max_priority_fee_per_gas,
+                )
+                < base_plus_tip_fee_gas_price
+            ):
                 raise ValidationException(
                     ValidationExceptionCode.InvalidFields,
                     f"Either Max fee per gas or (Max priority fee per gas + estimated basefee) should be equal or higher than : {base_plus_tip_fee_gas_price}",
@@ -619,8 +642,11 @@ class ValidationManager:
                 f"Preverification gas is too low. it should be minimum : {expected_preverification_gas}",
                 "",
             )
-        
-        if user_operation.verification_gas_limit > self.max_verification_gas_limit:
+
+        if (
+            user_operation.verification_gas_limit
+            > self.max_verification_gas_limit
+        ):
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
                 f"Verification gas is too high. it should be maximum : {self.max_verification_gas_limit}",
@@ -708,7 +734,13 @@ class ValidationManager:
 
         is_sender_staked = ValidationManager.is_staked(sender_info)
 
-        return return_info, sender_info, factory_info, paymaster_info, is_sender_staked
+        return (
+            return_info,
+            sender_info,
+            factory_info,
+            paymaster_info,
+            is_sender_staked,
+        )
 
     @staticmethod
     def decode_FailedOp_event(solidity_error_params: str) -> tuple[str, str]:
@@ -802,13 +834,22 @@ class ValidationManager:
                 stack.append(call_to_stack)
 
         return results, paymaster_call
-    
+
     @staticmethod
     def get_user_operation_hash_from_debug_data(debug_data):
-        encodedInfo = next((inp["enter"]["in"] for inp in reversed(debug_data["debug"][:-2]) if "enter" in inp and "in" in inp["enter"] and "0x3a871cdd" in inp["enter"]["in"]), None)
+        encodedInfo = next(
+            (
+                inp["enter"]["in"]
+                for inp in reversed(debug_data["debug"][:-2])
+                if "enter" in inp
+                and "in" in inp["enter"]
+                and "0x3a871cdd" in inp["enter"]["in"]
+            ),
+            None,
+        )
         decoded_result = decode(
-                ["bytes32", "bytes32", "uint256"],
-                bytes.fromhex(encodedInfo[10:]),
-            )
+            ["bytes32", "bytes32", "uint256"],
+            bytes.fromhex(encodedInfo[10:]),
+        )
         user_operation_hash = "0x" + decoded_result[1].hex()
         return user_operation_hash

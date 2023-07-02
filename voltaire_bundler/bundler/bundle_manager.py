@@ -4,9 +4,13 @@ import logging
 from eth_abi import encode
 from eth_account import Account
 
-from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
+from voltaire_bundler.utils.eth_client_utils import (
+    send_rpc_request_to_eth_client,
+)
 from voltaire_bundler.user_operation.user_operation import UserOperation
-from voltaire_bundler.user_operation.user_operation_handler import UserOperationHandler
+from voltaire_bundler.user_operation.user_operation_handler import (
+    UserOperationHandler,
+)
 from .mempool_manager import MempoolManager
 from .reputation_manager import ReputationManager
 from .validation_manager import ValidationManager
@@ -179,7 +183,9 @@ class BundlerManager:
                         user_operation.paymaster_address_lowercase
                     )
                 elif "AA2" in reason:
-                    self.reputation_manager.ban_entity(user_operation.sender_address)
+                    self.reputation_manager.ban_entity(
+                        user_operation.sender_address
+                    )
                 elif (
                     "AA1" in reason
                     and user_operation.factory_address_lowercase is not None

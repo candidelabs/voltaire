@@ -6,9 +6,17 @@ from eth_utils import to_checksum_address, keccak
 from eth_abi import encode, decode
 
 from .user_operation import UserOperation
-from voltaire_bundler.bundler.exceptions import ValidationException, ValidationExceptionCode
-from voltaire_bundler.bundler.exceptions import ExecutionException, ExecutionExceptionCode
-from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
+from voltaire_bundler.bundler.exceptions import (
+    ValidationException,
+    ValidationExceptionCode,
+)
+from voltaire_bundler.bundler.exceptions import (
+    ExecutionException,
+    ExecutionExceptionCode,
+)
+from voltaire_bundler.utils.eth_client_utils import (
+    send_rpc_request_to_eth_client,
+)
 
 from voltaire_bundler.user_operation.models import (
     Log,
@@ -85,10 +93,12 @@ class UserOperationHandler:
     @staticmethod
     def calc_preverification_gas(user_operation: UserOperation) -> int:
         user_operation_list = user_operation.to_list()
-        
-        user_operation_list[6] = 21000 #pre_verification_gas
-        user_operation_list[10] = b'\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01' #signature
-        
+
+        user_operation_list[6] = 21000  # pre_verification_gas
+        user_operation_list[
+            10
+        ] = b"\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01"  # signature
+
         fixed = 21000
         per_user_operation = 18300
         per_user_operation_word = 4
@@ -97,7 +107,9 @@ class UserOperationHandler:
         bundle_size = 1
         # sigSize = 65
 
-        packed = UserOperationHandler.pack_user_operation(user_operation_list, False)
+        packed = UserOperationHandler.pack_user_operation(
+            user_operation_list, False
+        )
 
         cost_list = list(
             map(lambda x: zero_byte if x == b"\x00" else non_zero_byte, packed)
@@ -341,22 +353,26 @@ class UserOperationHandler:
             self.ethereum_node_url, "eth_getTransactionByHash", params
         )
         return res["result"]
-    
+
     @staticmethod
-    def get_user_operation_hash(user_operation_list: list(), entrypoint_addr:str, chain_id:int):
-        packed_user_operation = keccak(UserOperationHandler.pack_user_operation(user_operation_list))
+    def get_user_operation_hash(
+        user_operation_list: list(), entrypoint_addr: str, chain_id: int
+    ):
+        packed_user_operation = keccak(
+            UserOperationHandler.pack_user_operation(user_operation_list)
+        )
 
         encoded_user_operation_hash = encode(
-                [
-                    "(bytes32,address,uint256)"
-                ],
-                [[packed_user_operation, entrypoint_addr, chain_id]],
-            )
+            ["(bytes32,address,uint256)"],
+            [[packed_user_operation, entrypoint_addr, chain_id]],
+        )
         user_operation_hash = "0x" + keccak(encoded_user_operation_hash).hex()
         return user_operation_hash
 
     @staticmethod
-    def pack_user_operation(user_operation_list: list(), for_signature:bool = True) -> bytes:
+    def pack_user_operation(
+        user_operation_list: list(), for_signature: bool = True
+    ) -> bytes:
         if for_signature:
             user_operation_list[2] = keccak(user_operation_list[2])
             user_operation_list[3] = keccak(user_operation_list[3])
@@ -364,18 +380,37 @@ class UserOperationHandler:
             user_operation_list_without_signature = user_operation_list[:-1]
 
             packed_user_operation = encode(
-                    [
-                        "address","uint256","bytes32","bytes32","uint256","uint256","uint256","uint256","uint256","bytes32"
-                    ],
-                    user_operation_list_without_signature,
-                )
+                [
+                    "address",
+                    "uint256",
+                    "bytes32",
+                    "bytes32",
+                    "uint256",
+                    "uint256",
+                    "uint256",
+                    "uint256",
+                    "uint256",
+                    "bytes32",
+                ],
+                user_operation_list_without_signature,
+            )
         else:
             packed_user_operation = encode(
-                    [
-                        "address","uint256","bytes","bytes","uint256","uint256","uint256","uint256","uint256","bytes","bytes"
-                    ],
-                    user_operation_list,
-                )
+                [
+                    "address",
+                    "uint256",
+                    "bytes",
+                    "bytes",
+                    "uint256",
+                    "uint256",
+                    "uint256",
+                    "uint256",
+                    "uint256",
+                    "bytes",
+                    "bytes",
+                ],
+                user_operation_list,
+            )
         return packed_user_operation
 
     @staticmethod

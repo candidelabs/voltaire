@@ -1,5 +1,8 @@
 from dataclasses import dataclass, InitVar
-from voltaire_bundler.bundler.exceptions import ValidationException, ValidationExceptionCode
+from voltaire_bundler.bundler.exceptions import (
+    ValidationException,
+    ValidationExceptionCode,
+)
 import re
 
 
@@ -137,7 +140,9 @@ class UserOperation:
             self.factory_address_lowercase = None
 
         if len(self.paymaster_and_data) > 20:
-            self.paymaster_address_lowercase = "0x" + self.paymaster_and_data[:20].hex()
+            self.paymaster_address_lowercase = (
+                "0x" + self.paymaster_and_data[:20].hex()
+            )
         else:
             self.paymaster_address_lowercase = None
 

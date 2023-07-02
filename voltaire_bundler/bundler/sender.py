@@ -4,7 +4,9 @@ from eth_abi import encode, decode
 
 from voltaire_bundler.user_operation.user_operation import UserOperation
 from .exceptions import ValidationException, ValidationExceptionCode
-from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
+from voltaire_bundler.utils.eth_client_utils import (
+    send_rpc_request_to_eth_client,
+)
 from voltaire_bundler.user_operation.models import DepositInfo
 from voltaire_bundler.user_operation.models import StakeInfo
 from .validation_manager import ValidationManager
@@ -19,9 +21,7 @@ class Sender:
     user_operations: list = field(default_factory=list[UserOperation])
 
     async def add_user_operation(
-        self,
-        new_user_operation: UserOperation,
-        is_sender_staked: bool
+        self, new_user_operation: UserOperation, is_sender_staked: bool
     ):
         sender_operations_num = len(self.user_operations)
 
