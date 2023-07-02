@@ -571,22 +571,37 @@ class ValidationManager:
         base_plus_tip_fee_gas_price = int(tasks[0]["result"], 16)
 
         tip_fee_gas_price = base_plus_tip_fee_gas_price
-        if not self.is_legacy_mode:
+        if self.is_legacy_mode:
+            if max_fee_per_gas < base_plus_tip_fee_gas_price:
+                raise ValidationException(
+                    ValidationExceptionCode.SimulateValidation,
+                    f"Max fee per gas is too low. it should be minimum : {base_plus_tip_fee_gas_price}",
+                    "",
+                )
+
+        else:
             tip_fee_gas_price = int(tasks[1]["result"], 16)
+            estimated_base_fee = max(base_plus_tip_fee_gas_price - tip_fee_gas_price, 1)
 
-        if max_fee_per_gas < base_plus_tip_fee_gas_price:
-            raise ValidationException(
-                ValidationExceptionCode.SimulateValidation,
-                f"Max fee per gas is too low. it should be minimum : {base_plus_tip_fee_gas_price}",
-                "",
-            )
+            if max_fee_per_gas < estimated_base_fee:
+                raise ValidationException(
+                    ValidationExceptionCode.InvalidFields,
+                    f"Max fee per gas is too low. it should be minimum the estimated base fee: {estimated_base_fee}",
+                    "",
+                )
+            if max_priority_fee_per_gas < 1:
+                raise ValidationException(
+                    ValidationExceptionCode.InvalidFields,
+                    f"Max priority fee per gas is too low. it should be minimum : 1",
+                    "",
+                )
+            if max(max_fee_per_gas, estimated_base_fee+max_priority_fee_per_gas) < base_plus_tip_fee_gas_price:
+                raise ValidationException(
+                    ValidationExceptionCode.InvalidFields,
+                    f"Either Max fee per gas or (Max priority fee per gas + estimated basefee) should be equal or higher than : {base_plus_tip_fee_gas_price}",
+                    "",
+                )
 
-        if max_priority_fee_per_gas < tip_fee_gas_price:
-            raise ValidationException(
-                ValidationExceptionCode.SimulateValidation,
-                f"Max priority fee per gas is too low. it should be minimum : {tip_fee_gas_price}",
-                "",
-            )
         return base_plus_tip_fee_gas_price_hex
 
     def verify_preverification_gas(
