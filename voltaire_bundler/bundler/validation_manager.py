@@ -613,7 +613,7 @@ class ValidationManager:
                     "",
                 )
             if (
-                max(
+                min(
                     max_fee_per_gas,
                     estimated_base_fee + max_priority_fee_per_gas,
                 )
@@ -621,7 +621,7 @@ class ValidationManager:
             ):
                 raise ValidationException(
                     ValidationExceptionCode.InvalidFields,
-                    f"Either Max fee per gas or (Max priority fee per gas + estimated basefee) should be equal or higher than : {base_plus_tip_fee_gas_price}",
+                    f"Max fee per gas and (Max priority fee per gas + estimated basefee) should be equal or higher than : {base_plus_tip_fee_gas_price}",
                     "",
                 )
 
