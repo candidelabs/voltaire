@@ -90,7 +90,7 @@ class ValidationManager:
         self,
         user_operation: UserOperation,
     ) -> bool:
-        self.verify_preverification_gas(user_operation)
+        self.verify_preverification_gas_and_verification_gas_limit(user_operation)
         gas_price_hex = await self.verify_gas_fees_and_get_price(user_operation)
 
         if self.is_unsafe:
@@ -604,7 +604,7 @@ class ValidationManager:
 
         return base_plus_tip_fee_gas_price_hex
 
-    def verify_preverification_gas(
+    def verify_preverification_gas_and_verification_gas_limit(
         self, user_operation: UserOperation
     ) -> None:
         expected_preverification_gas = (
