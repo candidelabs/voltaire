@@ -155,32 +155,31 @@ class ExecutionEndpoint(Endpoint):
 
         self._verify_entrypoint(entrypoint_address)
 
-        (
-            call_gas_limit,
-            preverification_gas,
-        ) = await self.user_operation_handler.estimate_user_operation_gas(
-            user_operation
-        )
-        call_gas_limit = int(call_gas_limit, 16)
-        user_operation.verification_gas_limit = MAX_VERIFICATION_GAS_LIMIT
-
-        # set gas fee to zero to ignore paying for prefund error while estimating gas
+        user_operation.paymaster_and_data = b''
         user_operation.max_fee_per_gas = 0
         user_operation.max_priority_fee_per_gas = 0
+        user_operation.pre_verification_gas = 0
+        user_operation.verification_gas_limit = MAX_VERIFICATION_GAS_LIMIT
 
-        user_operation.call_gas_limit = call_gas_limit
-        user_operation.pre_verification_gas = preverification_gas
-
-        (
-            _,
-            solidity_error_params,
-        ) = await self.validation_manager.simulate_validation_without_tracing(
+        estimate_gas_operation = self.user_operation_handler.estimate_user_operation_gas(
             user_operation
         )
+
+        simulate_validation_operation = self.validation_manager.simulate_validation_without_tracing(
+            user_operation
+        )
+
+        tasks = await asyncio.gather(estimate_gas_operation, simulate_validation_operation)
+        
+        call_gas_limit, preverification_gas = tasks[0]
+        _, solidity_error_params = tasks[1]
+
+        call_gas_limit = int(call_gas_limit, 16)
 
         decoded_validation_result = ValidationManager.decode_validation_result(
             solidity_error_params
         )
+
         return_info = decoded_validation_result[0]
 
         pre_operation_gas = return_info.preOpGas
