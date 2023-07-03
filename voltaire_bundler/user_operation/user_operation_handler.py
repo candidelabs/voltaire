@@ -46,7 +46,7 @@ class UserOperationHandler:
         self.entrypoint = entrypoint
         self.is_legacy_mode = is_legacy_mode
 
-    async def estimate_user_operation_gas(self, user_operation: UserOperation):
+    async def estimate_call_gas_limit_and_preverification_gas(self, user_operation: UserOperation):
         tasks = await asyncio.gather(
             self.estimate_call_gas_limit(
                 call_data="0x" + user_operation.call_data.hex(),
