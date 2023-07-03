@@ -152,13 +152,12 @@ class ExecutionEndpoint(Endpoint):
     ) -> RPCCallResponseEvent:
         user_operation: UserOperation = rpc_request.req_arguments[0]
         entrypoint_address = rpc_request.req_arguments[1]
-
         self._verify_entrypoint(entrypoint_address)
-
+        
         estimate_call_gas_limit_and_preverification_gas_operation = self.user_operation_handler.estimate_call_gas_limit_and_preverification_gas(
             user_operation
         )
-
+        
         #set gas fee to zero to ignore paying for prefund error while estimating gas
         user_operation.max_fee_per_gas = 0
         
@@ -168,24 +167,27 @@ class ExecutionEndpoint(Endpoint):
         simulate_validation_operation = self.validation_manager.simulate_validation_without_tracing(
             user_operation
         )
-
+        
         tasks = await asyncio.gather(estimate_call_gas_limit_and_preverification_gas_operation, simulate_validation_operation)
         
-        call_gas_limit, preverification_gas = tasks[0]
+        call_gas_limit_hex, preverification_gas = tasks[0]
         _, solidity_error_params = tasks[1]
 
-        call_gas_limit = int(call_gas_limit, 16)
+        if(call_gas_limit_hex == "0x"):
+            call_gas_limit = 0
+        else:
+            call_gas_limit = int(call_gas_limit_hex, 16)
 
         decoded_validation_result = ValidationManager.decode_validation_result(
             solidity_error_params
         )
-
+        
         return_info = decoded_validation_result[0]
 
         verification_gas = return_info.preOpGas - user_operation.pre_verification_gas
 
         deadline = return_info.validUntil
-
+        
         estimated_gas_json = {
             "callGasLimit": call_gas_limit,
             "preVerificationGas": preverification_gas,
