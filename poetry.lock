@@ -915,6 +915,21 @@ files = [
 regex = ">=2022.3.15"
 
 [[package]]
+name = "prometheus-client"
+version = "0.17.0"
+description = "Python client for the Prometheus monitoring system."
+category = "main"
+optional = false
+python-versions = ">=3.6"
+files = [
+    {file = "prometheus_client-0.17.0-py3-none-any.whl", hash = "sha256:a77b708cf083f4d1a3fb3ce5c95b4afa32b9c521ae363354a4a910204ea095ce"},
+    {file = "prometheus_client-0.17.0.tar.gz", hash = "sha256:9c3b26f1535945e85b8934fb374678d263137b78ef85f305b1156c7c881cd11b"},
+]
+
+[package.extras]
+twisted = ["twisted"]
+
+[[package]]
 name = "pycryptodome"
 version = "3.18.0"
 description = "Cryptographic library for Python"
@@ -1273,4 +1288,4 @@ multidict = ">=4.0"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.11"
-content-hash = "7818c36bc660f92ad87531830e18c57c66a9502fef34f61da82def948f3bdd7e"
+content-hash = "63f9965eaad36ad36be1c8b67458315f42c434739739c6a202972864df14fb5e"

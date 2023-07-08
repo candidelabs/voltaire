@@ -7,7 +7,7 @@ from .boot import initialize, InitData
 from .rpc.rpc_http_server import run_rpc_http_server
 from voltaire_bundler.bundler.execution_endpoint import ExecutionEndpoint
 from voltaire_bundler.utils.SignalHaltError import immediate_exit
-
+from voltaire_bundler.metrics.metrics import run_metrics_server
 
 async def main() -> None:
     initData: InitData = initialize()
@@ -43,7 +43,7 @@ async def main() -> None:
                 is_debug=initData.is_debug,
             )
         )
-
-
-# if __name__ == "__main__":
-#     asyncio.run(main())
+        if initData.is_metrics:
+            run_metrics_server(
+                host=initData.rpc_url,
+            )

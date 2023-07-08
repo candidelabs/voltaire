@@ -40,6 +40,7 @@ class InitData:
     is_send_raw_transaction_conditional: bool
     bundle_interval: int
     whitelist_entity_storage_access: list()
+    is_metrics: bool
 
 
 def address(ep):
@@ -177,6 +178,14 @@ def initialize() -> InitData:
         default=[],
     )
 
+    parser.add_argument(
+        "--metrics",
+        help="enable metrics collection",
+        nargs="?",
+        const=True,
+        default=False,
+    )
+
     parser.add_argument('--version', action='version', version='%(prog)s ' + "version " +__version__)
 
     args = parser.parse_args()
@@ -216,6 +225,7 @@ def initialize() -> InitData:
         args.send_raw_transaction_conditional,
         args.bundle_interval,
         args.whitelist_entity_storage_access,
+        args.metrics
     )
 
     logging.basicConfig(
