@@ -23,6 +23,14 @@ from voltaire_bundler.bundler.exceptions import (
     ExecutionException,
     ValidationExceptionCode,
 )
+from prometheus_client import Summary
+
+REQUEST_TIME_eth_chainId = Summary('request_processing_seconds_eth_chainId', 'Time spent processing request eth_chainId')
+REQUEST_TIME_eth_supportedEntryPoints = Summary('request_processing_seconds_eth_supportedEntryPoints', 'Time spent processing request eth_supportedEntryPoints')
+REQUEST_TIME_eth_estimateUserOperationGas = Summary('request_processing_seconds_eth_estimateUserOperationGas', 'Time spent processing request eth_estimateUserOperationGas')
+REQUEST_TIME_chainId_eth_sendUserOperation = Summary('request_processing_seconds_eth_sendUserOperation', 'Time spent processing request eth_sendUserOperation')
+REQUEST_TIME_chainId_eth_getUserOperationReceipt = Summary('request_processing_seconds_eth_getUserOperationReceipt', 'Time spent processing request eth_getUserOperationReceipt')
+REQUEST_TIME_chainId_eth_getUserOperationByHash = Summary('request_processing_seconds_eth_getUserOperationByHash', 'Time spent processing request eth_getUserOperationByHash')
 
 
 async def _handle_rpc_request(
@@ -45,7 +53,7 @@ async def _handle_rpc_request(
     else:
         return Success(resp.payload)
 
-
+@REQUEST_TIME_eth_chainId.time()
 @method
 async def eth_chainId() -> Result:
     result = await _handle_rpc_request(
@@ -55,7 +63,7 @@ async def eth_chainId() -> Result:
     )
     return result
 
-
+@REQUEST_TIME_eth_supportedEntryPoints.time()
 @method
 async def eth_supportedEntryPoints() -> Result:
     result = await _handle_rpc_request(
@@ -65,7 +73,7 @@ async def eth_supportedEntryPoints() -> Result:
     )
     return result
 
-
+@REQUEST_TIME_eth_estimateUserOperationGas.time()
 @method
 async def eth_estimateUserOperationGas(
     userOperationJson, entrypoint
@@ -83,7 +91,7 @@ async def eth_estimateUserOperationGas(
     )
     return result
 
-
+@REQUEST_TIME_chainId_eth_sendUserOperation.time()
 @method
 async def eth_sendUserOperation(userOperationJson, entrypoint) -> Result:
     try:
@@ -99,7 +107,7 @@ async def eth_sendUserOperation(userOperationJson, entrypoint) -> Result:
     )
     return result
 
-
+@REQUEST_TIME_chainId_eth_getUserOperationReceipt.time()
 @method
 async def eth_getUserOperationReceipt(userOperationHash) -> Result:
     if not is_user_operation_hash(userOperationHash):
@@ -115,7 +123,7 @@ async def eth_getUserOperationReceipt(userOperationHash) -> Result:
     )
     return result
 
-
+@REQUEST_TIME_chainId_eth_getUserOperationByHash.time()
 @method
 async def eth_getUserOperationByHash(userOperationHash) -> Result:
     if not is_user_operation_hash(userOperationHash):
@@ -219,7 +227,6 @@ async def handle(is_debug, request):
         text=await async_dispatch(res, methods=methods),
         content_type="application/json",
     )
-
 
 async def run_rpc_http_server(host="localhost", port=3000, is_debug=False):
     logging.info(f"Starting HTTP RPC Server at: {host}:{port}/rpc")

@@ -22,6 +22,7 @@ jsonrpcserver = "^5.0.9"
 uvloop = "^0.17.0"
 eth-abi = "^4.0.0"
 eth-account = "^0.8.0"
+prometheus-client = "^0.17.0"
 
 [build-system]
 requires = ["poetry-core"]
