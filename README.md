@@ -28,7 +28,7 @@
 Deploy Voltaire using the latest docker image
 
 ```
-docker run --net=host --rm -ti sherifahmed990/voltaire_bundler:latest --entrypoint $ENTRYPOINT --bundler_secret $BUNDLER_SECRET --rpc_url $RPC_URL --rpc_port $PORT --ethereum_node_url $ETHEREUM_NODE_URL --chain_id $CHAIN_ID --verbose
+docker run --net=host --rm -ti ghcr.io/candidelabs/voltaire/voltaire-bundler:0.1.0a21 --entrypoint $ENTRYPOINT --bundler_secret $BUNDLER_SECRET --rpc_url $RPC_URL --rpc_port $PORT --ethereum_node_url $ETHEREUM_NODE_URL --chain_id $CHAIN_ID --verbose
 ```
 
 # Development
