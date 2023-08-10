@@ -173,11 +173,6 @@ class ExecutionEndpoint(Endpoint):
         call_gas_limit_hex, preverification_gas = tasks[0]
         _, solidity_error_params = tasks[1]
 
-        if(call_gas_limit_hex == "0x"):
-            call_gas_limit = 0
-        else:
-            call_gas_limit = int(call_gas_limit_hex, 16)
-
         decoded_validation_result = ValidationManager.decode_validation_result(
             solidity_error_params
         )
@@ -189,10 +184,10 @@ class ExecutionEndpoint(Endpoint):
         deadline = return_info.validUntil
         
         estimated_gas_json = {
-            "callGasLimit": call_gas_limit,
-            "preVerificationGas": preverification_gas,
-            "verificationGas": verification_gas,
-            "deadline": deadline,
+            "callGasLimit": call_gas_limit_hex,
+            "preVerificationGas": hex(preverification_gas),
+            "verificationGas": hex(verification_gas),
+            "deadline": hex(deadline),
         }
 
         return RPCCallResponseEvent(estimated_gas_json)

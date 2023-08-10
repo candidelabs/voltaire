@@ -590,7 +590,7 @@ class ValidationManager:
             if max_fee_per_gas < base_plus_tip_fee_gas_price:
                 raise ValidationException(
                     ValidationExceptionCode.SimulateValidation,
-                    f"Max fee per gas is too low. it should be minimum : {base_plus_tip_fee_gas_price}",
+                    f"Max fee per gas is too low. it should be minimum : {base_plus_tip_fee_gas_price_hex}",
                     "",
                 )
 
@@ -603,7 +603,7 @@ class ValidationManager:
             if max_fee_per_gas < estimated_base_fee:
                 raise ValidationException(
                     ValidationExceptionCode.InvalidFields,
-                    f"Max fee per gas is too low. it should be minimum the estimated base fee: {estimated_base_fee}",
+                    f"Max fee per gas is too low. it should be minimum the estimated base fee: {hex(estimated_base_fee)}",
                     "",
                 )
             if max_priority_fee_per_gas < 1:
@@ -621,7 +621,7 @@ class ValidationManager:
             ):
                 raise ValidationException(
                     ValidationExceptionCode.InvalidFields,
-                    f"Max fee per gas and (Max priority fee per gas + estimated basefee) should be equal or higher than : {base_plus_tip_fee_gas_price}",
+                    f"Max fee per gas and (Max priority fee per gas + estimated basefee) should be equal or higher than : {base_plus_tip_fee_gas_price_hex}",
                     "",
                 )
 
@@ -639,7 +639,7 @@ class ValidationManager:
         if user_operation.pre_verification_gas < expected_preverification_gas:
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
-                f"Preverification gas is too low. it should be minimum : {expected_preverification_gas}",
+                f"Preverification gas is too low. it should be minimum : {hex(expected_preverification_gas)}",
                 "",
             )
 
@@ -649,7 +649,7 @@ class ValidationManager:
         ):
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
-                f"Verification gas is too high. it should be maximum : {self.max_verification_gas_limit}",
+                f"Verification gas is too high. it should be maximum : {hex(self.max_verification_gas_limit)}",
                 "",
             )
 
