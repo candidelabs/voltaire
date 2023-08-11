@@ -186,8 +186,7 @@ def verify_and_get_bytes(value) -> bytes:
     if value is None:
         return bytes(0)
 
-    bytes_pattern = "(^$|^0x|0x([1-9a-f]+[0-9a-f]*|0)$)"
-    if isinstance(value, str) and re.match(bytes_pattern, value) is not None:
+    if isinstance(value, str) and value[:2] == "0x":
         try:
             return bytes.fromhex(value[2:])
         except ValueError as exp:
