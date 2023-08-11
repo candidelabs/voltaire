@@ -1,6 +1,7 @@
 import logging
 from functools import partial
 from aiohttp import web
+import aiohttp_cors
 from jsonrpcserver import (
     method,
     Result,
@@ -228,11 +229,21 @@ async def handle(is_debug, request):
         content_type="application/json",
     )
 
-async def run_rpc_http_server(host="localhost", port=3000, is_debug=False):
+async def run_rpc_http_server(host="localhost", rpc_cors_domain="*",port=3000, is_debug=False):
     logging.info(f"Starting HTTP RPC Server at: {host}:{port}/rpc")
     app = web.Application()
     handle_func = partial(handle, is_debug)
     app.router.add_post("/rpc", handle_func)
+
+    cors = aiohttp_cors.setup(app, defaults={
+        rpc_cors_domain: aiohttp_cors.ResourceOptions(
+                allow_credentials=True,
+                expose_headers="*",
+                allow_headers="*",
+            )
+    })
+    resource = cors.add(app.router.add_resource("/rpc"))
+    cors.add(resource.add_route("PUT", handle_func))
 
     runner = web.AppRunner(app)
     await runner.setup()

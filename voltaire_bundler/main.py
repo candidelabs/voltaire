@@ -20,7 +20,6 @@ async def main() -> None:
 
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
-    # loop.set_debug(True)
     async with asyncio.TaskGroup() as task_group:
         execution_endpoint: ExecutionEndpoint = ExecutionEndpoint(
             initData.ethereum_node_url,
@@ -39,6 +38,7 @@ async def main() -> None:
         task_group.create_task(
             run_rpc_http_server(
                 host=initData.rpc_url,
+                rpc_cors_domain=initData.rpc_cors_domain,
                 port=initData.rpc_port,
                 is_debug=initData.is_debug,
             )

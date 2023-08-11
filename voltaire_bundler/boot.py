@@ -41,6 +41,7 @@ class InitData:
     bundle_interval: int
     whitelist_entity_storage_access: list()
     is_metrics: bool
+    rpc_cors_domain: str
 
 
 def address(ep):
@@ -94,6 +95,15 @@ def initialize() -> InitData:
         nargs="?",
         const="127.0.0.1",
         default="127.0.0.1",
+    )
+
+    parser.add_argument(
+        "--rpc_cors_domain",
+        type=str,
+        help="rpc cors allowed domain - defaults to *",
+        nargs="?",
+        const="*",
+        default="*",
     )
 
     parser.add_argument(
@@ -225,7 +235,8 @@ def initialize() -> InitData:
         args.send_raw_transaction_conditional,
         args.bundle_interval,
         args.whitelist_entity_storage_access,
-        args.metrics
+        args.metrics,
+        args.rpc_cors_domain
     )
 
     logging.basicConfig(
