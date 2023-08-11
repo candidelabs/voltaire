@@ -165,12 +165,7 @@ def verify_and_get_address(value) -> str:
 def verify_and_get_uint(value) -> int:
     if value is None or value == "0x":
         return 0
-
-    if isinstance(value, int):
-        return value
-    elif isinstance(value, str) and value.isdigit():
-        return int(value)
-    elif isinstance(value, str):
+    elif isinstance(value, str) and value[:2] == "0x":
         try:
             return int(value, 16)
         except ValueError as exp:
