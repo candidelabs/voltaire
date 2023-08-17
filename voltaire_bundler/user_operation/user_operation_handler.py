@@ -46,26 +46,6 @@ class UserOperationHandler:
         self.entrypoint = entrypoint
         self.is_legacy_mode = is_legacy_mode
 
-    async def estimate_call_gas_limit_and_preverification_gas(self, user_operation: UserOperation):
-        tasks = await asyncio.gather(
-            self.estimate_call_gas_limit(
-                call_data="0x" + user_operation.call_data.hex(),
-                _from=self.entrypoint,
-                to=user_operation.sender_address,
-            ),
-            asyncio.to_thread(
-                UserOperationHandler.calc_preverification_gas, user_operation
-            ),
-        )
-
-        call_gas_limit = tasks[0]
-        pre_verification_gas = tasks[1]
-
-        return (
-            call_gas_limit,
-            pre_verification_gas,
-        )
-
     async def estimate_call_gas_limit(self, call_data, _from, to):
         if call_data == "0x":
             return "0x"

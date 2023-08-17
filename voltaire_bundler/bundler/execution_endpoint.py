@@ -1,10 +1,20 @@
 import asyncio
 import logging
+import math
 
 from voltaire_bundler.event_bus_manager.endpoint import Endpoint
 from voltaire_bundler.rpc.events import (
     RPCCallRequestEvent,
     RPCCallResponseEvent,
+)
+from eth_abi import decode, encode
+
+from voltaire_bundler.utils.eth_client_utils import (
+    send_rpc_request_to_eth_client,
+)
+from voltaire_bundler.bundler.exceptions import (
+    ExecutionException,
+    ExecutionExceptionCode,
 )
 from voltaire_bundler.user_operation.user_operation import UserOperation
 
@@ -22,7 +32,7 @@ from .validation_manager import ValidationManager
 from .reputation_manager import ReputationManager
 
 MAX_VERIFICATION_GAS_LIMIT = 10000000
-
+MIN_CALL_GAS_LIMIT = 21000
 
 class ExecutionEndpoint(Endpoint):
     ethereum_node_url: str
@@ -153,44 +163,64 @@ class ExecutionEndpoint(Endpoint):
         user_operation: UserOperation = rpc_request.req_arguments[0]
         entrypoint_address = rpc_request.req_arguments[1]
         self._verify_entrypoint(entrypoint_address)
-        
-        estimate_call_gas_limit_and_preverification_gas_operation = self.user_operation_handler.estimate_call_gas_limit_and_preverification_gas(
-            user_operation
-        )
-        
-        #set gas fee to zero to ignore paying for prefund error while estimating gas
-        user_operation.max_fee_per_gas = 0
-        
-        #set high verification_gas_limit for validtion to succeed while estimating gas
+
+        preverification_gas = self.user_operation_handler.calc_preverification_gas(user_operation)
+        preverification_gas_hex = hex(preverification_gas)
+
+        user_operation.pre_verification_gas = preverification_gas
         user_operation.verification_gas_limit = MAX_VERIFICATION_GAS_LIMIT
 
-        simulate_validation_operation = self.validation_manager.simulate_validation_without_tracing(
-            user_operation
+        latest_block = await self.get_latest_block()
+        latest_block_number = latest_block["number"]
+        
+        call_data = user_operation.call_data
+        user_operation.call_data = bytes(0)
+        user_operation.max_fee_per_gas = 0
+
+        preOpGas, _, targetSuccess, targetResult = await self.simulate_handle_op(
+            user_operation, 
+            latest_block_number, 
+            latest_block["gasLimit"],
+            user_operation.sender_address,
+            call_data)
+
+        if(not targetSuccess):
+            raise ExecutionException(
+                ExecutionExceptionCode.EXECUTION_REVERTED,
+                targetResult, ""
+            )
+
+        verification_gas_limit = math.ceil((preOpGas - user_operation.pre_verification_gas)*1.1)
+        verification_gas_hex = hex(verification_gas_limit)
+        user_operation.verification_gas_limit = verification_gas_limit
+
+        preOpGas, _, targetSuccess, targetResult  = await self.simulate_handle_op(
+            user_operation,
+            latest_block_number,
+            latest_block["gasLimit"],
+            "0x6E0428608E6857C1f82aB5f1D431c557Bd8D7a27", # a random address where the GasLeft contract is deployed through state
+            bytes.fromhex("15e812ad") #getGasLeft will return the remaining gas
         )
-        
-        tasks = await asyncio.gather(estimate_call_gas_limit_and_preverification_gas_operation, simulate_validation_operation)
-        
-        call_gas_limit_hex, preverification_gas = tasks[0]
-        _, solidity_error_params = tasks[1]
+        block_gas_limit = int(latest_block["gasLimit"], 16)
+        remaining_gas = decode(["uint256"], targetResult)[0]
 
-        decoded_validation_result = ValidationManager.decode_validation_result(
-            solidity_error_params
-        )
-        
-        return_info = decoded_validation_result[0]
+        call_gas_limit =  block_gas_limit - remaining_gas - preOpGas - 400000
+        call_gas_limit = max(MIN_CALL_GAS_LIMIT, call_gas_limit)
+        call_gas_limit_hex =  hex(call_gas_limit )
 
-        verification_gas = return_info.preOpGas - user_operation.pre_verification_gas
-
-        deadline = return_info.validUntil
-        
         estimated_gas_json = {
             "callGasLimit": call_gas_limit_hex,
-            "preVerificationGas": hex(preverification_gas),
-            "verificationGas": hex(verification_gas),
-            "deadline": hex(deadline),
+            "preVerificationGas": preverification_gas_hex,
+            "verificationGas": verification_gas_hex,
         }
 
         return RPCCallResponseEvent(estimated_gas_json)
+    
+    async def get_latest_block(self) -> dict:
+        res = await send_rpc_request_to_eth_client(
+            self.ethereum_node_url, "eth_getBlockByNumber", ["latest", False]
+        )
+        return res["result"]
 
     async def _event_rpc_sendUserOperation(
         self, rpc_request: RPCCallRequestEvent
@@ -289,6 +319,86 @@ class ExecutionEndpoint(Endpoint):
                 "Unsupported entrypoint",
                 "",
             )
+        
+    async def simulate_handle_op(
+                self, user_operation: UserOperation,
+                bloch_number_hex:str,
+                gasLimit,
+                target:str="0x0000000000000000000000000000000000000000", 
+                target_call_data:bytes=bytes(0),
+            ):
+            # simulateHandleOp(entrypoint solidity function) will always revert
+            function_selector = "0xd6383f94"
+            params = encode(
+                [
+                    "(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)", #useroperation
+                    "address", #target (Optional - to check the )
+                    "bytes"    #targetCallData
+                ],
+                [
+                    user_operation.to_list(),
+                    target,
+                    target_call_data
+                ],
+            )
+
+            call_data = function_selector + params.hex()
+
+            params = [
+                {
+                    # "from": self.bundler_address,
+                    "to": self.entrypoint,
+                    "data": call_data,
+                    "gas": gasLimit,
+                    # "gasPrice": "0x0",
+                },
+                bloch_number_hex,
+                {
+                    "0x6E0428608E6857C1f82aB5f1D431c557Bd8D7a27": # a random address where the GasLeft contract is deployed through state
+                    {
+                        "code": "0x6080604052348015600f57600080fd5b506004361060285760003560e01c806315e812ad14602d575b600080fd5b60336047565b604051603e91906066565b60405180910390f35b60005a905090565b6000819050919050565b606081604f565b82525050565b6000602082019050607960008301846059565b9291505056fea26469706673582212205a5bd8713997a517191580430600d0387c0a224bc73a9ae59c6ce4e7da11beb064736f6c63430008120033"
+                    }
+                }
+            ]
+
+            result = await send_rpc_request_to_eth_client(
+                self.ethereum_node_url, "eth_call", params
+            )
+            if (
+                "error" not in result
+                or "execution reverted" not in result["error"]["message"]
+            ):
+                raise ValueError("simulateHandleOp didn't revert!")
+
+            elif (
+                "data" not in result["error"] or len(result["error"]["data"]) < 10
+            ):
+                raise ValidationException(
+                    ValidationExceptionCode.SimulateValidation,
+                    result["error"]["message"],
+                    "",
+                )
+
+            error_data = result["error"]["data"]
+            solidity_error_selector = str(error_data[:10])
+            solidity_error_params = error_data[10:]
+
+            if solidity_error_selector == "0x8b7ac980":
+                preOpGas, paid, targetSuccess, targetResult = self.validation_manager.decode_ExecutionResult(solidity_error_params)
+            else:
+                (
+                    _,
+                    reason,
+                ) = ValidationManager.decode_FailedOp_event(
+                    solidity_error_params
+                )
+                raise ValidationException(
+                    ValidationExceptionCode.SimulateValidation,
+                    reason,
+                    "",
+                )
+
+            return preOpGas, paid, targetSuccess, targetResult
 
 
 async def exception_handler_decorator(
