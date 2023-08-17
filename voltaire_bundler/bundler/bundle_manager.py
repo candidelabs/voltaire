@@ -14,6 +14,7 @@ from voltaire_bundler.user_operation.user_operation_handler import (
 from .mempool_manager import MempoolManager
 from .reputation_manager import ReputationManager
 from .validation_manager import ValidationManager
+from .gas_manager import GasManager
 
 
 class BundlerManager:
@@ -33,6 +34,7 @@ class BundlerManager:
         mempool_manager: MempoolManager,
         user_operation_handler: UserOperationHandler,
         reputation_manager: ReputationManager,
+        gas_manager: GasManager,
         ethereum_node_url: str,
         bundler_private_key: str,
         bundler_address: str,
@@ -44,6 +46,7 @@ class BundlerManager:
         self.mempool_manager = mempool_manager
         self.user_operation_handler = user_operation_handler
         self.reputation_manager = reputation_manager
+        self.gas_manager = gas_manager
         self.ethereum_node_url = ethereum_node_url
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
@@ -83,7 +86,7 @@ class BundlerManager:
         call_data = function_selector + params.hex()
 
         gas_estimation_op = (
-            self.user_operation_handler.estimate_call_gas_limit(
+            self.gas_manager.estimate_call_gas_limit(
                 call_data,
                 _from=self.bundler_address,
                 to=self.entrypoint,

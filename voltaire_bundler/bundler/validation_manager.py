@@ -24,11 +24,17 @@ from voltaire_bundler.utils.eth_client_utils import (
     DebugEntityData,
     Call,
 )
+from voltaire_bundler.utils.decode import(
+    decode_FailedOp_event
+)
+
+from voltaire_bundler.bundler.gas_manager import GasManager
 
 
 class ValidationManager:
     user_operation_handler: UserOperationHandler
     ethereum_node_url: str
+    gas_manager: GasManager
     bundler_private_key: str
     bundler_address: str
     entrypoint: str
@@ -39,12 +45,12 @@ class ValidationManager:
     is_unsafe: bool
     is_legacy_mode: bool
     whitelist_entity_storage_access: list()
-    max_verification_gas_limit: int
 
     def __init__(
         self,
         user_operation_handler: UserOperationHandler,
         ethereum_node_url: str,
+        gas_manager: GasManager,
         bundler_private_key: str,
         bundler_address: str,
         entrypoint: str,
@@ -53,10 +59,10 @@ class ValidationManager:
         is_unsafe: bool,
         is_legacy_mode: bool,
         whitelist_entity_storage_access: list(),
-        max_verification_gas_limit: int,
     ):
         self.user_operation_handler = user_operation_handler
         self.ethereum_node_url = ethereum_node_url
+        self.gas_manager = gas_manager
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
         self.entrypoint = entrypoint
@@ -65,7 +71,6 @@ class ValidationManager:
         self.is_unsafe = is_unsafe
         self.is_legacy_mode = is_legacy_mode
         self.whitelist_entity_storage_access = whitelist_entity_storage_access
-        self.max_verification_gas_limit = max_verification_gas_limit
 
         package_directory = os.path.dirname(os.path.abspath(__file__))
         BundlerCollectorTracer_file = os.path.join(
@@ -98,10 +103,10 @@ class ValidationManager:
         self,
         user_operation: UserOperation,
     ) -> bool:
-        self.verify_preverification_gas_and_verification_gas_limit(
+        self.gas_manager.verify_preverification_gas_and_verification_gas_limit(
             user_operation
         )
-        gas_price_hex = await self.verify_gas_fees_and_get_price(
+        gas_price_hex = await self.gas_manager.verify_gas_fees_and_get_price(
             user_operation
         )
 
@@ -562,97 +567,6 @@ class ValidationManager:
                 "",
             )
 
-    async def verify_gas_fees_and_get_price(
-        self, user_operation: UserOperation
-    ) -> int:
-        max_fee_per_gas = user_operation.max_fee_per_gas
-        max_priority_fee_per_gas = user_operation.max_priority_fee_per_gas
-
-        base_plus_tip_fee_gas_price_op = send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_gasPrice"
-        )
-
-        tasks_arr = [base_plus_tip_fee_gas_price_op]
-
-        if not self.is_legacy_mode:
-            tip_fee_gas_price_op = send_rpc_request_to_eth_client(
-                self.ethereum_node_url, "eth_maxPriorityFeePerGas"
-            )
-            tasks_arr.append(tip_fee_gas_price_op)
-
-        tasks = await asyncio.gather(*tasks_arr)
-
-        base_plus_tip_fee_gas_price_hex = tasks[0]["result"]
-        base_plus_tip_fee_gas_price = int(tasks[0]["result"], 16)
-
-        tip_fee_gas_price = base_plus_tip_fee_gas_price
-        if self.is_legacy_mode:
-            if max_fee_per_gas < base_plus_tip_fee_gas_price:
-                raise ValidationException(
-                    ValidationExceptionCode.SimulateValidation,
-                    f"Max fee per gas is too low. it should be minimum : {base_plus_tip_fee_gas_price_hex}",
-                    "",
-                )
-
-        else:
-            tip_fee_gas_price = int(tasks[1]["result"], 16)
-            estimated_base_fee = max(
-                base_plus_tip_fee_gas_price - tip_fee_gas_price, 1
-            )
-
-            if max_fee_per_gas < estimated_base_fee:
-                raise ValidationException(
-                    ValidationExceptionCode.InvalidFields,
-                    f"Max fee per gas is too low. it should be minimum the estimated base fee: {hex(estimated_base_fee)}",
-                    "",
-                )
-            if max_priority_fee_per_gas < 1:
-                raise ValidationException(
-                    ValidationExceptionCode.InvalidFields,
-                    f"Max priority fee per gas is too low. it should be minimum : 1",
-                    "",
-                )
-            if (
-                min(
-                    max_fee_per_gas,
-                    estimated_base_fee + max_priority_fee_per_gas,
-                )
-                < base_plus_tip_fee_gas_price
-            ):
-                raise ValidationException(
-                    ValidationExceptionCode.InvalidFields,
-                    f"Max fee per gas and (Max priority fee per gas + estimated basefee) should be equal or higher than : {base_plus_tip_fee_gas_price_hex}",
-                    "",
-                )
-
-        return base_plus_tip_fee_gas_price_hex
-
-    def verify_preverification_gas_and_verification_gas_limit(
-        self, user_operation: UserOperation
-    ) -> None:
-        expected_preverification_gas = (
-            self.user_operation_handler.calc_preverification_gas(
-                user_operation
-            )
-        )
-
-        if user_operation.pre_verification_gas < expected_preverification_gas:
-            raise ValidationException(
-                ValidationExceptionCode.SimulateValidation,
-                f"Preverification gas is too low. it should be minimum : {hex(expected_preverification_gas)}",
-                "",
-            )
-
-        if (
-            user_operation.verification_gas_limit
-            > self.max_verification_gas_limit
-        ):
-            raise ValidationException(
-                ValidationExceptionCode.SimulateValidation,
-                f"Verification gas is too high. it should be maximum : {hex(self.max_verification_gas_limit)}",
-                "",
-            )
-
     @staticmethod
     def is_slot_associated_with_address(
         slot, address: str, associated_slots: list[str]
@@ -699,7 +613,7 @@ class ValidationManager:
                 VALIDATION_RESULT_ABI, bytes.fromhex(solidity_error_params)
             )
         except Exception as err:
-            operation_index, reason = ValidationManager.decode_FailedOp_event(
+            operation_index, reason = decode_FailedOp_event(
                 solidity_error_params
             )
             raise ValidationException(
@@ -741,37 +655,6 @@ class ValidationManager:
             paymaster_info,
             is_sender_staked,
         )
-
-    @staticmethod
-    def decode_FailedOp_event(solidity_error_params: str) -> tuple[str, str]:
-        FAILED_OP_PARAMS_API = ["uint256", "string"]
-        failed_op_params_res = decode(
-            FAILED_OP_PARAMS_API, bytes.fromhex(solidity_error_params)
-        )
-        operation_index = failed_op_params_res[0]
-        reason = failed_op_params_res[1]
-
-        return operation_index, reason
-    
-    @staticmethod
-    def decode_ExecutionResult(solidity_error_params: str) -> tuple[str, str, bool, str]:
-        EXECUTION_RESULT_PARAMS_API = [
-            "uint256", #preOpGas
-            "uint256", #paid
-            "uint48",  #validAfter
-            "uint48",  #validUntil
-            "bool",    #targetSuccess
-            "bytes"    #targetResult
-        ]
-        execution_result__params_res = decode(
-            EXECUTION_RESULT_PARAMS_API, bytes.fromhex(solidity_error_params)
-        )
-        preOpGas = execution_result__params_res[0]
-        paid = execution_result__params_res[1]
-        targetSuccess = execution_result__params_res[4]
-        targetResult = execution_result__params_res[5]
-
-        return preOpGas, paid, targetSuccess, targetResult
 
     @staticmethod
     def parse_entity_slots(entities: list[str], keccak_list: list[str]):

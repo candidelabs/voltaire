@@ -46,65 +46,6 @@ class UserOperationHandler:
         self.entrypoint = entrypoint
         self.is_legacy_mode = is_legacy_mode
 
-    async def estimate_call_gas_limit(self, call_data, _from, to):
-        if call_data == "0x":
-            return "0x"
-
-        params = [{"from": _from, "to": to, "data": call_data}]
-
-        result = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_estimateGas", params
-        )
-        if "error" in result:
-            errorMessage = result["error"]["message"]
-            errorParams = ""
-            if "data" in result["error"]:
-                errorData = result["error"]["data"]
-                errorParams = errorData[10:]
-            raise ExecutionException(
-                ExecutionExceptionCode.EXECUTION_REVERTED,
-                errorMessage,
-                errorParams,
-            )
-        call_gas_limit = result["result"]
-
-        return call_gas_limit
-
-    @staticmethod
-    def calc_preverification_gas(user_operation: UserOperation) -> int:
-        user_operation_list = user_operation.to_list()
-
-        user_operation_list[6] = 21000  # pre_verification_gas
-        user_operation_list[
-            10
-        ] = b"\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01"  # signature
-
-        fixed = 21000
-        per_user_operation = 18300
-        per_user_operation_word = 4
-        zero_byte = 4
-        non_zero_byte = 16
-        bundle_size = 1
-        # sigSize = 65
-
-        packed = UserOperationHandler.pack_user_operation(
-            user_operation_list, False
-        )
-
-        cost_list = list(
-            map(lambda x: zero_byte if x == b"\x00" else non_zero_byte, packed)
-        )
-        call_data_cost = reduce(lambda x, y: x + y, cost_list)
-
-        pre_verification_gas = (
-            call_data_cost
-            + (fixed / bundle_size)
-            + per_user_operation
-            + per_user_operation_word * len(packed)
-        )
-
-        return math.ceil(pre_verification_gas)
-
     async def get_user_operation_by_hash(
         self, user_operation_hash: str
     ) -> tuple:
