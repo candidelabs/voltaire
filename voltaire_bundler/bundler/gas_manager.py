@@ -194,6 +194,21 @@ class GasManager:
                 reason,
                 "",
             )
+        elif solidity_error_selector == "0x08c379a0": #Error(string)
+            reason = decode(["string"], bytes.fromhex(solidity_error_params)) #decode revert message
+
+            raise ValidationException(
+                ValidationExceptionCode.SimulateValidation,
+                reason[0],
+                "",
+            )
+        else:
+            raise ValidationException(
+                ValidationExceptionCode.SimulateValidation,
+                solidity_error_params,
+                "",
+            )
+
 
         return preOpGas, paid, targetSuccess, targetResult
     
