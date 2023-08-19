@@ -72,7 +72,9 @@ class MempoolManager:
         new_sender_address = user_operation.sender_address
 
         if new_sender_address not in self.senders:
-            self.senders[new_sender_address] = SenderMempool(new_sender_address)
+            self.senders[new_sender_address] = SenderMempool(
+                new_sender_address
+            )
 
         new_sender = self.senders[new_sender_address]
 

@@ -80,8 +80,10 @@ class SenderMempool:
                 existing_operation.max_priority_fee_per_gas
             )
         )
-        min_fee_per_gas_to_replace = SenderMempool._calculate_min_fee_to_replace(
-            existing_operation.max_fee_per_gas
+        min_fee_per_gas_to_replace = (
+            SenderMempool._calculate_min_fee_to_replace(
+                existing_operation.max_fee_per_gas
+            )
         )
 
         if (

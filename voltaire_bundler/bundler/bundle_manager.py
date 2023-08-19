@@ -10,9 +10,7 @@ from voltaire_bundler.user_operation.user_operation import UserOperation
 from voltaire_bundler.user_operation.user_operation_handler import (
     UserOperationHandler,
 )
-from voltaire_bundler.utils.encode import(
-    encode_handleops_calldata
-)
+from voltaire_bundler.utils.encode import encode_handleops_calldata
 
 from .mempool_manager import MempoolManager
 from .reputation_manager import ReputationManager
@@ -78,16 +76,13 @@ class BundlerManager:
             user_operations_list.append(user_operation.to_list())
 
         call_data = encode_handleops_calldata(
-            user_operations_list, 
-            self.bundler_address
+            user_operations_list, self.bundler_address
         )
 
-        gas_estimation_op = (
-            self.gas_manager.estimate_call_gas_limit(
-                call_data,
-                _from=self.bundler_address,
-                to=self.entrypoint,
-            )
+        gas_estimation_op = self.gas_manager.estimate_call_gas_limit(
+            call_data,
+            _from=self.bundler_address,
+            to=self.entrypoint,
         )
 
         base_plus_tip_fee_gas_price_op = send_rpc_request_to_eth_client(

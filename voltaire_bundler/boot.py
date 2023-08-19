@@ -196,7 +196,11 @@ def initialize() -> InitData:
         default=False,
     )
 
-    parser.add_argument('--version', action='version', version='%(prog)s ' + "version " +__version__)
+    parser.add_argument(
+        "--version",
+        action="version",
+        version="%(prog)s " + "version " + __version__,
+    )
 
     args = parser.parse_args()
 
@@ -236,7 +240,7 @@ def initialize() -> InitData:
         args.bundle_interval,
         args.whitelist_entity_storage_access,
         args.metrics,
-        args.rpc_cors_domain
+        args.rpc_cors_domain,
     )
 
     logging.basicConfig(

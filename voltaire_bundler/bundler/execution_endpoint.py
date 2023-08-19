@@ -80,7 +80,7 @@ class ExecutionEndpoint(Endpoint):
         self.whitelist_entity_storage_access = whitelist_entity_storage_access
 
         self.reputation_manager = ReputationManager()
-        
+
         self.gas_manager = GasManager(
             self.ethereum_node_url,
             entrypoint,
@@ -171,13 +171,13 @@ class ExecutionEndpoint(Endpoint):
         self._verify_entrypoint(entrypoint_address)
 
         (
-            call_gas_limit_hex, 
-            preverification_gas_hex, 
-            verification_gas_hex
+            call_gas_limit_hex,
+            preverification_gas_hex,
+            verification_gas_hex,
         ) = await self.gas_manager.estimate_callgaslimit_and_preverificationgas_and_verificationgas(
             user_operation
-            )
-        
+        )
+
         estimated_gas_json = {
             "callGasLimit": call_gas_limit_hex,
             "preVerificationGas": preverification_gas_hex,
@@ -283,6 +283,7 @@ class ExecutionEndpoint(Endpoint):
                 "Unsupported entrypoint",
                 "",
             )
+
 
 async def exception_handler_decorator(
     response_function, rpc_request: RPCCallRequestEvent

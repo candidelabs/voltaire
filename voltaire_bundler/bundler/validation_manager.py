@@ -24,12 +24,8 @@ from voltaire_bundler.utils.eth_client_utils import (
     DebugEntityData,
     Call,
 )
-from voltaire_bundler.utils.decode import(
-    decode_FailedOp_event
-)
-from voltaire_bundler.utils.encode import(
-    encode_simulate_validation_calldata
-)
+from voltaire_bundler.utils.decode import decode_FailedOp_event
+from voltaire_bundler.utils.encode import encode_simulate_validation_calldata
 from voltaire_bundler.bundler.gas_manager import GasManager
 
 
@@ -171,7 +167,6 @@ class ValidationManager:
     async def simulate_validation_without_tracing(
         self, user_operation: UserOperation
     ) -> tuple[str, str]:
-        
         call_data = encode_simulate_validation_calldata(user_operation)
 
         params = [
