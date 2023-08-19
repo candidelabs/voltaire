@@ -379,7 +379,13 @@ class GasManager:
 
         return gas_estimate_for_l1
 
-    async def get_preverification_gas(self, user_operation: UserOperation, block_number_hex:str) -> int:
+    async def get_preverification_gas(
+        self, 
+        user_operation: UserOperation, 
+        block_number_hex:str,
+        preverification_gas_percentage_coefficient:int=100,
+        preverification_gas_addition_constant:int=0
+    ) -> int:
         base_preverification_gas = GasManager.calc_base_preverification_gas(user_operation)
         l1_gas = 0
 
@@ -388,7 +394,13 @@ class GasManager:
         elif(self.chain_id == 42161): #arbitrum One
             l1_gas = await self.calc_l1_fees_arbitrum(user_operation)
 
-        return base_preverification_gas + l1_gas
+        calculated_preverification_gas = base_preverification_gas + l1_gas
+
+        adjusted_preverification_gas = math.ceil(
+            (calculated_preverification_gas * preverification_gas_percentage_coefficient / 100) + preverification_gas_addition_constant
+        )
+        
+        return adjusted_preverification_gas
 
     @staticmethod
     def calc_base_preverification_gas(user_operation: UserOperation) -> int:
