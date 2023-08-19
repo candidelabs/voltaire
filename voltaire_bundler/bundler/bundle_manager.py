@@ -1,7 +1,6 @@
 import asyncio
 import logging
 
-from eth_abi import encode
 from eth_account import Account
 
 from voltaire_bundler.utils.eth_client_utils import (
@@ -11,6 +10,10 @@ from voltaire_bundler.user_operation.user_operation import UserOperation
 from voltaire_bundler.user_operation.user_operation_handler import (
     UserOperationHandler,
 )
+from voltaire_bundler.utils.encode import(
+    encode_handleops_calldata
+)
+
 from .mempool_manager import MempoolManager
 from .reputation_manager import ReputationManager
 from .validation_manager import ValidationManager
@@ -74,16 +77,10 @@ class BundlerManager:
         for user_operation in user_operations:
             user_operations_list.append(user_operation.to_list())
 
-        function_selector = "0x1fad948c"  # handleOps
-        params = encode(
-            [
-                "(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)[]",
-                "address",
-            ],
-            [user_operations_list, self.bundler_address],
+        call_data = encode_handleops_calldata(
+            user_operations_list, 
+            self.bundler_address
         )
-
-        call_data = function_selector + params.hex()
 
         gas_estimation_op = (
             self.gas_manager.estimate_call_gas_limit(

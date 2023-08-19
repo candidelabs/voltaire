@@ -27,7 +27,9 @@ from voltaire_bundler.utils.eth_client_utils import (
 from voltaire_bundler.utils.decode import(
     decode_FailedOp_event
 )
-
+from voltaire_bundler.utils.encode import(
+    encode_simulate_validation_calldata
+)
 from voltaire_bundler.bundler.gas_manager import GasManager
 
 
@@ -169,16 +171,8 @@ class ValidationManager:
     async def simulate_validation_without_tracing(
         self, user_operation: UserOperation
     ) -> tuple[str, str]:
-        # simulateValidation(entrypoint solidity function) will always revert
-        function_selector = "0xee219423"
-        params = encode(
-            [
-                "(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)"
-            ],
-            [user_operation.to_list()],
-        )
-
-        call_data = function_selector + params.hex()
+        
+        call_data = encode_simulate_validation_calldata(user_operation)
 
         params = [
             {
@@ -216,20 +210,7 @@ class ValidationManager:
     async def simulate_validation_with_tracing(
         self, user_operation: UserOperation, gas_price_hex: int
     ) -> str:
-        simultion_gas = (
-            user_operation.pre_verification_gas
-            + user_operation.verification_gas_limit
-        )
-
-        function_selector = "0xee219423"  # simulateValidation
-        params = encode(
-            [
-                "(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)"
-            ],
-            [user_operation.to_list()],
-        )
-
-        call_data = function_selector + params.hex()
+        call_data = encode_simulate_validation_calldata(user_operation)
 
         params = [
             {
