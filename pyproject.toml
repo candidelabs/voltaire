@@ -25,6 +25,9 @@ eth-account = "^0.8.0"
 prometheus-client = "^0.17.1"
 aiohttp-cors = "^0.7.0"
 
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
