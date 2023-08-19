@@ -61,8 +61,9 @@ class GasManager:
         
         call_data = user_operation.call_data
         user_operation.call_data = bytes(0)
-        user_operation.max_fee_per_gas = 0
 
+        #Call simulateHandleOp with empty callData and pass callData to simulateHandleOp target param
+        #to be able to get determine if callData was reverted and retrieve the revert error
         preOpGas, _, targetSuccess, targetResult = await self.simulate_handle_op(
             user_operation, 
             latest_block_number, 
@@ -80,6 +81,10 @@ class GasManager:
         verification_gas_hex = hex(verification_gas_limit)
         user_operation.verification_gas_limit = verification_gas_limit
 
+        #Call simulateHandleOp again and add the GasLeft contract as a state override
+        #call the GasLeft contract as the target will return the remaining gas
+        #from the remaing gas the call gas limit can be calculated
+        #this method avoid using the paid result as it require the gas price be non zero
         preOpGas, _, targetSuccess, targetResult  = await self.simulate_handle_op(
             user_operation,
             latest_block_number,
@@ -152,7 +157,7 @@ class GasManager:
 
         params = [
             {
-                # "from": self.bundler_address,
+                "from": "0x0000000000000000000000000000000000000000",
                 "to": self.entrypoint,
                 "data": call_data,
                 "gas": gasLimit,
@@ -160,11 +165,19 @@ class GasManager:
             },
             bloch_number_hex,
             {
-                "0x6E0428608E6857C1f82aB5f1D431c557Bd8D7a27": # a random address where the GasLeft contract is deployed through state
+                "0x0000000000000000000000000000000000000000":
+                {
+                    "balance": "0x21E19E0C9BAB2400000" #to make sure that the zero address is wel funded for gas estimation
+                },
+                user_operation.sender_address: #to make sure that the sender address is wel funded for gas estimation
+                {
+                    "balance": "0x21E19E0C9BAB2400000"
+                },
+                "0x6E0428608E6857C1f82aB5f1D431c557Bd8D7a27": # a random address for the GasLeft contract
                 {
                     "code": "0x6080604052348015600f57600080fd5b506004361060285760003560e01c806315e812ad14602d575b600080fd5b60336047565b604051603e91906066565b60405180910390f35b60005a905090565b6000819050919050565b606081604f565b82525050565b6000602082019050607960008301846059565b9291505056fea26469706673582212205a5bd8713997a517191580430600d0387c0a224bc73a9ae59c6ce4e7da11beb064736f6c63430008120033"
-                }
-            }
+                },
+            },
         ]
 
         result = await send_rpc_request_to_eth_client(
