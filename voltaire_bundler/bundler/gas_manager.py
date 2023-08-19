@@ -291,7 +291,7 @@ class GasManager:
     ) -> None:
         expected_preverification_gas = (
             await self.get_preverification_gas(
-                user_operation
+                user_operation, "latest"
             )
         )
 
