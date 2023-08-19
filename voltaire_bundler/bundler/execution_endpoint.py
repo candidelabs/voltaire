@@ -84,6 +84,7 @@ class ExecutionEndpoint(Endpoint):
         self.gas_manager = GasManager(
             self.ethereum_node_url,
             entrypoint,
+            chain_id,
             is_legacy_mode,
         )
 

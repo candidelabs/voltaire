@@ -26,22 +26,25 @@ MIN_CALL_GAS_LIMIT = 21000
 class GasManager:
     ethereum_node_url: str
     entrypoint:str
+    chain_id: str
     is_legacy_mode: bool
     
     def __init__(
         self,
         ethereum_node_url,
         entrypoint,
+        chain_id,
         is_legacy_mode
     ):
         self.ethereum_node_url = ethereum_node_url
         self.entrypoint = entrypoint
+        self.chain_id = chain_id
         self.is_legacy_mode = is_legacy_mode
 
     async def estimate_callgaslimit_and_preverificationgas_and_verificationgas(
             self, user_operation: UserOperation
     )->[str,str,str]:
-        preverification_gas = GasManager.calc_preverification_gas(user_operation)
+        preverification_gas = await self.get_preverification_gas(user_operation)
         preverification_gas_hex = hex(preverification_gas)
 
         user_operation.pre_verification_gas = preverification_gas
@@ -182,7 +185,7 @@ class GasManager:
 
         if solidity_error_selector == "0x8b7ac980":
             preOpGas, paid, targetSuccess, targetResult = decode_ExecutionResult(solidity_error_params)
-        else:
+        elif solidity_error_selector == "0x220266b6":
             (
                 _,
                 reason,
@@ -277,11 +280,11 @@ class GasManager:
 
         return base_plus_tip_fee_gas_price_hex
 
-    def verify_preverification_gas_and_verification_gas_limit(
+    async def verify_preverification_gas_and_verification_gas_limit(
         self, user_operation: UserOperation
     ) -> None:
         expected_preverification_gas = (
-            GasManager.calc_preverification_gas(
+            await self.get_preverification_gas(
                 user_operation
             )
         )
@@ -303,9 +306,40 @@ class GasManager:
                 "",
             )
 
+    async def calc_l1_fees_optimism(self,user_operation: UserOperation) -> int:
+        optimism_gas_oracle_contract_address = "0x420000000000000000000000000000000000000F"
+
+        packed = UserOperationHandler.pack_user_operation(user_operation, False)
+
+        # getL1GasUsed
+        function_selector = "0xde26c4a1"
+        params = encode(["bytes"], [packed])
+
+        call_data = function_selector + params.hex()
+
+        params = [
+            {
+                "to": optimism_gas_oracle_contract_address,
+                "data": call_data,
+            },
+        ]
+
+        result = await send_rpc_request_to_eth_client(
+            self.ethereum_node_url, "eth_call", params
+        )
+
+        return result["result"]
+
+    async def get_preverification_gas(self, user_operation: UserOperation) -> int:
+        base_preverification_gas = GasManager.calc_base_preverification_gas(user_operation)
+        l1_gas = 0
+
+        if(self.chain_id == 10): #optimism
+            l1_gas = self.calc_base_preverification_gas(user_operation)        
+        return base_preverification_gas + l1_gas
 
     @staticmethod
-    def calc_preverification_gas(user_operation: UserOperation) -> int:
+    def calc_base_preverification_gas(user_operation: UserOperation) -> int:
         user_operation_list = user_operation.to_list()
 
         user_operation_list[6] = 21000  # pre_verification_gas

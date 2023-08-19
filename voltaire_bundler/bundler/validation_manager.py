@@ -103,7 +103,7 @@ class ValidationManager:
         self,
         user_operation: UserOperation,
     ) -> bool:
-        self.gas_manager.verify_preverification_gas_and_verification_gas_limit(
+        await self.gas_manager.verify_preverification_gas_and_verification_gas_limit(
             user_operation
         )
         gas_price_hex = await self.gas_manager.verify_gas_fees_and_get_price(
