@@ -17,7 +17,13 @@ from voltaire_bundler.utils.eth_client_utils import (
 )
 from voltaire_bundler.utils.decode import(
     decode_ExecutionResult,
-    decode_FailedOp_event
+    decode_FailedOp_event,
+    decode_gasEstimateL1Component_result
+)
+
+from voltaire_bundler.utils.encode import(
+    encode_handleops_calldata,
+    encode_gasEstimateL1Component_calldata
 )
 
 MAX_VERIFICATION_GAS_LIMIT = 10000000
@@ -333,6 +339,45 @@ class GasManager:
         l1_fee = decode(["uint256"], bytes. fromhex(result["result"][2:]))[0]
         
         return l1_fee
+    
+    async def calc_l1_fees_arbitrum(self,user_operation: UserOperation) -> int:
+        arbitrum_nodeInterface_address = "0x00000000000000000000000000000000000000C8"
+
+        is_init:bool = user_operation.nonce == 0
+
+        user_operations_list = [user_operation.to_list()]
+
+        handleops_calldata = encode_handleops_calldata(
+            user_operations_list, 
+            "0x0000000000000000000000000000000000000000"
+        )
+      
+        call_data = encode_gasEstimateL1Component_calldata(
+            self.entrypoint,
+            is_init,
+            handleops_calldata
+        )
+
+        params = [
+            {
+                "from": "0x0000000000000000000000000000000000000000",
+                "to": arbitrum_nodeInterface_address,
+                "data": call_data,
+            },
+            "latest"
+        ]
+
+        result = await send_rpc_request_to_eth_client(
+            self.ethereum_node_url, "eth_call", params
+        )
+
+        raw_gas_results =  result["result"]
+
+        gas_estimate_for_l1 = decode_gasEstimateL1Component_result(
+            raw_gas_results
+        )
+
+        return gas_estimate_for_l1
 
     async def get_preverification_gas(self, user_operation: UserOperation, block_number_hex:str) -> int:
         base_preverification_gas = GasManager.calc_base_preverification_gas(user_operation)
@@ -340,6 +385,9 @@ class GasManager:
 
         if(self.chain_id == 10): #optimism
             l1_gas = await self.calc_l1_fees_optimism(user_operation, block_number_hex)
+        elif(self.chain_id == 42161): #arbitrum One
+            l1_gas = await self.calc_l1_fees_arbitrum(user_operation)
+
         return base_preverification_gas + l1_gas
 
     @staticmethod
