@@ -44,14 +44,14 @@ class GasManager:
     async def estimate_callgaslimit_and_preverificationgas_and_verificationgas(
             self, user_operation: UserOperation
     )->[str,str,str]:
-        preverification_gas = await self.get_preverification_gas(user_operation)
+        latest_block = await self.get_latest_block()
+        latest_block_number = latest_block["number"]
+    
+        preverification_gas = await self.get_preverification_gas(user_operation, latest_block_number)
         preverification_gas_hex = hex(preverification_gas)
 
         user_operation.pre_verification_gas = preverification_gas
         user_operation.verification_gas_limit = MAX_VERIFICATION_GAS_LIMIT
-
-        latest_block = await self.get_latest_block()
-        latest_block_number = latest_block["number"]
         
         call_data = user_operation.call_data
         user_operation.call_data = bytes(0)
@@ -306,10 +306,10 @@ class GasManager:
                 "",
             )
 
-    async def calc_l1_fees_optimism(self,user_operation: UserOperation) -> int:
+    async def calc_l1_fees_optimism(self,user_operation: UserOperation, block_number_hex:str) -> int:
         optimism_gas_oracle_contract_address = "0x420000000000000000000000000000000000000F"
 
-        packed = UserOperationHandler.pack_user_operation(user_operation, False)
+        packed = UserOperationHandler.pack_user_operation(user_operation.to_list(), False)
 
         # getL1GasUsed
         function_selector = "0xde26c4a1"
@@ -319,23 +319,27 @@ class GasManager:
 
         params = [
             {
+                "from": "0x0000000000000000000000000000000000000000",
                 "to": optimism_gas_oracle_contract_address,
                 "data": call_data,
             },
+            block_number_hex
         ]
 
         result = await send_rpc_request_to_eth_client(
             self.ethereum_node_url, "eth_call", params
         )
+        
+        l1_fee = decode(["uint256"], bytes. fromhex(result["result"][2:]))[0]
+        
+        return l1_fee
 
-        return result["result"]
-
-    async def get_preverification_gas(self, user_operation: UserOperation) -> int:
+    async def get_preverification_gas(self, user_operation: UserOperation, block_number_hex:str) -> int:
         base_preverification_gas = GasManager.calc_base_preverification_gas(user_operation)
         l1_gas = 0
 
         if(self.chain_id == 10): #optimism
-            l1_gas = self.calc_base_preverification_gas(user_operation)        
+            l1_gas = await self.calc_l1_fees_optimism(user_operation, block_number_hex)
         return base_preverification_gas + l1_gas
 
     @staticmethod
