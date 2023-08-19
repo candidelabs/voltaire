@@ -16,7 +16,7 @@ MIN_PRICE_BUMP = 10
 
 
 @dataclass
-class Sender:
+class SenderMempool:
     address: str
     user_operations: list = field(default_factory=list[UserOperation])
 
@@ -76,11 +76,11 @@ class Sender:
             return False
 
         min_priority_fee_per_gas_to_replace = (
-            Sender._calculate_min_fee_to_replace(
+            SenderMempool._calculate_min_fee_to_replace(
                 existing_operation.max_priority_fee_per_gas
             )
         )
-        min_fee_per_gas_to_replace = Sender._calculate_min_fee_to_replace(
+        min_fee_per_gas_to_replace = SenderMempool._calculate_min_fee_to_replace(
             existing_operation.max_fee_per_gas
         )
 
