@@ -75,7 +75,7 @@ class GasManager:
                 ExecutionExceptionCode.EXECUTION_REVERTED,
                 targetResult, ""
             )
-
+        user_operation.call_data = call_data
         verification_gas_limit = math.ceil((preOpGas - user_operation.pre_verification_gas)*1.1)
         verification_gas_hex = hex(verification_gas_limit)
         user_operation.verification_gas_limit = verification_gas_limit
