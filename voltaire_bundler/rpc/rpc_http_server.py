@@ -253,6 +253,8 @@ async def handle(is_debug, request):
         content_type="application/json",
     )
 
+async def health(request):
+    return web.Response(text="OK")
 
 async def run_rpc_http_server(
     host="localhost", rpc_cors_domain="*", port=3000, is_debug=False
@@ -261,6 +263,8 @@ async def run_rpc_http_server(
     app = web.Application()
     handle_func = partial(handle, is_debug)
     app.router.add_post("/rpc", handle_func)
+
+    app.router.add_post("/health", health)
 
     cors = aiohttp_cors.setup(
         app,
