@@ -5,6 +5,7 @@ import re
 import json
 from dataclasses import dataclass
 from importlib.metadata import version
+from argparse import ArgumentParser, Namespace
 
 from .utils.import_key import (
     import_bundler_account,
@@ -51,7 +52,7 @@ def address(ep):
     return ep
 
 
-def initialize() -> InitData:
+def initialize_argument_parser() -> ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="Voltaire",
         description="EIP-4337 python Bundler",
@@ -202,8 +203,9 @@ def initialize() -> InitData:
         version="%(prog)s " + "version " + __version__,
     )
 
-    args = parser.parse_args()
+    return parser
 
+def get_init_data(args:Namespace)-> InitData:
     bundler_address = ""
     bundler_pk = ""
 
