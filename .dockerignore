@@ -1,0 +1,7 @@
+tests
+dist
+docs
+.pytest_cache
+.git
+.cache
+*.ipc
