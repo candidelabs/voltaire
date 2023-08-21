@@ -23,7 +23,7 @@ class MempoolManager:
     bundler_address: str
     entrypoint: str
     chain_id: int
-    senders: dict[str, SenderMempool]
+    senders_mempools: dict[str, SenderMempool]
     is_unsafe: bool
     entity_no_of_ops_in_mempool: dict[str, int]  # factory and paymaster
 
@@ -48,11 +48,11 @@ class MempoolManager:
         self.entrypoint = entrypoint
         self.chain_id = chain_id
         self.is_unsafe = is_unsafe
-        self.senders = {}
+        self.senders_mempools = {}
         self.entity_no_of_ops_in_mempool = {}
 
     def clear_user_operations(self) -> None:
-        self.senders.clear()
+        self.senders_mempools.clear()
 
     async def add_user_operation(self, user_operation: UserOperation) -> str:
         self._verify_entities_reputation(
@@ -71,12 +71,12 @@ class MempoolManager:
         new_sender = None
         new_sender_address = user_operation.sender_address
 
-        if new_sender_address not in self.senders:
-            self.senders[new_sender_address] = SenderMempool(
+        if new_sender_address not in self.senders_mempools:
+            self.senders_mempools[new_sender_address] = SenderMempool(
                 new_sender_address
             )
 
-        new_sender = self.senders[new_sender_address]
+        new_sender = self.senders_mempools[new_sender_address]
 
         await new_sender.add_user_operation(
             user_operation,
@@ -103,10 +103,10 @@ class MempoolManager:
 
     async def get_user_operations_to_bundle(self) -> list[UserOperation]:
         bundle = []
-        for sender_address in list(self.senders):
-            sender = self.senders[sender_address]
-            if len(sender.user_operations) > 0:
-                user_operation = sender.user_operations.pop(0)
+        for sender_address in list(self.senders_mempools):
+            sender = self.senders_mempools[sender_address]
+            if len(sender.mempool_members_list) > 0:
+                user_operation = sender.mempool_members_list.pop(0).user_operation
 
                 if not self.is_unsafe:
                     new_code_hash = (
@@ -118,16 +118,16 @@ class MempoolManager:
                         continue
 
                 bundle.append(user_operation)
-                if len(sender.user_operations) == 0:
-                    del self.senders[sender.address]
+                if len(sender.mempool_members_list) == 0:
+                    del self.senders_mempools[sender.address]
 
         return bundle
 
     def get_all_user_operations(self) -> list[UserOperation]:
         user_operations = [
-            user_operation
-            for sender in self.senders.values()
-            for user_operation in sender.user_operations
+            mempool_member.user_operation
+            for sender in self.senders_mempools.values()
+            for mempool_member in sender.mempool_members_list
         ]
         return user_operations
 
@@ -146,9 +146,9 @@ class MempoolManager:
         self, sender_address: str, factory_address: str, paymaster_address: str
     ) -> None:
         sender_no_of_ops = 0
-        if sender_address in self.senders:
+        if sender_address in self.senders_mempools:
             sender_no_of_ops = len(
-                self.senders[sender_address].user_operations
+                self.senders_mempools[sender_address].mempool_members_list
             )
         self._verify_entity_reputation(
             sender_address, "sender", sender_no_of_ops
