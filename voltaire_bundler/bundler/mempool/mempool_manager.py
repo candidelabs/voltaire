@@ -5,8 +5,8 @@ from .sender_mempool import SenderMempool
 from voltaire_bundler.user_operation.user_operation_handler import (
     UserOperationHandler,
 )
-from .validation_manager import ValidationManager
-from .reputation_manager import ReputationManager, ReputationStatus
+from ..validation_manager import ValidationManager
+from ..reputation_manager import ReputationManager, ReputationStatus
 from voltaire_bundler.bundler.exceptions import (
     ValidationException,
     ValidationExceptionCode,

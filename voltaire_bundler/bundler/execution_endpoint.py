@@ -16,7 +16,7 @@ from voltaire_bundler.bundler.exceptions import (
 )
 from voltaire_bundler.user_operation.user_operation import UserOperation
 
-from .mempool_manager import MempoolManager
+from .mempool.mempool_manager import MempoolManager
 from voltaire_bundler.user_operation.user_operation_handler import (
     UserOperationHandler,
 )
