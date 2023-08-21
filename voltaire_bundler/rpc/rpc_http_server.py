@@ -11,6 +11,7 @@ from jsonrpcserver import (
     InvalidParams,
 )
 from typing import Any
+from importlib.metadata import version
 
 from voltaire_bundler.event_bus_manager.endpoint import Client
 from .events import RPCCallRequestEvent, RPCCallResponseEvent
@@ -226,6 +227,9 @@ async def debug_bundler_dumpReputation(entrypoint) -> Result:
     )
     return result
 
+@method
+async def web3_bundlerVersion() -> Result:
+    return Success(version("voltaire_bundler"))
 
 async def handle(is_debug, request):
     res = await request.text()
@@ -236,6 +240,7 @@ async def handle(is_debug, request):
         "eth_sendUserOperation": eth_sendUserOperation,
         "eth_getUserOperationReceipt": eth_getUserOperationReceipt,
         "eth_getUserOperationByHash": eth_getUserOperationByHash,
+        "web3_bundlerVersion": web3_bundlerVersion,
     }
 
     if is_debug:
