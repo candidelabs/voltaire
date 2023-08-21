@@ -171,13 +171,13 @@ def verify_and_get_uint(value) -> int:
         except ValueError as exp:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
-                f"Invalide uint value : {value}",
+                f"Invalide uint hex value : {value}",
                 "",
             )
     else:
         raise ValidationException(
             ValidationExceptionCode.InvalidFields,
-            f"Invalide uint value : {value}",
+            f"Invalide uint hex value : {value}",
             "",
         )
 
