@@ -12,10 +12,10 @@ from voltaire_bundler.user_operation.user_operation_handler import (
 )
 from voltaire_bundler.utils.encode import encode_handleops_calldata
 
-from .mempool_manager import MempoolManager
-from .reputation_manager import ReputationManager
-from .validation_manager import ValidationManager
-from .gas_manager import GasManager
+from ..mempool_manager import MempoolManager
+from ..reputation_manager import ReputationManager
+from ..validation_manager import ValidationManager
+from ..gas_manager import GasManager
 
 
 class BundlerManager:
