@@ -266,18 +266,15 @@ async def run_rpc_http_server(
 
     app.router.add_post("/health", health)
 
-    cors = aiohttp_cors.setup(
-        app,
-        defaults={
-            rpc_cors_domain: aiohttp_cors.ResourceOptions(
+    cors = aiohttp_cors.setup(app, defaults={
+        rpc_cors_domain: aiohttp_cors.ResourceOptions(
                 allow_credentials=True,
                 expose_headers="*",
-                allow_headers="*",
+                allow_headers="*"
             )
-        },
-    )
-    resource = cors.add(app.router.add_resource("/rpc"))
-    cors.add(resource.add_route("PUT", handle_func))
+        })
+    for route in list(app.router.routes()):
+        cors.add(route)
 
     runner = web.AppRunner(app)
     await runner.setup()
