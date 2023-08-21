@@ -4,12 +4,7 @@ from eth_abi import encode, decode
 
 from voltaire_bundler.user_operation.user_operation import UserOperation
 from ..exceptions import ValidationException, ValidationExceptionCode
-from voltaire_bundler.utils.eth_client_utils import (
-    send_rpc_request_to_eth_client,
-)
 from voltaire_bundler.user_operation.models import DepositInfo
-from voltaire_bundler.user_operation.models import StakeInfo
-from ..validation_manager import ValidationManager
 
 MAX_MEMPOOL_USEROPS_PER_SENDER = 4
 MIN_PRICE_BUMP = 10
