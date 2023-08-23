@@ -51,7 +51,11 @@ class GasManager:
     ) -> [str, str, str]:
         latest_block = await self.get_latest_block()
         latest_block_number = latest_block["number"]
-        latest_block_base_fee = int(latest_block["baseFeePerGas"], 16)
+
+        if "baseFeePerGas" in latest_block:
+            latest_block_base_fee = int(latest_block["baseFeePerGas"], 16)
+        else: #for block requested before the EIP-1559 upgrade
+            latest_block_base_fee = 0 
 
         preverification_gas = await self.get_preverification_gas(
             user_operation, latest_block_number, latest_block_base_fee
