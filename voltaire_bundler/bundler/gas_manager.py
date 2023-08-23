@@ -343,7 +343,7 @@ class GasManager:
                 "",
             )
 
-    async def calc_l1_fees_optimism(
+    async def calc_l1_gas_estimate_optimism(
         self, user_operation: UserOperation, 
         block_number_hex: str,
         latest_block_base_fee: int
@@ -390,11 +390,11 @@ class GasManager:
         )
         l2_gas_price = max(1, l2_gas_price) #in case l2_gas_price = 0
 
-        l1_fee_gas_overhead = math.ceil(l1_fee / l2_gas_price)
+        gas_estimate_for_l1 = math.ceil(l1_fee / l2_gas_price)
 
-        return l1_fee_gas_overhead
+        return gas_estimate_for_l1
 
-    async def calc_l1_fees_arbitrum(
+    async def calc_l1_gas_estimate_arbitrum(
         self, user_operation: UserOperation
     ) -> int:
         arbitrum_nodeInterface_address = (
@@ -448,11 +448,11 @@ class GasManager:
         l1_gas = 0
 
         if self.chain_id == 10:  # optimism
-            l1_gas = await self.calc_l1_fees_optimism(
+            l1_gas = await self.calc_l1_gas_estimate_optimism(
                 user_operation, block_number_hex, latest_block_base_fee
             )
         elif self.chain_id == 42161:  # arbitrum One
-            l1_gas = await self.calc_l1_fees_arbitrum(user_operation)
+            l1_gas = await self.calc_l1_gas_estimate_arbitrum(user_operation)
 
         calculated_preverification_gas = base_preverification_gas + l1_gas
 
