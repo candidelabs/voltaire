@@ -100,9 +100,11 @@ class ValidationManager:
     async def validate_user_operation(
         self,
         user_operation: UserOperation,
+        latest_block_number:str,
+        latest_block_basefee: int,
     ) -> bool:
         await self.gas_manager.verify_preverification_gas_and_verification_gas_limit(
-            user_operation
+            user_operation, latest_block_number, latest_block_basefee
         )
         gas_price_hex = await self.gas_manager.verify_gas_fees_and_get_price(
             user_operation

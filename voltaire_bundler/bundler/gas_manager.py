@@ -16,6 +16,7 @@ from voltaire_bundler.bundler.exceptions import (
 )
 from voltaire_bundler.utils.eth_client_utils import (
     send_rpc_request_to_eth_client,
+    get_latest_block_info
 )
 from voltaire_bundler.utils.decode import (
     decode_ExecutionResult,
@@ -49,16 +50,10 @@ class GasManager:
     async def estimate_callgaslimit_and_preverificationgas_and_verificationgas(
         self, user_operation: UserOperation
     ) -> [str, str, str]:
-        latest_block = await self.get_latest_block()
-        latest_block_number = latest_block["number"]
-
-        if "baseFeePerGas" in latest_block:
-            latest_block_base_fee = int(latest_block["baseFeePerGas"], 16)
-        else: #for block requested before the EIP-1559 upgrade
-            latest_block_base_fee = 0 
+        latest_block_number, latest_block_basefee, latest_block_gas_limit_hex = await get_latest_block_info(self.ethereum_node_url)
 
         preverification_gas = await self.get_preverification_gas(
-            user_operation, latest_block_number, latest_block_base_fee
+            user_operation, latest_block_number, latest_block_basefee
         )
         preverification_gas_hex = hex(preverification_gas)
 
@@ -79,7 +74,7 @@ class GasManager:
         ) = await self.simulate_handle_op(
             user_operation,
             latest_block_number,
-            latest_block["gasLimit"],
+            latest_block_gas_limit_hex,
             user_operation.sender_address,
             call_data,
         )
@@ -107,13 +102,13 @@ class GasManager:
         ) = await self.simulate_handle_op(
             user_operation,
             latest_block_number,
-            latest_block["gasLimit"],
+            latest_block_gas_limit_hex,
             "0x6E0428608E6857C1f82aB5f1D431c557Bd8D7a27",  # a random address where the GasLeft contract is deployed through state
             bytes.fromhex(
                 "15e812ad"
             ),  # getGasLeft will return the remaining gas
         )
-        block_gas_limit = int(latest_block["gasLimit"], 16)
+        block_gas_limit = int(latest_block_gas_limit_hex, 16)
         remaining_gas = decode(["uint256"], targetResult)[0]
 
         call_gas_limit = block_gas_limit - remaining_gas - preOpGas - 400000
@@ -125,12 +120,6 @@ class GasManager:
             preverification_gas_hex,
             verification_gas_hex,
         )
-
-    async def get_latest_block(self) -> dict:
-        res = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_getBlockByNumber", ["latest", False]
-        )
-        return res["result"]
 
     async def estimate_call_gas_limit(self, call_data, _from, to):
         if call_data == "0x":
@@ -323,10 +312,12 @@ class GasManager:
         return base_plus_tip_fee_gas_price_hex
 
     async def verify_preverification_gas_and_verification_gas_limit(
-        self, user_operation: UserOperation
+        self, user_operation: UserOperation, 
+        latest_block_number:str,
+        latest_block_basefee:int,
     ) -> None:
         expected_preverification_gas = await self.get_preverification_gas(
-            user_operation, "latest"
+            user_operation, latest_block_number, latest_block_basefee
         )
 
         if user_operation.pre_verification_gas < expected_preverification_gas:

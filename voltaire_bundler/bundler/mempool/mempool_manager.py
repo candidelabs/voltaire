@@ -11,7 +11,9 @@ from voltaire_bundler.bundler.exceptions import (
     ValidationException,
     ValidationExceptionCode,
 )
-
+from voltaire_bundler.utils.eth_client_utils import (
+    get_latest_block_info
+)
 
 @dataclass
 class MempoolManager:
@@ -61,11 +63,12 @@ class MempoolManager:
             user_operation.paymaster_address_lowercase,
         )
 
+        latest_block_number, latest_block_basefee, _ = await get_latest_block_info(self.ethereum_node_url)
         (
             is_sender_staked,
             user_operation_hash,
         ) = await self.validation_manager.validate_user_operation(
-            user_operation,
+            user_operation, latest_block_number, latest_block_basefee
         )
 
         new_sender = None
