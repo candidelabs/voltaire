@@ -51,9 +51,10 @@ class GasManager:
     ) -> [str, str, str]:
         latest_block = await self.get_latest_block()
         latest_block_number = latest_block["number"]
+        latest_block_base_fee = int(latest_block["baseFeePerGas"], 16)
 
         preverification_gas = await self.get_preverification_gas(
-            user_operation, latest_block_number
+            user_operation, latest_block_number, latest_block_base_fee
         )
         preverification_gas_hex = hex(preverification_gas)
 
@@ -62,6 +63,7 @@ class GasManager:
 
         call_data = user_operation.call_data
         user_operation.call_data = bytes(0)
+        user_operation.call_gas_limit = 0 #
 
         # Call simulateHandleOp with empty callData and pass callData to simulateHandleOp target param
         # to be able to get determine if callData was reverted and retrieve the revert error
@@ -338,19 +340,28 @@ class GasManager:
             )
 
     async def calc_l1_fees_optimism(
-        self, user_operation: UserOperation, block_number_hex: str
+        self, user_operation: UserOperation, 
+        block_number_hex: str,
+        latest_block_base_fee: int
     ) -> int:
+
+        user_operations_list = [user_operation.to_list()]
+
+        # currently most bundles contains a singler useroperations
+        # so l1 fees is calculated for the full handleops transaction 
+        handleops_calldata = encode_handleops_calldata(
+            user_operations_list, "0x0000000000000000000000000000000000000000"
+        )
+
         optimism_gas_oracle_contract_address = (
             "0x420000000000000000000000000000000000000F"
         )
 
-        packed = UserOperationHandler.pack_user_operation(
-            user_operation.to_list(), False
+        function_selector = "0x49948e0e" # getL1Fee
+        params = encode(
+            ["bytes"], 
+            [bytes.fromhex(handleops_calldata[2:])]
         )
-
-        # getL1GasUsed
-        function_selector = "0xde26c4a1"
-        params = encode(["bytes"], [packed])
 
         call_data = function_selector + params.hex()
 
@@ -369,7 +380,15 @@ class GasManager:
 
         l1_fee = decode(["uint256"], bytes.fromhex(result["result"][2:]))[0]
 
-        return l1_fee
+        l2_gas_price = min(
+            user_operation.max_fee_per_gas,
+            user_operation.max_priority_fee_per_gas + latest_block_base_fee
+        )
+        l2_gas_price = max(1, l2_gas_price) #in case l2_gas_price = 0
+
+        l1_fee_gas_overhead = math.ceil(l1_fee / l2_gas_price)
+
+        return l1_fee_gas_overhead
 
     async def calc_l1_fees_arbitrum(
         self, user_operation: UserOperation
@@ -415,6 +434,7 @@ class GasManager:
         self,
         user_operation: UserOperation,
         block_number_hex: str,
+        latest_block_base_fee: int,
         preverification_gas_percentage_coefficient: int = 100,
         preverification_gas_addition_constant: int = 0,
     ) -> int:
@@ -425,7 +445,7 @@ class GasManager:
 
         if self.chain_id == 10:  # optimism
             l1_gas = await self.calc_l1_fees_optimism(
-                user_operation, block_number_hex
+                user_operation, block_number_hex, latest_block_base_fee
             )
         elif self.chain_id == 42161:  # arbitrum One
             l1_gas = await self.calc_l1_fees_arbitrum(user_operation)
