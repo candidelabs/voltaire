@@ -438,7 +438,7 @@ class GasManager:
         )
         l1_gas = 0
 
-        if self.chain_id == 10:  # optimism
+        if self.chain_id == 10 or self.chain_id == 420:  # optimism and optimism goerli
             l1_gas = await self.calc_l1_gas_estimate_optimism(
                 user_operation, block_number_hex, latest_block_base_fee
             )
