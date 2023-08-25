@@ -181,7 +181,7 @@ class ExecutionEndpoint(Endpoint):
         estimated_gas_json = {
             "callGasLimit": call_gas_limit_hex,
             "preVerificationGas": preverification_gas_hex,
-            "verificationGas": verification_gas_hex,
+            "verificationGasLimit": verification_gas_hex,
         }
 
         return RPCCallResponseEvent(estimated_gas_json)
