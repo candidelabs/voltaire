@@ -38,14 +38,24 @@ class GasManager:
     entrypoint: str
     chain_id: str
     is_legacy_mode: bool
+    max_fee_per_gas_percentage_multiplier: int
+    max_priority_fee_per_gas_percentage_multiplier: int
 
     def __init__(
-        self, ethereum_node_url, entrypoint, chain_id, is_legacy_mode
+        self, 
+        ethereum_node_url, 
+        entrypoint, 
+        chain_id, 
+        is_legacy_mode,
+        max_fee_per_gas_percentage_multiplier: int,
+        max_priority_fee_per_gas_percentage_multiplier: int,
     ):
         self.ethereum_node_url = ethereum_node_url
         self.entrypoint = entrypoint
         self.chain_id = chain_id
         self.is_legacy_mode = is_legacy_mode
+        self.max_fee_per_gas_percentage_multiplier = max_fee_per_gas_percentage_multiplier
+        self.max_priority_fee_per_gas_percentage_multiplier = max_priority_fee_per_gas_percentage_multiplier
 
     async def estimate_callgaslimit_and_preverificationgas_and_verificationgas(
         self, user_operation: UserOperation
@@ -127,7 +137,6 @@ class GasManager:
             ),  # getGasLeft will return the remaining gas
         )
         remaining_gas = decode(["uint256"], targetResult)[0]
-        print(str(new_gas_limit - remaining_gas))
         call_gas_limit = new_gas_limit - remaining_gas - (preOpGas - preverification_gas)
         call_gas_limit = max(MIN_CALL_GAS_LIMIT, call_gas_limit)
         call_gas_limit_hex = hex(call_gas_limit)
@@ -285,6 +294,7 @@ class GasManager:
 
         base_plus_tip_fee_gas_price_hex = tasks[0]["result"]
         base_plus_tip_fee_gas_price = int(tasks[0]["result"], 16)
+        base_plus_tip_fee_gas_price = math.ceil(base_plus_tip_fee_gas_price * (self.max_fee_per_gas_percentage_multiplier/100))
 
         tip_fee_gas_price = base_plus_tip_fee_gas_price
         if self.is_legacy_mode:
@@ -297,6 +307,8 @@ class GasManager:
 
         else:
             tip_fee_gas_price = int(tasks[1]["result"], 16)
+            tip_fee_gas_price = math.ceil(tip_fee_gas_price * (self.max_priority_fee_per_gas_percentage_multiplier/100))
+
             estimated_base_fee = max(
                 base_plus_tip_fee_gas_price - tip_fee_gas_price, 1
             )

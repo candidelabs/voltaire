@@ -41,6 +41,8 @@ class InitData:
     is_send_raw_transaction_conditional: bool
     bundle_interval: int
     whitelist_entity_storage_access: list()
+    max_fee_per_gas_percentage_multiplier: int
+    max_priority_fee_per_gas_percentage_multiplier: int
     is_metrics: bool
     rpc_cors_domain: str
 
@@ -190,6 +192,24 @@ def initialize_argument_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
+        "--max_fee_per_gas_percentage_multiplier",
+        type=int,
+        help="modify the bundle max_fee_per_gas value as the following formula [bundle_max_fee_per_gas = block_max_fee_per_gas * max_fee_per_gas_percentage_multiplier /100], defaults to 100",
+        nargs="?",
+        const=100,
+        default=100,
+    )
+
+    parser.add_argument(
+        "--max_priority_fee_per_gas_percentage_multiplier",
+        type=int,
+        help="modify the bundle max_priority_fee_per_gas value as the following formula [bundle_max_priority_fee_per_gas = block_max_priority_fee_per_gas * max_priority_fee_per_gas_percentage_multiplier /100], defaults to 100",
+        nargs="?",
+        const=100,
+        default=100,
+    )
+
+    parser.add_argument(
         "--metrics",
         help="enable metrics collection",
         nargs="?",
@@ -241,6 +261,8 @@ def get_init_data(args:Namespace)-> InitData:
         args.send_raw_transaction_conditional,
         args.bundle_interval,
         args.whitelist_entity_storage_access,
+        args.max_fee_per_gas_percentage_multiplier,
+        args.max_priority_fee_per_gas_percentage_multiplier,
         args.metrics,
         args.rpc_cors_domain,
     )

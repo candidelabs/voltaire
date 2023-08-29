@@ -38,6 +38,8 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             init_data.is_send_raw_transaction_conditional,
             init_data.bundle_interval,
             init_data.whitelist_entity_storage_access,
+            init_data.max_fee_per_gas_percentage_multiplier,
+            init_data.max_priority_fee_per_gas_percentage_multiplier,
         )
         task_group.create_task(execution_endpoint.start_execution_endpoint())
         task_group.create_task(

@@ -49,6 +49,8 @@ class ExecutionEndpoint(Endpoint):
     is_send_raw_transaction_conditional: bool
     bundle_interval: int
     whitelist_entity_storage_access: list()
+    max_fee_per_gas_percentage_multiplier: int
+    max_priority_fee_per_gas_percentage_multiplier: int
 
     def __init__(
         self,
@@ -63,6 +65,8 @@ class ExecutionEndpoint(Endpoint):
         is_send_raw_transaction_conditional: bool,
         bundle_interval: int,
         whitelist_entity_storage_access: list(),
+        max_fee_per_gas_percentage_multiplier: int,
+        max_priority_fee_per_gas_percentage_multiplier: int,
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_url = ethereum_node_url
@@ -78,6 +82,8 @@ class ExecutionEndpoint(Endpoint):
         )
         self.bundle_interval = bundle_interval
         self.whitelist_entity_storage_access = whitelist_entity_storage_access
+        self.max_fee_per_gas_percentage_multiplier = max_fee_per_gas_percentage_multiplier
+        self.max_priority_fee_per_gas_percentage_multiplier = max_priority_fee_per_gas_percentage_multiplier
 
         self.reputation_manager = ReputationManager()
 
@@ -86,6 +92,8 @@ class ExecutionEndpoint(Endpoint):
             entrypoint,
             chain_id,
             is_legacy_mode,
+            max_fee_per_gas_percentage_multiplier,
+            max_priority_fee_per_gas_percentage_multiplier,
         )
 
         self.user_operation_handler = UserOperationHandler(
@@ -134,6 +142,8 @@ class ExecutionEndpoint(Endpoint):
             chain_id,
             is_legacy_mode,
             is_send_raw_transaction_conditional,
+            max_fee_per_gas_percentage_multiplier,
+            max_priority_fee_per_gas_percentage_multiplier,
         )
         if self.bundle_interval > 0:
             asyncio.ensure_future(self.execute_bundle_cron_job())

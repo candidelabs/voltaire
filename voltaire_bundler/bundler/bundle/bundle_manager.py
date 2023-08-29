@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import math
 
 from eth_account import Account
 
@@ -29,6 +30,8 @@ class BundlerManager:
     chain_id: int
     is_legacy_mode: bool
     is_send_raw_transaction_conditional: bool
+    max_fee_per_gas_percentage_multiplier: int
+    max_priority_fee_per_gas_percentage_multiplier: int
 
     def __init__(
         self,
@@ -43,6 +46,8 @@ class BundlerManager:
         chain_id: str,
         is_legacy_mode: bool,
         is_send_raw_transaction_conditional: bool,
+        max_fee_per_gas_percentage_multiplier: int,
+        max_priority_fee_per_gas_percentage_multiplier: int,
     ):
         self.mempool_manager = mempool_manager
         self.user_operation_handler = user_operation_handler
@@ -57,6 +62,8 @@ class BundlerManager:
         self.is_send_raw_transaction_conditional = (
             is_send_raw_transaction_conditional
         )
+        self.max_fee_per_gas_percentage_multiplier = max_fee_per_gas_percentage_multiplier
+        self.max_priority_fee_per_gas_percentage_multiplier = max_priority_fee_per_gas_percentage_multiplier
 
     async def send_next_bundle(self) -> None:
         user_operations = (
@@ -113,9 +120,16 @@ class BundlerManager:
         base_plus_tip_fee_gas_price = tasks[1]["result"]
         nonce = tasks[2]["result"]
 
+        base_plus_tip_fee_gas_price_dec = int(base_plus_tip_fee_gas_price, 16)
+        base_plus_tip_fee_gas_price_dec_mod = math.ceil(base_plus_tip_fee_gas_price_dec * (self.max_fee_per_gas_percentage_multiplier/100))
+        base_plus_tip_fee_gas_price = hex(base_plus_tip_fee_gas_price_dec_mod)
+
         tip_fee_gas_price = 0
         if not self.is_legacy_mode:
             tip_fee_gas_price = tasks[3]["result"]
+            tip_fee_gas_price_dec = int(tip_fee_gas_price, 16)
+            tip_fee_gas_price_dec_mod = math.ceil(tip_fee_gas_price_dec * (self.max_priority_fee_per_gas_percentage_multiplier/100))
+            tip_fee_gas_price = hex(tip_fee_gas_price_dec_mod)
 
         txnDict = {
             "chainId": self.chain_id,
