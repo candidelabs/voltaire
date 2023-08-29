@@ -110,8 +110,25 @@ class GasManager:
         )
         block_gas_limit = int(latest_block_gas_limit_hex, 16)
         remaining_gas = decode(["uint256"], targetResult)[0]
+        new_gas_limit = block_gas_limit - remaining_gas
 
-        call_gas_limit = block_gas_limit - remaining_gas - preOpGas - 400000
+        (
+            preOpGas,
+            _,
+            targetSuccess,
+            targetResult,
+        ) = await self.simulate_handle_op(
+            user_operation,
+            latest_block_number,
+            hex(new_gas_limit),
+            "0x6E0428608E6857C1f82aB5f1D431c557Bd8D7a27",  # a random address where the GasLeft contract is deployed through state
+            bytes.fromhex(
+                "15e812ad"
+            ),  # getGasLeft will return the remaining gas
+        )
+        remaining_gas = decode(["uint256"], targetResult)[0]
+        print(str(new_gas_limit - remaining_gas))
+        call_gas_limit = new_gas_limit - remaining_gas - (preOpGas - preverification_gas)
         call_gas_limit = max(MIN_CALL_GAS_LIMIT, call_gas_limit)
         call_gas_limit_hex = hex(call_gas_limit)
 
