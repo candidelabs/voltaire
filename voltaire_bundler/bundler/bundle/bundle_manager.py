@@ -92,7 +92,7 @@ class BundlerManager:
             to=self.entrypoint,
         )
 
-        base_plus_tip_fee_gas_price_op = send_rpc_request_to_eth_client(
+        block_max_fee_per_gas_op = send_rpc_request_to_eth_client(
             self.ethereum_node_url, "eth_gasPrice"
         )
 
@@ -104,32 +104,32 @@ class BundlerManager:
 
         tasks_arr = [
             gas_estimation_op,
-            base_plus_tip_fee_gas_price_op,
+            block_max_fee_per_gas_op,
             nonce_op,
         ]
 
         if not self.is_legacy_mode:
-            tip_fee_gas_price_op = send_rpc_request_to_eth_client(
+            block_max_priority_fee_per_gas_op = send_rpc_request_to_eth_client(
                 self.ethereum_node_url, "eth_maxPriorityFeePerGas"
             )
-            tasks_arr.append(tip_fee_gas_price_op)
+            tasks_arr.append(block_max_priority_fee_per_gas_op)
 
         tasks = await asyncio.gather(*tasks_arr)
 
         gas_estimation = tasks[0]
-        base_plus_tip_fee_gas_price = tasks[1]["result"]
+        block_max_fee_per_gas = tasks[1]["result"]
         nonce = tasks[2]["result"]
 
-        base_plus_tip_fee_gas_price_dec = int(base_plus_tip_fee_gas_price, 16)
-        base_plus_tip_fee_gas_price_dec_mod = math.ceil(base_plus_tip_fee_gas_price_dec * (self.max_fee_per_gas_percentage_multiplier/100))
-        base_plus_tip_fee_gas_price = hex(base_plus_tip_fee_gas_price_dec_mod)
+        block_max_fee_per_gas_dec = int(block_max_fee_per_gas, 16)
+        block_max_fee_per_gas_dec_mod = math.ceil(block_max_fee_per_gas_dec * (self.max_fee_per_gas_percentage_multiplier/100))
+        block_max_fee_per_gas = hex(block_max_fee_per_gas_dec_mod)
 
-        tip_fee_gas_price = 0
+        block_max_priority_fee_per_gas = 0
         if not self.is_legacy_mode:
-            tip_fee_gas_price = tasks[3]["result"]
-            tip_fee_gas_price_dec = int(tip_fee_gas_price, 16)
-            tip_fee_gas_price_dec_mod = math.ceil(tip_fee_gas_price_dec * (self.max_priority_fee_per_gas_percentage_multiplier/100))
-            tip_fee_gas_price = hex(tip_fee_gas_price_dec_mod)
+            block_max_priority_fee_per_gas = tasks[3]["result"]
+            block_max_priority_fee_per_gas_dec = int(block_max_priority_fee_per_gas, 16)
+            block_max_priority_fee_per_gas_dec_mod = math.ceil(block_max_priority_fee_per_gas_dec * (self.max_priority_fee_per_gas_percentage_multiplier/100))
+            block_max_priority_fee_per_gas = hex(block_max_priority_fee_per_gas_dec_mod)
 
         txnDict = {
             "chainId": self.chain_id,
@@ -143,14 +143,14 @@ class BundlerManager:
         if self.is_legacy_mode:
             txnDict.update(
                 {
-                    "gasPrice": base_plus_tip_fee_gas_price,
+                    "gasPrice": block_max_fee_per_gas,
                 }
             )
         else:
             txnDict.update(
                 {
-                    "maxFeePerGas": base_plus_tip_fee_gas_price,
-                    "maxPriorityFeePerGas": tip_fee_gas_price,
+                    "maxFeePerGas": block_max_fee_per_gas,
+                    "maxPriorityFeePerGas": block_max_priority_fee_per_gas,
                 }
             )
 

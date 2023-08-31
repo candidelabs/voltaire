@@ -277,43 +277,42 @@ class GasManager:
         max_fee_per_gas = user_operation.max_fee_per_gas
         max_priority_fee_per_gas = user_operation.max_priority_fee_per_gas
 
-        base_plus_tip_fee_gas_price_op = send_rpc_request_to_eth_client(
+        block_max_fee_per_gas_op = send_rpc_request_to_eth_client(
             self.ethereum_node_url, "eth_gasPrice"
         )
 
-        tasks_arr = [base_plus_tip_fee_gas_price_op]
+        tasks_arr = [block_max_fee_per_gas_op]
 
         if not self.is_legacy_mode:
-            tip_fee_gas_price_op = send_rpc_request_to_eth_client(
+            block_max_priority_fee_per_gas_op = send_rpc_request_to_eth_client(
                 self.ethereum_node_url, "eth_maxPriorityFeePerGas"
             )
-            tasks_arr.append(tip_fee_gas_price_op)
+            tasks_arr.append(block_max_priority_fee_per_gas_op)
 
         tasks = await asyncio.gather(*tasks_arr)
 
-        base_plus_tip_fee_gas_price_hex = tasks[0]["result"]
-        base_plus_tip_fee_gas_price = int(tasks[0]["result"], 16)
-        base_plus_tip_fee_gas_price = math.ceil(base_plus_tip_fee_gas_price * (self.max_fee_per_gas_percentage_multiplier/100))
-        base_plus_tip_fee_gas_price_with_tolerance = math.ceil(base_plus_tip_fee_gas_price * (1 - (enforce_gas_price_tolerance/100)))
-        base_plus_tip_fee_gas_price_with_tolerance_hex = hex(base_plus_tip_fee_gas_price_with_tolerance)
+        block_max_fee_per_gas_hex = tasks[0]["result"]
+        block_max_fee_per_gas = int(tasks[0]["result"], 16)
+        block_max_fee_per_gas = math.ceil(block_max_fee_per_gas * (self.max_fee_per_gas_percentage_multiplier/100))
+        block_max_fee_per_gas_with_tolerance = math.ceil(block_max_fee_per_gas * (1 - (enforce_gas_price_tolerance/100)))
+        block_max_fee_per_gas_with_tolerance_hex = hex(block_max_fee_per_gas_with_tolerance)
 
         if enforce_gas_price_tolerance < 100:
-            tip_fee_gas_price = base_plus_tip_fee_gas_price
             if self.is_legacy_mode:
-                
-                if max_fee_per_gas < base_plus_tip_fee_gas_price_with_tolerance:
+                block_max_priority_fee_per_gas = block_max_fee_per_gas
+                if max_fee_per_gas < block_max_fee_per_gas_with_tolerance:
                     raise ValidationException(
                         ValidationExceptionCode.SimulateValidation,
-                        f"Max fee per gas is too low. it should be minimum : {base_plus_tip_fee_gas_price_with_tolerance_hex}",
+                        f"Max fee per gas is too low. it should be minimum : {block_max_fee_per_gas_with_tolerance_hex}",
                         "",
                     )
 
             else:
-                tip_fee_gas_price = int(tasks[1]["result"], 16)
-                tip_fee_gas_price = math.ceil(tip_fee_gas_price * (self.max_priority_fee_per_gas_percentage_multiplier/100))
+                block_max_priority_fee_per_gas = int(tasks[1]["result"], 16)
+                block_max_priority_fee_per_gas = math.ceil(block_max_priority_fee_per_gas * (self.max_priority_fee_per_gas_percentage_multiplier/100))
 
                 estimated_base_fee = max(
-                    base_plus_tip_fee_gas_price - tip_fee_gas_price, 1
+                    block_max_fee_per_gas - block_max_priority_fee_per_gas, 1
                 )
 
                 if max_fee_per_gas < estimated_base_fee:
@@ -333,15 +332,15 @@ class GasManager:
                         max_fee_per_gas,
                         estimated_base_fee + max_priority_fee_per_gas,
                     )
-                    < base_plus_tip_fee_gas_price_with_tolerance
+                    < block_max_fee_per_gas_with_tolerance
                 ):
                     raise ValidationException(
                         ValidationExceptionCode.InvalidFields,
-                        f"Max fee per gas and (Max priority fee per gas + estimated basefee) should be equal or higher than : {base_plus_tip_fee_gas_price_with_tolerance_hex}",
+                        f"Max fee per gas and (Max priority fee per gas + estimated basefee) should be equal or higher than : {block_max_fee_per_gas_with_tolerance_hex}",
                         "",
                     )
 
-        return base_plus_tip_fee_gas_price_hex
+        return block_max_fee_per_gas_hex
 
     async def verify_preverification_gas_and_verification_gas_limit(
         self, user_operation: UserOperation, 
