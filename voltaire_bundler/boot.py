@@ -45,6 +45,7 @@ class InitData:
     max_priority_fee_per_gas_percentage_multiplier: int
     is_metrics: bool
     rpc_cors_domain: str
+    enforce_gas_price_tolerance:int
 
 
 def address(ep):
@@ -210,6 +211,15 @@ def initialize_argument_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
+        "--enforce_gas_price_tolerance",
+        type=int,
+        help="eth_sendUserOperation will return an error if the useroperation gas price is less than min_max_fee_per_gas, takes a tolerance percentage as a paramter as the following formula min_max_fee_per_gas = block_max_fee_per_gas * (1-tolerance/100), tolerance defaults to 10",
+        nargs="?",
+        const=10,
+        default=10,
+    )
+
+    parser.add_argument(
         "--metrics",
         help="enable metrics collection",
         nargs="?",
@@ -265,6 +275,7 @@ def get_init_data(args:Namespace)-> InitData:
         args.max_priority_fee_per_gas_percentage_multiplier,
         args.metrics,
         args.rpc_cors_domain,
+        args.enforce_gas_price_tolerance,
     )
 
     logging.basicConfig(

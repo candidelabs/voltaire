@@ -51,6 +51,7 @@ class ExecutionEndpoint(Endpoint):
     whitelist_entity_storage_access: list()
     max_fee_per_gas_percentage_multiplier: int
     max_priority_fee_per_gas_percentage_multiplier: int
+    enforce_gas_price_tolerance: int
 
     def __init__(
         self,
@@ -67,6 +68,7 @@ class ExecutionEndpoint(Endpoint):
         whitelist_entity_storage_access: list(),
         max_fee_per_gas_percentage_multiplier: int,
         max_priority_fee_per_gas_percentage_multiplier: int,
+        enforce_gas_price_tolerance:int,
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_url = ethereum_node_url
@@ -116,6 +118,7 @@ class ExecutionEndpoint(Endpoint):
             is_unsafe,
             is_legacy_mode,
             whitelist_entity_storage_access,
+            enforce_gas_price_tolerance,
         )
 
         self.mempool_manager = MempoolManager(

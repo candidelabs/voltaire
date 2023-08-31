@@ -32,7 +32,6 @@ from voltaire_bundler.utils.encode import (
 MAX_VERIFICATION_GAS_LIMIT = 10000000
 MIN_CALL_GAS_LIMIT = 21000
 
-
 class GasManager:
     ethereum_node_url: str
     entrypoint: str
@@ -273,7 +272,7 @@ class GasManager:
         return preOpGas, paid, targetSuccess, targetResult
 
     async def verify_gas_fees_and_get_price(
-        self, user_operation: UserOperation
+        self, user_operation: UserOperation, enforce_gas_price_tolerance:int
     ) -> int:
         max_fee_per_gas = user_operation.max_fee_per_gas
         max_priority_fee_per_gas = user_operation.max_priority_fee_per_gas
@@ -295,48 +294,52 @@ class GasManager:
         base_plus_tip_fee_gas_price_hex = tasks[0]["result"]
         base_plus_tip_fee_gas_price = int(tasks[0]["result"], 16)
         base_plus_tip_fee_gas_price = math.ceil(base_plus_tip_fee_gas_price * (self.max_fee_per_gas_percentage_multiplier/100))
+        base_plus_tip_fee_gas_price_with_tolerance = math.ceil(base_plus_tip_fee_gas_price * (1 - (enforce_gas_price_tolerance/100)))
+        base_plus_tip_fee_gas_price_with_tolerance_hex = hex(base_plus_tip_fee_gas_price_with_tolerance)
 
-        tip_fee_gas_price = base_plus_tip_fee_gas_price
-        if self.is_legacy_mode:
-            if max_fee_per_gas < base_plus_tip_fee_gas_price:
-                raise ValidationException(
-                    ValidationExceptionCode.SimulateValidation,
-                    f"Max fee per gas is too low. it should be minimum : {base_plus_tip_fee_gas_price_hex}",
-                    "",
+        if enforce_gas_price_tolerance < 100:
+            tip_fee_gas_price = base_plus_tip_fee_gas_price
+            if self.is_legacy_mode:
+                
+                if max_fee_per_gas < base_plus_tip_fee_gas_price_with_tolerance:
+                    raise ValidationException(
+                        ValidationExceptionCode.SimulateValidation,
+                        f"Max fee per gas is too low. it should be minimum : {base_plus_tip_fee_gas_price_with_tolerance_hex}",
+                        "",
+                    )
+
+            else:
+                tip_fee_gas_price = int(tasks[1]["result"], 16)
+                tip_fee_gas_price = math.ceil(tip_fee_gas_price * (self.max_priority_fee_per_gas_percentage_multiplier/100))
+
+                estimated_base_fee = max(
+                    base_plus_tip_fee_gas_price - tip_fee_gas_price, 1
                 )
 
-        else:
-            tip_fee_gas_price = int(tasks[1]["result"], 16)
-            tip_fee_gas_price = math.ceil(tip_fee_gas_price * (self.max_priority_fee_per_gas_percentage_multiplier/100))
-
-            estimated_base_fee = max(
-                base_plus_tip_fee_gas_price - tip_fee_gas_price, 1
-            )
-
-            if max_fee_per_gas < estimated_base_fee:
-                raise ValidationException(
-                    ValidationExceptionCode.InvalidFields,
-                    f"Max fee per gas is too low. it should be minimum the estimated base fee: {hex(estimated_base_fee)}",
-                    "",
-                )
-            if max_priority_fee_per_gas < 1:
-                raise ValidationException(
-                    ValidationExceptionCode.InvalidFields,
-                    f"Max priority fee per gas is too low. it should be minimum : 1",
-                    "",
-                )
-            if (
-                min(
-                    max_fee_per_gas,
-                    estimated_base_fee + max_priority_fee_per_gas,
-                )
-                < base_plus_tip_fee_gas_price
-            ):
-                raise ValidationException(
-                    ValidationExceptionCode.InvalidFields,
-                    f"Max fee per gas and (Max priority fee per gas + estimated basefee) should be equal or higher than : {base_plus_tip_fee_gas_price_hex}",
-                    "",
-                )
+                if max_fee_per_gas < estimated_base_fee:
+                    raise ValidationException(
+                        ValidationExceptionCode.InvalidFields,
+                        f"Max fee per gas is too low. it should be minimum the estimated base fee: {hex(estimated_base_fee)}",
+                        "",
+                    )
+                if max_priority_fee_per_gas < 1:
+                    raise ValidationException(
+                        ValidationExceptionCode.InvalidFields,
+                        f"Max priority fee per gas is too low. it should be minimum : 1",
+                        "",
+                    )
+                if (
+                    min(
+                        max_fee_per_gas,
+                        estimated_base_fee + max_priority_fee_per_gas,
+                    )
+                    < base_plus_tip_fee_gas_price_with_tolerance
+                ):
+                    raise ValidationException(
+                        ValidationExceptionCode.InvalidFields,
+                        f"Max fee per gas and (Max priority fee per gas + estimated basefee) should be equal or higher than : {base_plus_tip_fee_gas_price_with_tolerance_hex}",
+                        "",
+                    )
 
         return base_plus_tip_fee_gas_price_hex
 

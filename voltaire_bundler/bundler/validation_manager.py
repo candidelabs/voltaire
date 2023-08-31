@@ -43,6 +43,7 @@ class ValidationManager:
     is_unsafe: bool
     is_legacy_mode: bool
     whitelist_entity_storage_access: list()
+    enforce_gas_price_tolerance: int
 
     def __init__(
         self,
@@ -57,6 +58,7 @@ class ValidationManager:
         is_unsafe: bool,
         is_legacy_mode: bool,
         whitelist_entity_storage_access: list(),
+        enforce_gas_price_tolerance: int,
     ):
         self.user_operation_handler = user_operation_handler
         self.ethereum_node_url = ethereum_node_url
@@ -69,6 +71,7 @@ class ValidationManager:
         self.is_unsafe = is_unsafe
         self.is_legacy_mode = is_legacy_mode
         self.whitelist_entity_storage_access = whitelist_entity_storage_access
+        self.enforce_gas_price_tolerance = enforce_gas_price_tolerance
 
         package_directory = os.path.dirname(os.path.abspath(__file__))
         BundlerCollectorTracer_file = os.path.join(
@@ -107,7 +110,7 @@ class ValidationManager:
             user_operation, latest_block_number, latest_block_basefee
         )
         gas_price_hex = await self.gas_manager.verify_gas_fees_and_get_price(
-            user_operation
+            user_operation, self.enforce_gas_price_tolerance
         )
 
         if self.is_unsafe:

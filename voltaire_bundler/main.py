@@ -40,6 +40,7 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             init_data.whitelist_entity_storage_access,
             init_data.max_fee_per_gas_percentage_multiplier,
             init_data.max_priority_fee_per_gas_percentage_multiplier,
+            init_data.enforce_gas_price_tolerance,
         )
         task_group.create_task(execution_endpoint.start_execution_endpoint())
         task_group.create_task(
