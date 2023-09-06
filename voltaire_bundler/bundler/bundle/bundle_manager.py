@@ -15,7 +15,7 @@ from voltaire_bundler.utils.encode import encode_handleops_calldata
 
 from ..mempool.mempool_manager import MempoolManager
 from ..reputation_manager import ReputationManager
-from ..validation_manager import ValidationManager
+from ..validation.validation_manager import ValidationManager
 from ..gas_manager import GasManager
 
 

@@ -26,7 +26,7 @@ from voltaire_bundler.bundler.exceptions import (
     ExecutionException,
 )
 from .bundle.bundle_manager import BundlerManager
-from .validation_manager import ValidationManager
+from .validation.validation_manager import ValidationManager
 from .reputation_manager import ReputationManager
 from voltaire_bundler.bundler.gas_manager import GasManager
 

@@ -75,7 +75,7 @@ class ValidationManager:
 
         package_directory = os.path.dirname(os.path.abspath(__file__))
         BundlerCollectorTracer_file = os.path.join(
-            package_directory, "..", "utils", "BundlerCollectorTracer.js"
+            package_directory, ".", "BundlerCollectorTracer.min.js"
         )
         with open(BundlerCollectorTracer_file) as keyfile:
             self.bundler_collector_tracer = keyfile.read()
