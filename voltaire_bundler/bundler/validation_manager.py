@@ -176,11 +176,16 @@ class ValidationManager:
 
         params = [
             {
-                "from": self.bundler_address,
+                "from": "0x0000000000000000000000000000000000000000",
                 "to": self.entrypoint,
                 "data": call_data,
             },
             "latest",
+            {
+                "0x0000000000000000000000000000000000000000": {
+                    "balance": "0x21E19E0C9BAB2400000"  # to make sure that the zero address is wel funded for gas estimation
+                },
+            }
         ]
 
         result = await send_rpc_request_to_eth_client(
