@@ -332,7 +332,7 @@ class GasManager:
         if user_operation.verification_gas_limit > MAX_VERIFICATION_GAS_LIMIT:
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
-                f"Verification gas is too high. it should be maximum : {hex(self.max_verification_gas_limit)}",
+                f"Verification gas is too high. it should be maximum : {hex(MAX_VERIFICATION_GAS_LIMIT)}",
                 "",
             )
 
