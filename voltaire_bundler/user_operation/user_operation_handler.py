@@ -1,6 +1,5 @@
 import asyncio
 from functools import reduce
-import math
 
 from eth_utils import to_checksum_address, keccak
 from eth_abi import encode, decode
@@ -10,10 +9,7 @@ from voltaire_bundler.bundler.exceptions import (
     ValidationException,
     ValidationExceptionCode,
 )
-from voltaire_bundler.bundler.exceptions import (
-    ExecutionException,
-    ExecutionExceptionCode,
-)
+
 from voltaire_bundler.utils.eth_client_utils import (
     send_rpc_request_to_eth_client,
 )

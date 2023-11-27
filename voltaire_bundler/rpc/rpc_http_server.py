@@ -8,7 +8,6 @@ from jsonrpcserver import (
     Success,
     async_dispatch,
     Error,
-    InvalidParams,
 )
 from typing import Any
 from importlib.metadata import version
@@ -17,7 +16,6 @@ from voltaire_bundler.event_bus_manager.endpoint import Client, RequestEvent, Re
 from voltaire_bundler.bundler.exceptions import (
     ValidationException,
     ExecutionException,
-    ValidationExceptionCode,
 )
 from prometheus_client import Summary
 

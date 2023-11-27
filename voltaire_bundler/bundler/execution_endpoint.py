@@ -2,17 +2,9 @@ import asyncio
 import logging
 
 from voltaire_bundler.event_bus_manager.endpoint import Endpoint
-from voltaire_bundler.rpc.events import (
-    RPCCallRequestEvent,
-    RPCCallResponseEvent,
-)
 
-from voltaire_bundler.utils.eth_client_utils import (
-    send_rpc_request_to_eth_client,
-)
 from voltaire_bundler.bundler.exceptions import (
     ExecutionException,
-    ExecutionExceptionCode,
 )
 from voltaire_bundler.user_operation.user_operation import UserOperation
 
