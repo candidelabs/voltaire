@@ -198,7 +198,7 @@ class UserOperationHandler:
         if "result" not in res or len(res["result"]) < 1:
             raise ValidationException(
                 ValidationExceptionCode.INVALID_USEROPHASH,
-                "can't find user operation with hash : " + user_operation_hash,
+                "Missing/invalid userOpHash : " + user_operation_hash,
                 "",
             )
         logs = res["result"]
