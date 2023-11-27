@@ -167,20 +167,20 @@ class ExecutionEndpoint(Endpoint):
         await self.start_server()
 
     async def _event_rpc_chainId(
-        self, rpc_request: RPCCallRequestEvent
-    ) -> RPCCallResponseEvent:
-        return RPCCallResponseEvent(hex(self.chain_id))
+        self, req_arguments: []
+    ) -> str:
+        return hex(self.chain_id)
 
     async def _event_rpc_supportedEntryPoints(
-        self, rpc_request: RPCCallRequestEvent
-    ) -> RPCCallResponseEvent:
-        return RPCCallResponseEvent([self.entrypoint])
+        self, req_arguments: []
+    ) -> str:
+        return [self.entrypoint]
 
     async def _event_rpc_estimateUserOperationGas(
-        self, rpc_request: RPCCallRequestEvent
-    ) -> RPCCallResponseEvent:
-        user_operation: UserOperation = rpc_request.req_arguments[0]
-        entrypoint_address = rpc_request.req_arguments[1]
+        self, req_arguments: []
+    ) -> dict:
+        user_operation: UserOperation = UserOperation(req_arguments[0])
+        entrypoint_address = req_arguments[1]
         self._verify_entrypoint(entrypoint_address)
 
         (
@@ -197,25 +197,25 @@ class ExecutionEndpoint(Endpoint):
             "verificationGasLimit": verification_gas_hex,
         }
 
-        return RPCCallResponseEvent(estimated_gas_json)
+        return estimated_gas_json
 
     async def _event_rpc_sendUserOperation(
-        self, rpc_request: RPCCallRequestEvent
-    ) -> RPCCallResponseEvent:
-        user_operation: UserOperation = rpc_request.req_arguments[0]
-        entrypoint_address = rpc_request.req_arguments[1]
+        self, req_arguments: []
+    ) -> str:
+        user_operation: UserOperation = UserOperation(req_arguments[0])
+        entrypoint_address = req_arguments[1]
 
         self._verify_entrypoint(entrypoint_address)
 
         user_operation_hash = await self.mempool_manager.add_user_operation(
             user_operation,
         )
-        return RPCCallResponseEvent(user_operation_hash)
+        return user_operation_hash
 
     async def _event_rpc_getUserOperationByHash(
-        self, rpc_request: RPCCallRequestEvent
-    ) -> RPCCallResponseEvent:
-        user_operation_hash = rpc_request.req_arguments[0]
+        self, req_arguments: []
+    ) -> dict:
+        user_operation_hash = req_arguments[0]
 
         user_operation_by_hash_json = (
             await self.user_operation_handler.get_user_operation_by_hash_rpc(
@@ -223,12 +223,12 @@ class ExecutionEndpoint(Endpoint):
             )
         )
 
-        return RPCCallResponseEvent(user_operation_by_hash_json)
+        return user_operation_by_hash_json
 
     async def _event_rpc_getUserOperationReceipt(
-        self, rpc_request: RPCCallRequestEvent
-    ) -> RPCCallResponseEvent:
-        user_operation_hash = rpc_request.req_arguments[0]
+        self, req_arguments: []
+    ) -> dict:
+        user_operation_hash = req_arguments[0]
 
         user_operation_receipt_info_json = (
             await self.user_operation_handler.get_user_operation_receipt_rpc(
@@ -236,26 +236,26 @@ class ExecutionEndpoint(Endpoint):
             )
         )
 
-        return RPCCallResponseEvent(user_operation_receipt_info_json)
+        return user_operation_receipt_info_json
 
     async def _event_debug_bundler_sendBundleNow(
-        self, rpc_request: RPCCallRequestEvent
-    ) -> RPCCallResponseEvent:
-        res = await self.bundle_manager.send_next_bundle()
+        self, req_arguments: []
+    ) -> None:
+        await self.bundle_manager.send_next_bundle()
 
-        return RPCCallResponseEvent(res)
+        return "ok"
 
     async def _event_debug_bundler_clearState(
-        self, rpc_request: RPCCallRequestEvent
-    ) -> RPCCallResponseEvent:
+        self, req_arguments: []
+    ) -> str:
         self.mempool_manager.clear_user_operations()
 
-        return RPCCallResponseEvent("ok")
+        return "ok"
 
     async def _event_debug_bundler_dumpMempool(
-        self, rpc_request: RPCCallRequestEvent
-    ) -> RPCCallResponseEvent:
-        entrypoint_address = rpc_request.req_arguments[0]
+        self, req_arguments: []
+    ) -> str:
+        entrypoint_address = req_arguments[0]
 
         user_operations = self.mempool_manager.get_all_user_operations()
 
@@ -263,31 +263,31 @@ class ExecutionEndpoint(Endpoint):
             user_operation.get_user_operation_json()
             for user_operation in user_operations
         ]
-        return RPCCallResponseEvent(user_operations_json)
+        return user_operations_json
 
     async def _event_debug_bundler_setReputation(
-        self, rpc_request: RPCCallRequestEvent
-    ) -> RPCCallResponseEvent:
-        entitiy = rpc_request.req_arguments[0]
-        ops_seen = rpc_request.req_arguments[0]
-        ops_included = rpc_request.req_arguments[0]
-        status = rpc_request.req_arguments[0]
+        self, req_arguments: []
+    ) -> str:
+        entitiy = req_arguments[0]
+        ops_seen = req_arguments[1]
+        ops_included = req_arguments[2]
+        status = req_arguments[3]
 
         self.reputation_manager.set_reputation(
             entitiy, ops_seen, ops_included, status
         )
 
-        return RPCCallResponseEvent("ok")
+        return "ok"
 
     async def _event_debug_bundler_dumpReputation(
-        self, rpc_request: RPCCallRequestEvent
-    ) -> RPCCallResponseEvent:
-        entrypoint_address = rpc_request.req_arguments[0]
+        self, req_arguments: []
+    ) -> dict:
+        entrypoint_address = req_arguments[0]
 
         entities_reputation_json = (
             self.reputation_manager.get_entities_reputation_json()
         )
-        return RPCCallResponseEvent(entities_reputation_json)
+        return entities_reputation_json
 
     def _verify_entrypoint(self, entrypoint):
         if entrypoint != self.entrypoint:
@@ -299,12 +299,15 @@ class ExecutionEndpoint(Endpoint):
 
 
 async def exception_handler_decorator(
-    response_function, rpc_request: RPCCallRequestEvent
-) -> RPCCallResponseEvent:
+    response_function, rpc_call_request: dict
+) -> dict:
     try:
-        response = await response_function(rpc_request)
+        rpc_call_response = await response_function(rpc_call_request)
+        return rpc_call_response
+
     except (ExecutionException, ValidationException) as excp:
-        response = RPCCallResponseEvent(excp)
-        response.is_error = True
-    finally:
-        return response
+        rpc_call_response = {
+            "payload" : excp,
+            "is_error" : True
+        }
+        return rpc_call_response
