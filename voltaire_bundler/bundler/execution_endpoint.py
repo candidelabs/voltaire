@@ -69,6 +69,7 @@ class ExecutionEndpoint(Endpoint):
         max_fee_per_gas_percentage_multiplier: int,
         max_priority_fee_per_gas_percentage_multiplier: int,
         enforce_gas_price_tolerance:int,
+        ethereum_node_debug_trace_call_url:str
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_url = ethereum_node_url
@@ -119,6 +120,7 @@ class ExecutionEndpoint(Endpoint):
             is_legacy_mode,
             whitelist_entity_storage_access,
             enforce_gas_price_tolerance,
+            ethereum_node_debug_trace_call_url,
         )
 
         self.mempool_manager = MempoolManager(

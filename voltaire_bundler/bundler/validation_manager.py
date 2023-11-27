@@ -44,6 +44,7 @@ class ValidationManager:
     is_legacy_mode: bool
     whitelist_entity_storage_access: list()
     enforce_gas_price_tolerance: int
+    ethereum_node_debug_trace_call_url: str
 
     def __init__(
         self,
@@ -59,6 +60,7 @@ class ValidationManager:
         is_legacy_mode: bool,
         whitelist_entity_storage_access: list(),
         enforce_gas_price_tolerance: int,
+        ethereum_node_debug_trace_call_url:str,
     ):
         self.user_operation_handler = user_operation_handler
         self.ethereum_node_url = ethereum_node_url
@@ -72,6 +74,7 @@ class ValidationManager:
         self.is_legacy_mode = is_legacy_mode
         self.whitelist_entity_storage_access = whitelist_entity_storage_access
         self.enforce_gas_price_tolerance = enforce_gas_price_tolerance
+        self.ethereum_node_debug_trace_call_url = ethereum_node_debug_trace_call_url
 
         package_directory = os.path.dirname(os.path.abspath(__file__))
         BundlerCollectorTracer_file = os.path.join(
@@ -230,7 +233,7 @@ class ValidationManager:
         ]
 
         res = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "debug_traceCall", params
+            self.ethereum_node_debug_trace_call_url, "debug_traceCall", params
         )
 
         if "result" in res:

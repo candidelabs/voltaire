@@ -46,6 +46,7 @@ class InitData:
     is_metrics: bool
     rpc_cors_domain: str
     enforce_gas_price_tolerance:int
+    ethereum_node_debug_trace_call_url: str
 
 
 def address(ep):
@@ -122,10 +123,19 @@ def initialize_argument_parser() -> ArgumentParser:
     parser.add_argument(
         "--ethereum_node_url",
         type=str,
-        help="Geth Client Http Url - defaults to http://0.0.0.0:8545",
+        help="Eth Client JSON-RPC Url - defaults to http://0.0.0.0:8545",
         nargs="?",
         const="http://0.0.0.0:8545",
         default="http://0.0.0.0:8545",
+    )
+
+    parser.add_argument(
+        "--ethereum_node_debug_trace_call_url",
+        type=str,
+        help="An Eth Client JSON-RPC Url for debug_traceCall only - defaults to ethereum_node_url value",
+        nargs="?",
+        const=None,
+        default=None,
     )
 
     parser.add_argument(
@@ -256,6 +266,9 @@ def get_init_data(args:Namespace)-> InitData:
     data = json.load(bundler_helper_byte_code_file)
     bundler_helper_byte_code = data["bytecode"]
 
+    if args.ethereum_node_debug_trace_call_url == None:
+        args.ethereum_node_debug_trace_call_url = args.ethereum_node_url
+
     ret = InitData(
         args.entrypoint,
         args.rpc_url,
@@ -276,6 +289,7 @@ def get_init_data(args:Namespace)-> InitData:
         args.metrics,
         args.rpc_cors_domain,
         args.enforce_gas_price_tolerance,
+        args.ethereum_node_debug_trace_call_url,
     )
 
     logging.basicConfig(
