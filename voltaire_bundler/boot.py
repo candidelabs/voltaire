@@ -130,15 +130,6 @@ def initialize_argument_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
-        "--ethereum_node_debug_trace_call_url",
-        type=str,
-        help="An Eth Client JSON-RPC Url for debug_traceCall only - defaults to ethereum_node_url value",
-        nargs="?",
-        const=None,
-        default=None,
-    )
-
-    parser.add_argument(
         "--chain_id",
         type=int,
         help="chain id",
@@ -161,7 +152,18 @@ def initialize_argument_parser() -> ArgumentParser:
         default=False,
     )
 
-    parser.add_argument(
+    group2 = parser.add_mutually_exclusive_group()
+
+    group2.add_argument(
+        "--ethereum_node_debug_trace_call_url",
+        type=str,
+        help="An Eth Client JSON-RPC Url for debug_traceCall only - defaults to ethereum_node_url value",
+        nargs="?",
+        const=None,
+        default=None,
+    )
+
+    group2.add_argument(
         "--unsafe",
         help="UNSAFE mode: no storage or opcode checks - when debug_traceCall is not available",
         nargs="?",
