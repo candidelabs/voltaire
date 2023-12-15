@@ -1,9 +1,12 @@
 import asyncio
+import os
 import uvloop
 from functools import partial
 from signal import SIGINT, SIGTERM
 from argparse import ArgumentParser
 import sys
+import subprocess
+import functools
 
 from .boot import initialize_argument_parser, InitData, get_init_data
 from .rpc.rpc_http_server import run_rpc_http_server
@@ -18,9 +21,36 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
     init_data = get_init_data(parsed_args)
     if loop == None:
         loop = asyncio.get_running_loop()
+    if os.path.exists("p2p_endpoint.ipc"):
+        os.remove("p2p_endpoint.ipc")
+    p2p_cmd = [
+        "./voltaire-p2p",
+        "--enr-tcp-port",           str(init_data.p2p_enr_tcp_port),
+        "--enr-udp-port",           str(init_data.p2p_enr_udp_port),
+        "--target-peers",    str(init_data.p2p_target_peers_number),
+        # "--client_version",             init_data.client_version,
+    ]
+    if init_data.p2p_enr_address is not None:
+        p2p_cmd.append("--enr-address")
+        p2p_cmd.append(init_data.p2p_enr_address)
+    if len(init_data.p2p_mempools_ids) > 0:
+        p2p_cmd.append("--p2p-mempool-topic-hashes")
+        for topic in functools.reduce(lambda a, b: a+b, init_data.p2p_mempools_ids):
+            p2p_cmd.append(topic)
+
+    if len(init_data.p2p_boot_nodes_enr) > 0:
+        p2p_cmd.append("--boot-nodes")
+        for enr in init_data.p2p_boot_nodes_enr:
+            p2p_cmd.append(enr)
+    if not init_data.p2p_upnp_enabled:
+        p2p_cmd.append("--disable-upnp")
+    # if init_data.p2p_metrics_enabled:
+    #     p2p_cmd.append("--p2p_metrics_enabled")
+
+    p2p = subprocess.Popen(p2p_cmd)
 
     for signal_enum in [SIGINT, SIGTERM]:
-        exit_func = partial(immediate_exit, signal_enum=signal_enum, loop=loop)
+        exit_func = partial(immediate_exit, signal_enum=signal_enum, loop=loop, p2p=p2p)
         loop.add_signal_handler(signal_enum, exit_func)
 
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
@@ -30,7 +60,7 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             init_data.ethereum_node_url,
             init_data.bundler_pk,
             init_data.bundler_address,
-            init_data.entrypoint,
+            init_data.entrypoints,
             init_data.bundler_helper_byte_code,
             init_data.chain_id,
             init_data.is_unsafe,
@@ -42,8 +72,13 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             init_data.max_priority_fee_per_gas_percentage_multiplier,
             init_data.enforce_gas_price_tolerance,
             init_data.ethereum_node_debug_trace_call_url,
+            init_data.entrypoints_versions,
+            init_data.p2p_mempools_types,
+            init_data.p2p_mempools_ids,
         )
         task_group.create_task(execution_endpoint.start_execution_endpoint())
+        # p2p_endpoint: P2pEndpoint = P2pEndpoint()
+        # task_group.create_task(p2p_endpoint.start_p2p_endpoint())
         task_group.create_task(
             run_rpc_http_server(
                 host=init_data.rpc_url,

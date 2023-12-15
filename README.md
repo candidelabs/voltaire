@@ -5,17 +5,23 @@
 <!-- PROJECT LOGO -->
 
 <div align="center">
-  <img src="https://github.com/candidelabs/voltaire/assets/7014833/603d130d-62ce-458e-b2f6-31597b5279ab">
+  <img src="https://user-images.githubusercontent.com/7014833/220775957-8add0c20-97d0-4bad-8f7c-fefb6df52ae2.png" height=600>
   <p>
     <b>
-      Modular and lighting-fast Python Bundler for Ethereum EIP-4337 Account Abstraction
+      Modular, developer-friendly and lighting-fast Python Bundler for Ethereum EIP-4337 Account Abstraction
     </b>
    </p>
 </div>
 
-# Using an instance
+*The project is still work in progress.*
 
-For a quick bundler instance, use one of our [public hosted endpoints](https://docs.candide.dev/wallet/bundler/rpc-endpoints/) for your developement.
+<p>
+  <a href="https://discord.gg/NM5HakA9nC">
+    <img 
+      src="https://img.shields.io/discord/985647134378430515?logo=discord"
+      alt="chat on Discord">
+  </a>
+</p>
 
 # Deployment
 
@@ -26,6 +32,8 @@ docker run --net=host --rm -ti ghcr.io/candidelabs/voltaire/voltaire-bundler:lat
 ```
 
 # Development
+
+The information provided is only a rough estimate based on the current implementation. We plan on publishing more documentation for different developer audiences as we move forward.
 
 ## Ubuntu: Get started testing the bundler in 5 minutes 
 
@@ -88,7 +96,13 @@ Follow the instruction in <a href='https://github.com/eth-infinitism/bundler-spe
 
 Thank you for considering contributing to open-source code! We welcome contributions and are grateful for even the smallest of fixes. 
 
+We will be publishing guidelines on how to contribute as we move forward with Voltaire's development.
+
 If you want to contribute today or follow along with the contributor discussion, you can use our main discord to chat with us about the development of Voltaire.
+
+# Status
+
+The project is not ready for production use. We hope to have a full implentation sometimes in April/May 2023, followed by optimizations. In the meantime, we're working on making sure this repo is well-documented, abstracted and tested.
 
 <!-- LICENSE -->
 ## License

@@ -21,7 +21,7 @@ RUN set -ex \
     && pip install . --no-cache-dir
 
 RUN chown -R appuser:appgroup /app 
-
-USER appuser
+RUN mkdir -p /app/cache
+RUN chmod a+w /app/cache
 
 ENTRYPOINT [ "python", "-m", "voltaire_bundler" ]

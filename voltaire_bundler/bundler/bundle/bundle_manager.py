@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import math
+from typing import List
 
 from eth_account import Account
 
@@ -13,7 +14,7 @@ from voltaire_bundler.user_operation.user_operation_handler import (
 )
 from voltaire_bundler.utils.encode import encode_handleops_calldata
 
-from ..mempool.mempool_manager import MempoolManager
+from ..mempool.mempool_manager import LocalMempoolManagerVersion0Point6
 from ..reputation_manager import ReputationManager
 from ..validation_manager import ValidationManager
 from ..gas_manager import GasManager
@@ -23,8 +24,7 @@ class BundlerManager:
     ethereum_node_url: str
     bundler_private_key: str
     bundler_address: str
-    entrypoint: str
-    mempool_manager: MempoolManager
+    entrypoints_addresses_to_local_mempools: dict[str,str]
     user_operation_handler: UserOperationHandler
     reputation_manager: ReputationManager
     chain_id: int
@@ -35,28 +35,26 @@ class BundlerManager:
 
     def __init__(
         self,
-        mempool_manager: MempoolManager,
+        entrypoints_addresses_to_local_mempools: dict[str,str],
         user_operation_handler: UserOperationHandler,
         reputation_manager: ReputationManager,
         gas_manager: GasManager,
         ethereum_node_url: str,
         bundler_private_key: str,
         bundler_address: str,
-        entrypoint: str,
         chain_id: str,
         is_legacy_mode: bool,
         is_send_raw_transaction_conditional: bool,
         max_fee_per_gas_percentage_multiplier: int,
         max_priority_fee_per_gas_percentage_multiplier: int,
     ):
-        self.mempool_manager = mempool_manager
+        self.entrypoints_addresses_to_local_mempools = entrypoints_addresses_to_local_mempools
         self.user_operation_handler = user_operation_handler
         self.reputation_manager = reputation_manager
         self.gas_manager = gas_manager
         self.ethereum_node_url = ethereum_node_url
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
-        self.entrypoint = entrypoint
         self.chain_id = chain_id
         self.is_legacy_mode = is_legacy_mode
         self.is_send_raw_transaction_conditional = (
@@ -66,18 +64,23 @@ class BundlerManager:
         self.max_priority_fee_per_gas_percentage_multiplier = max_priority_fee_per_gas_percentage_multiplier
 
     async def send_next_bundle(self) -> None:
-        user_operations = (
-            await self.mempool_manager.get_user_operations_to_bundle()
-        )
-        numbder_of_user_operations = len(user_operations)
-
-        if numbder_of_user_operations > 0:
-            await self.send_bundle(user_operations)
-            logging.info(
-                f"Sending bundle with {len(user_operations)} user operations"
+        for mempool_manager in self.entrypoints_addresses_to_local_mempools.values():
+            user_operations = (
+                await mempool_manager.get_user_operations_to_bundle()
             )
+            numbder_of_user_operations = len(user_operations)
 
-    async def send_bundle(self, user_operations: list[UserOperation]) -> None:
+            if numbder_of_user_operations > 0:
+                await self.send_bundle(user_operations, mempool_manager.entrypoint)
+                logging.info(
+                    f"Sending bundle with {len(user_operations)} user operations"
+                )
+
+    async def send_bundle(
+            self, 
+            user_operations: list[UserOperation],
+            entrypoint:str
+            ) -> None:
         user_operations_list = []
         for user_operation in user_operations:
             user_operations_list.append(user_operation.to_list())
@@ -89,7 +92,7 @@ class BundlerManager:
         gas_estimation_op = self.gas_manager.estimate_call_gas_limit(
             call_data,
             _from=self.bundler_address,
-            to=self.entrypoint,
+            to=entrypoint,
         )
 
         block_max_fee_per_gas_op = send_rpc_request_to_eth_client(
@@ -134,7 +137,7 @@ class BundlerManager:
         txnDict = {
             "chainId": self.chain_id,
             "from": self.bundler_address,
-            "to": self.entrypoint,
+            "to": entrypoint,
             "nonce": nonce,
             "gas": int(gas_estimation, 16),
             "data": call_data,

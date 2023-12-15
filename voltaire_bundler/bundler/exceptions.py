@@ -19,8 +19,6 @@ class ValidationExceptionCode(Enum):
 class ValidationException(Exception):
     exception_code: ValidationExceptionCode
     message: str
-    data: bytes
-
 
 class ExecutionExceptionCode(Enum):
     EXECUTION_REVERTED = -32521
@@ -30,4 +28,3 @@ class ExecutionExceptionCode(Enum):
 class ExecutionException(Exception):
     exception_code: ExecutionExceptionCode
     message: str
-    data: bytes
