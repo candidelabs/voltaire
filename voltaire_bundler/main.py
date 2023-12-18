@@ -18,7 +18,7 @@ from voltaire_bundler.metrics.metrics import run_metrics_server
 async def main(cmd_args=sys.argv[1:], loop=None) -> None:
     argument_parser: ArgumentParser = initialize_argument_parser()
     parsed_args = argument_parser.parse_args(cmd_args)
-    init_data = get_init_data(parsed_args)
+    init_data = await get_init_data(parsed_args)
     if loop == None:
         loop = asyncio.get_running_loop()
     if os.path.exists("p2p_endpoint.ipc"):
