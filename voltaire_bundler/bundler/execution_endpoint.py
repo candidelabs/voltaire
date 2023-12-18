@@ -29,7 +29,7 @@ from .bundle.bundle_manager import BundlerManager
 from .validation_manager import ValidationManager
 from .reputation_manager import ReputationManager, ReputationStatus
 from voltaire_bundler.bundler.gas_manager import GasManager
-from voltaire_bundler.boot import EntrypointType, MempoolType
+from voltaire_bundler.cli_manager import EntrypointType, MempoolType
 from voltaire_bundler.typing import Address, MempoolId
 
 class ExecutionEndpoint(Endpoint):

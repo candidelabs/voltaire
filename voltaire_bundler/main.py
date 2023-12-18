@@ -8,7 +8,7 @@ import sys
 import subprocess
 import functools
 
-from .boot import initialize_argument_parser, InitData, get_init_data
+from .cli_manager import initialize_argument_parser, InitData, get_init_data
 from .rpc.rpc_http_server import run_rpc_http_server
 from voltaire_bundler.bundler.execution_endpoint import ExecutionEndpoint
 from voltaire_bundler.utils.SignalHaltError import immediate_exit

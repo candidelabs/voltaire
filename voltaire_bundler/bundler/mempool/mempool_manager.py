@@ -21,7 +21,7 @@ from voltaire_bundler.utils.eth_client_utils import (
     get_latest_block_info
 )
 from voltaire_bundler.typing import Address, MempoolId
-from voltaire_bundler.boot import MempoolType
+from voltaire_bundler.cli_manager import MempoolType
 
 MAX_OPS_PER_REQUEST = 4096
 
