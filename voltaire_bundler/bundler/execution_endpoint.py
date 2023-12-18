@@ -265,7 +265,6 @@ class ExecutionEndpoint(Endpoint):
         )
         async with asyncio.TaskGroup() as task_group:
             task_group.create_task(self.start_server("bundler_endpoint.ipc"))
-            task_group.create_task(self.start_server("p2p_listen_endpoint.ipc"))
 
     async def _event_rpc_chainId(
         self, req_arguments: []
