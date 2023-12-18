@@ -72,6 +72,7 @@ class InitData:
     p2p_upnp_enabled: bool
     p2p_metrics_enabled: bool
     client_version: str
+    disable_p2p: bool
 
 def address(ep: str):
     address_pattern = "^0x[0-9,a-f,A-F]{40}$"
@@ -278,6 +279,7 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--metrics",
+        type=bool,
         help="enable metrics collection",
         nargs="?",
         const=True,
@@ -354,6 +356,15 @@ def initialize_argument_parser() -> ArgumentParser:
     parser.add_argument(
         "--p2p_metrics_enabled",
         help="Whether metrics are enabled.",
+        nargs="?",
+        const=True,
+        default=False,
+    )
+
+    parser.add_argument(
+        "--disable_p2p",
+        type=bool,
+        help="disable p2p",
         nargs="?",
         const=True,
         default=False,
@@ -503,7 +514,8 @@ async def get_init_data(args:Namespace)-> InitData:
         args.p2p_boot_nodes_enr,
         args.p2p_upnp_enabled,
         args.p2p_metrics_enabled,
-        __version__
+        __version__,
+        args.disable_p2p,
     )
 
     if args.verbose:

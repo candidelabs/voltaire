@@ -57,6 +57,7 @@ class ExecutionEndpoint(Endpoint):
     p2pClient: Client
     peer_ids_to_offset: dict[str,int]
     peer_ids_to_user_ops_hashes_queue: dict[str,List[str]]
+    disable_p2p:bool
 
     def __init__(
         self,
@@ -78,6 +79,7 @@ class ExecutionEndpoint(Endpoint):
         entrypoints_versions: List[str],
         p2p_mempools_types_per_entrypoint: List[List[str]],
         p2p_mempools_ids_per_entrypoint: List[List[str]],
+        disable_p2p:bool
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_url = ethereum_node_url
@@ -198,30 +200,40 @@ class ExecutionEndpoint(Endpoint):
         )
         self.peer_ids_to_offset = dict()
         self.peer_ids_to_user_ops_hashes_queue = dict()
+        self.disable_p2p = disable_p2p
 
         asyncio.ensure_future(self.execute_cron_job())
 
     async def execute_cron_job(self) -> None:
-        heartbeat_counter = 0
-        heartbeat_interval = 0.1 #decisecond
-        deciseconds_per_bundle = math.floor(self.bundle_interval / heartbeat_interval)
-        
-        while not os.path.exists("p2p_endpoint.ipc"):
-            await asyncio.sleep(1)
-
-        await self.send_pooled_user_op_hashes_to_all_peers()
-
-        while True:
-            try:
-                await self.update_p2p_gossip()
-                await self.update_p2p_peer_ids_to_user_ops_hashes_queue()
-                if self.bundle_interval > 0 and (heartbeat_counter % deciseconds_per_bundle == 0):
+        if self.disable_p2p:
+            if self.bundle_interval > 0:
+                try:
                     await self.bundle_manager.send_next_bundle()
-            except (ValidationException, ExecutionException) as excp:
-                logging.exception(excp.message)
+                except (ValidationException, ExecutionException) as excp:
+                    logging.exception(excp.message)
 
-            heartbeat_counter = heartbeat_counter + 1
-            await asyncio.sleep(heartbeat_interval)
+            await asyncio.sleep(self.bundle_interval)
+        else:
+            heartbeat_counter = 0
+            heartbeat_interval = 0.1 #decisecond
+            deciseconds_per_bundle = math.floor(self.bundle_interval / heartbeat_interval)
+            
+            while not os.path.exists("p2p_endpoint.ipc"):
+                await asyncio.sleep(1)
+
+            await self.send_pooled_user_op_hashes_to_all_peers()
+
+            while True:
+                try:
+                    await self.update_p2p_gossip()
+                    await self.update_p2p_peer_ids_to_user_ops_hashes_queue()
+                    if self.bundle_interval > 0 and (heartbeat_counter % deciseconds_per_bundle == 0):
+                        await self.bundle_manager.send_next_bundle()
+                except (ValidationException, ExecutionException) as excp:
+                    logging.exception(excp.message)
+
+                heartbeat_counter = heartbeat_counter + 1
+                await asyncio.sleep(heartbeat_interval)
 
     async def send_pooled_user_op_hashes_to_all_peers(self):
         await self.send_pooled_user_op_hashes_request("", 0)
@@ -311,11 +323,12 @@ class ExecutionEndpoint(Endpoint):
         ) = await self.entrypoints_to_local_mempools[entrypoint_address].add_user_operation(
             user_operation
         )
-        self.entrypoints_to_local_mempools[entrypoint_address].queue_useroperations_with_entrypoint_to_gossip_publish(
-            user_operation.get_user_operation_json(),
-            verified_at_block_hash, 
-            valid_mempools
-        )
+        if not self.disable_p2p:
+            self.entrypoints_to_local_mempools[entrypoint_address].queue_useroperations_with_entrypoint_to_gossip_publish(
+                user_operation.get_user_operation_json(),
+                verified_at_block_hash, 
+                valid_mempools
+            )
 
         return user_operation_hash
     
