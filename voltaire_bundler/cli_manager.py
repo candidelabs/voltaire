@@ -75,14 +75,6 @@ def address(ep: str):
         raise ValueError
     return ep
 
-# def entrypoints_versions(entrypoint_version: str):
-#     supported_entrypoint_version = ["v0.6"]
-#     if entrypoint_version not in ["v0.6"]:
-#         logging.error(f"Unsupported entrypoint version : {entrypoint_version}, supported entrypoints version are {supported_entrypoint_version}")
-#         raise ValueError
-
-#     return entrypoint_version
-
 
 def initialize_argument_parser() -> ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -355,16 +347,16 @@ def initialize_argument_parser() -> ArgumentParser:
     return parser
 
 def get_init_data(args:Namespace)-> InitData:
-    bundler_address = ""
-    bundler_pk = ""
-
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-        datefmt="%m-%d %H:%M:%S",
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%b %d %H:%M:%S.%03d",
     )
 
     logging.getLogger("Voltaire")
+
+    bundler_address = ""
+    bundler_pk = ""
 
     if args.keystore_file_path is not None:
         bundler_address, bundler_pk = import_bundler_account(
