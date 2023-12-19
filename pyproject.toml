@@ -1,11 +1,11 @@
 [tool.poetry]
 name = "voltaire_bundler"
-version = "v0.1.0-alpha.23"
+version = "v0.1.0-alpha.24"
 description = "EIP-4337 python Bundler"
 authors = ["Candide Wallet Team"]
 license = "LGPL"
 readme = "README.md"
-homepage = "https://candide.dev/"
+homepage = "https://github.com/candidelabs/voltaire"
 repository = "https://github.com/candidelabs/voltaire"
 keywords = ["4337", "account_abstraction", "ethereum", "bundler"]
 classifiers = [
@@ -17,18 +17,26 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = "^3.11"
-aiohttp = "^3.9.1"
 jsonrpcserver = "^5.0.9"
 uvloop = "^0.19.0"
 eth-abi = "^4.1.0"
 eth-account = "^0.8.0"
 prometheus-client = "^0.17.1"
 aiohttp-cors = "^0.7.0"
+aiohttp = "^3.9.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
 pytest-asyncio = "^0.21.1"
 docker = "^6.1.3"
+sphinx = "^7.2.6"
+mypy = "^1.6.1"
+flake8 = "^6.1.0"
+flake8-bugbear = "^23.9.16"
+
+[tool.poetry.scripts]
+build_p2p = "scripts.build_p2p:build"
+lint = "scripts.lint:start"
 
 [build-system]
 requires = ["poetry-core"]

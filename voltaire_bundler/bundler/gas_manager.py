@@ -34,7 +34,6 @@ MIN_CALL_GAS_LIMIT = 21000
 
 class GasManager:
     ethereum_node_url: str
-    entrypoint: str
     chain_id: str
     is_legacy_mode: bool
     max_fee_per_gas_percentage_multiplier: int
@@ -43,26 +42,26 @@ class GasManager:
     def __init__(
         self, 
         ethereum_node_url, 
-        entrypoint, 
         chain_id, 
         is_legacy_mode,
         max_fee_per_gas_percentage_multiplier: int,
         max_priority_fee_per_gas_percentage_multiplier: int,
     ):
         self.ethereum_node_url = ethereum_node_url
-        self.entrypoint = entrypoint
         self.chain_id = chain_id
         self.is_legacy_mode = is_legacy_mode
         self.max_fee_per_gas_percentage_multiplier = max_fee_per_gas_percentage_multiplier
         self.max_priority_fee_per_gas_percentage_multiplier = max_priority_fee_per_gas_percentage_multiplier
 
     async def estimate_callgaslimit_and_preverificationgas_and_verificationgas(
-        self, user_operation: UserOperation
+        self, 
+        user_operation: UserOperation,
+        entrypoint:str, 
     ) -> [str, str, str]:
         latest_block_number, latest_block_basefee, latest_block_gas_limit_hex = await get_latest_block_info(self.ethereum_node_url)
 
         preverification_gas = await self.get_preverification_gas(
-            user_operation, latest_block_number, latest_block_basefee
+            user_operation, entrypoint, latest_block_number, latest_block_basefee
         )
         preverification_gas_hex = hex(preverification_gas)
 
@@ -82,6 +81,7 @@ class GasManager:
             targetResult,
         ) = await self.simulate_handle_op(
             user_operation,
+            entrypoint,
             latest_block_number,
             latest_block_gas_limit_hex,
             user_operation.sender_address,
@@ -90,7 +90,7 @@ class GasManager:
 
         if not targetSuccess:
             raise ExecutionException(
-                ExecutionExceptionCode.EXECUTION_REVERTED, targetResult, ""
+                ExecutionExceptionCode.EXECUTION_REVERTED, targetResult,
             )
         user_operation.call_data = call_data
         verification_gas_limit = math.ceil(
@@ -100,7 +100,7 @@ class GasManager:
 
         call_gas_limit_hex = await self.estimate_call_gas_limit(
                 call_data="0x" + user_operation.call_data.hex(),
-                _from=self.entrypoint,
+                _from=entrypoint,
                 to=user_operation.sender_address,
             )
         if call_gas_limit_hex == "0x":
@@ -134,8 +134,7 @@ class GasManager:
                 errorParams = errorData[10:]
             raise ExecutionException(
                 ExecutionExceptionCode.EXECUTION_REVERTED,
-                errorMessage,
-                errorParams,
+                errorMessage + " " + bytes.fromhex(errorParams[-64:]).decode("ascii"),
             )
         call_gas_limit = result["result"]
 
@@ -144,6 +143,7 @@ class GasManager:
     async def simulate_handle_op(
         self,
         user_operation: UserOperation,
+        entrypoint:str,
         bloch_number_hex: str,
         gasLimit,
         target: str = "0x0000000000000000000000000000000000000000",
@@ -165,7 +165,7 @@ class GasManager:
         params = [
             {
                 "from": "0x0000000000000000000000000000000000000000",
-                "to": self.entrypoint,
+                "to": entrypoint,
                 "data": call_data,
                 "gas": gasLimit,
                 # "gasPrice": "0x0",
@@ -196,7 +196,6 @@ class GasManager:
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
                 result["error"]["message"],
-                "",
             )
 
         error_data = result["error"]["data"]
@@ -218,7 +217,6 @@ class GasManager:
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
                 reason,
-                "",
             )
         elif solidity_error_selector == "0x08c379a0":  # Error(string)
             reason = decode(
@@ -228,13 +226,11 @@ class GasManager:
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
                 reason[0],
-                "",
             )
         else:
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
                 solidity_error_params,
-                "",
             )
 
         return preOpGas, paid, targetSuccess, targetResult
@@ -272,7 +268,6 @@ class GasManager:
                     raise ValidationException(
                         ValidationExceptionCode.SimulateValidation,
                         f"Max fee per gas is too low. it should be minimum : {block_max_fee_per_gas_with_tolerance_hex}",
-                        "",
                     )
 
             else:
@@ -287,13 +282,11 @@ class GasManager:
                     raise ValidationException(
                         ValidationExceptionCode.InvalidFields,
                         f"Max fee per gas is too low. it should be minimum the estimated base fee: {hex(estimated_base_fee)}",
-                        "",
                     )
                 if max_priority_fee_per_gas < 1:
                     raise ValidationException(
                         ValidationExceptionCode.InvalidFields,
                         f"Max priority fee per gas is too low. it should be minimum : 1",
-                        "",
                     )
                 if (
                     min(
@@ -305,32 +298,31 @@ class GasManager:
                     raise ValidationException(
                         ValidationExceptionCode.InvalidFields,
                         f"Max fee per gas and (Max priority fee per gas + estimated basefee) should be equal or higher than : {block_max_fee_per_gas_with_tolerance_hex}",
-                        "",
                     )
 
         return block_max_fee_per_gas_hex
 
     async def verify_preverification_gas_and_verification_gas_limit(
-        self, user_operation: UserOperation, 
+        self, 
+        user_operation: UserOperation,
+        entrypoint: str, 
         latest_block_number:str,
         latest_block_basefee:int,
     ) -> None:
         expected_preverification_gas = await self.get_preverification_gas(
-            user_operation, latest_block_number, latest_block_basefee
+            user_operation, entrypoint, latest_block_number, latest_block_basefee
         )
 
         if user_operation.pre_verification_gas < expected_preverification_gas:
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
                 f"Preverification gas is too low. it should be minimum : {hex(expected_preverification_gas)}",
-                "",
             )
 
         if user_operation.verification_gas_limit > MAX_VERIFICATION_GAS_LIMIT:
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
                 f"Verification gas is too high. it should be maximum : {hex(MAX_VERIFICATION_GAS_LIMIT)}",
-                "",
             )
 
     async def calc_l1_gas_estimate_optimism(
@@ -385,7 +377,7 @@ class GasManager:
         return gas_estimate_for_l1
 
     async def calc_l1_gas_estimate_arbitrum(
-        self, user_operation: UserOperation
+        self, user_operation: UserOperation, entrypoint:str
     ) -> int:
         arbitrum_nodeInterface_address = (
             "0x00000000000000000000000000000000000000C8"
@@ -400,7 +392,7 @@ class GasManager:
         )
 
         call_data = encode_gasEstimateL1Component_calldata(
-            self.entrypoint, is_init, handleops_calldata
+            entrypoint, is_init, handleops_calldata
         )
 
         params = [
@@ -427,6 +419,7 @@ class GasManager:
     async def get_preverification_gas(
         self,
         user_operation: UserOperation,
+        entrypoint: str,
         block_number_hex: str,
         latest_block_base_fee: int,
         preverification_gas_percentage_coefficient: int = 100,
@@ -442,7 +435,7 @@ class GasManager:
                 user_operation, block_number_hex, latest_block_base_fee
             )
         elif self.chain_id == 42161:  # arbitrum One
-            l1_gas = await self.calc_l1_gas_estimate_arbitrum(user_operation)
+            l1_gas = await self.calc_l1_gas_estimate_arbitrum(user_operation, entrypoint)
 
         calculated_preverification_gas = base_preverification_gas + l1_gas
 
@@ -461,7 +454,7 @@ class GasManager:
     def calc_base_preverification_gas(user_operation: UserOperation) -> int:
         user_operation_list = user_operation.to_list()
 
-        user_operation_list[6] = 21000  # pre_verification_gas
+        user_operation_list[6] = 21000
 
         #set a dummy signature only if the user didn't supply any
         if(len(user_operation_list[10]) < 65):
@@ -480,17 +473,22 @@ class GasManager:
         packed = UserOperationHandler.pack_user_operation(
             user_operation_list, False
         )
+        packed_length = len(packed)
+        zero_byte_count = packed.count(b"\x00")
+        non_zero_byte_count = packed_length - zero_byte_count
+        call_data_cost = zero_byte_count * zero_byte + non_zero_byte_count * non_zero_byte
 
-        cost_list = list(
-            map(lambda x: zero_byte if x == b"\x00" else non_zero_byte, packed)
-        )
-        call_data_cost = reduce(lambda x, y: x + y, cost_list)
+        length_in_words = math.ceil((packed_length + 31) /32)
+        # cost_list = list(
+        #     map(lambda x: zero_byte if x == b"\x00" else non_zero_byte, packed)
+        # )
+        # call_data_cost = reduce(lambda x, y: x + y, cost_list)
 
         pre_verification_gas = (
             call_data_cost
             + (fixed / bundle_size)
             + per_user_operation
-            + per_user_operation_word * len(packed)
+            + per_user_operation_word * length_in_words
         )
 
         return math.ceil(pre_verification_gas)

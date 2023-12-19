@@ -1,5 +1,6 @@
 import asyncio
 from functools import reduce
+import math
 
 from eth_utils import to_checksum_address, keccak
 from eth_abi import encode, decode
@@ -9,7 +10,10 @@ from voltaire_bundler.bundler.exceptions import (
     ValidationException,
     ValidationExceptionCode,
 )
-
+from voltaire_bundler.bundler.exceptions import (
+    ExecutionException,
+    ExecutionExceptionCode,
+)
 from voltaire_bundler.utils.eth_client_utils import (
     send_rpc_request_to_eth_client,
 )
@@ -25,7 +29,6 @@ class UserOperationHandler:
     ethereum_node_url: str
     bundler_private_key: str
     bundler_address: str
-    entrypoint: str
     is_legacy_mode: bool
 
     def __init__(
@@ -33,20 +36,18 @@ class UserOperationHandler:
         ethereum_node_url,
         bundler_private_key,
         bundler_address,
-        entrypoint,
         is_legacy_mode,
     ):
         self.ethereum_node_url = ethereum_node_url
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
-        self.entrypoint = entrypoint
         self.is_legacy_mode = is_legacy_mode
 
     async def get_user_operation_by_hash(
-        self, user_operation_hash: str
+        self, user_operation_hash: str, entrypoint:str
     ) -> tuple:
         event_log_info = await self.get_user_operation_event_log_info(
-            user_operation_hash
+            user_operation_hash, entrypoint
         )
         log_object = event_log_info[0]
         transaction_hash = log_object.transactionHash
@@ -60,14 +61,14 @@ class UserOperationHandler:
         return user_operation, block_number, block_hash, transaction_hash
 
     async def get_user_operation_by_hash_rpc(
-        self, user_operation_hash: str
+        self, user_operation_hash: str, entrypoint:str
     ) -> dict:
         (
             handle_op_input,
             block_number,
             block_hash,
             transaction_hash,
-        ) = await self.get_user_operation_by_hash(user_operation_hash)
+        ) = await self.get_user_operation_by_hash(user_operation_hash, entrypoint)
 
         user_operation = UserOperationHandler.decode_handle_op_input(
             handle_op_input
@@ -88,7 +89,7 @@ class UserOperationHandler:
         }
         user_operation_by_hash_json = {
             "userOperation": user_operation_json,
-            "entryPoint": self.entrypoint,
+            "entryPoint": entrypoint,
             "blockNumber": block_number,
             "blockHash": block_hash,
             "transactionHash": transaction_hash,
@@ -96,7 +97,7 @@ class UserOperationHandler:
         return user_operation_by_hash_json
 
     async def get_user_operation_receipt(
-        self, user_operation_hash: str
+        self, user_operation_hash: str, entrypoint:str
     ) -> tuple[ReceiptInfo, UserOperationReceiptInfo]:
         (
             log_object,
@@ -108,7 +109,8 @@ class UserOperationHandler:
             actualGasCost,
             actualGasUsed,
             logs,
-        ) = await self.get_user_operation_event_log_info(user_operation_hash)
+        ) = await self.get_user_operation_event_log_info(
+            user_operation_hash, entrypoint)
 
         transaction = await self.get_transaction_receipt(
             log_object.transactionHash
@@ -148,12 +150,12 @@ class UserOperationHandler:
         return receiptInfo, userOperationReceiptInfo
 
     async def get_user_operation_receipt_rpc(
-        self, user_operation_hash: str
+        self, user_operation_hash: str, entrypoint:str
     ) -> dict:
         (
             receipt_info,
             user_operation_receipt_info,
-        ) = await self.get_user_operation_receipt(user_operation_hash)
+        ) = await self.get_user_operation_receipt(user_operation_hash, entrypoint)
 
         receipt_info_json = {
             "blockHash": receipt_info.blockHash,
@@ -173,7 +175,7 @@ class UserOperationHandler:
 
         user_operation_receipt_rpc_json = {
             "userOpHash": user_operation_receipt_info.userOpHash,
-            "entryPoint": self.entrypoint,
+            "entryPoint": entrypoint,
             "sender": user_operation_receipt_info.sender,
             "nonce": hex(user_operation_receipt_info.nonce),
             "paymaster": user_operation_receipt_info.paymaster,
@@ -187,15 +189,14 @@ class UserOperationHandler:
         return user_operation_receipt_rpc_json
 
     async def get_user_operation_event_log_info(
-        self, user_operation_hash: str
+        self, user_operation_hash: str, entrypoint:str
     ) -> tuple:
-        res = await self.get_user_operation_logs(user_operation_hash)
+        res = await self.get_user_operation_logs(user_operation_hash, entrypoint)
 
         if "result" not in res or len(res["result"]) < 1:
             raise ValidationException(
                 ValidationExceptionCode.INVALID_USEROPHASH,
-                "Missing/invalid userOpHash : " + user_operation_hash,
-                "",
+                "can't find user operation with hash : " + user_operation_hash,
             )
         logs = res["result"]
         log = res["result"][0]
@@ -245,12 +246,12 @@ class UserOperationHandler:
         )
         return res["result"]
 
-    async def get_user_operation_logs(self, user_operation_hash: str):
+    async def get_user_operation_logs(self, user_operation_hash: str, entrypoint:str):
         USER_OPERATIOM_EVENT_DISCRIPTOR = "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
 
         params = [
             {
-                "address": self.entrypoint,
+                "address": entrypoint,
                 "topics": [
                     USER_OPERATIOM_EVENT_DISCRIPTOR,
                     user_operation_hash,

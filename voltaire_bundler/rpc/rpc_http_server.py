@@ -8,6 +8,7 @@ from jsonrpcserver import (
     Success,
     async_dispatch,
     Error,
+    InvalidParams,
 )
 from typing import Any
 from importlib.metadata import version
@@ -16,6 +17,7 @@ from voltaire_bundler.event_bus_manager.endpoint import Client, RequestEvent, Re
 from voltaire_bundler.bundler.exceptions import (
     ValidationException,
     ExecutionException,
+    ValidationExceptionCode,
 )
 from prometheus_client import Summary
 
@@ -187,7 +189,7 @@ async def debug_bundler_dumpReputation(entrypoint: str) -> Result:
         request_arguments=[entrypoint],
     )
     return result
-
+#
 @method
 async def web3_bundlerVersion() -> Result:
     return Success(version("voltaire_bundler"))

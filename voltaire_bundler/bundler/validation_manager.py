@@ -35,7 +35,6 @@ class ValidationManager:
     gas_manager: GasManager
     bundler_private_key: str
     bundler_address: str
-    entrypoint: str
     chain_id: int
     bundler_collector_tracer: str
     banned_opcodes: list()
@@ -44,7 +43,7 @@ class ValidationManager:
     is_legacy_mode: bool
     whitelist_entity_storage_access: list()
     enforce_gas_price_tolerance: int
-    ethereum_node_debug_trace_call_url: str
+    ethereum_node_debug_trace_call_url:str
 
     def __init__(
         self,
@@ -53,21 +52,19 @@ class ValidationManager:
         gas_manager: GasManager,
         bundler_private_key: str,
         bundler_address: str,
-        entrypoint: str,
         chain_id: int,
         bundler_helper_byte_code: str,
         is_unsafe: bool,
         is_legacy_mode: bool,
         whitelist_entity_storage_access: list(),
         enforce_gas_price_tolerance: int,
-        ethereum_node_debug_trace_call_url:str,
+        ethereum_node_debug_trace_call_url: str,
     ):
         self.user_operation_handler = user_operation_handler
         self.ethereum_node_url = ethereum_node_url
         self.gas_manager = gas_manager
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
-        self.entrypoint = entrypoint
         self.chain_id = chain_id
         self.bundler_helper_byte_code = bundler_helper_byte_code
         self.is_unsafe = is_unsafe
@@ -106,25 +103,29 @@ class ValidationManager:
     async def validate_user_operation(
         self,
         user_operation: UserOperation,
-        latest_block_number:str,
-        latest_block_basefee: int,
+        entrypoint:str,
+        block_number:str,
+        # latest_block_basefee: int,
+        gas_price_hex:str
     ) -> bool:
-        await self.gas_manager.verify_preverification_gas_and_verification_gas_limit(
-            user_operation, latest_block_number, latest_block_basefee
-        )
-        gas_price_hex = await self.gas_manager.verify_gas_fees_and_get_price(
-            user_operation, self.enforce_gas_price_tolerance
-        )
+        # await self.gas_manager.verify_preverification_gas_and_verification_gas_limit(
+        #     user_operation, entrypoint, latest_block_number, latest_block_basefee
+        # )
+        # gas_price_hex = await self.gas_manager.verify_gas_fees_and_get_price(
+        #     user_operation, self.enforce_gas_price_tolerance
+        # )
 
         if self.is_unsafe:
             (
                 selector,
                 validation_result,
-            ) = await self.simulate_validation_without_tracing(user_operation)
+            ) = await self.simulate_validation_without_tracing(user_operation, entrypoint)
         else:
             debug_data: str = await self.simulate_validation_with_tracing(
                 user_operation,
+                entrypoint,
                 gas_price_hex,
+                block_number
             )
             selector = debug_data["debug"][-2]["REVERT"][:10]
             validation_result = debug_data["debug"][-2]["REVERT"][10:]
@@ -135,8 +136,7 @@ class ValidationManager:
             )
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
-                "revert reason : " + reason,
-                validation_result,
+                "revert reason : " + reason + " " + bytes.fromhex(validation_result[-64:]).decode("ascii"),
             )
 
         (
@@ -151,7 +151,7 @@ class ValidationManager:
 
         if self.is_unsafe:
             user_operation_hash = UserOperationHandler.get_user_operation_hash(
-                user_operation.to_list(), self.entrypoint, self.chain_id
+                user_operation.to_list(), entrypoint, self.chain_id
             )
         else:
             debug_data_formated = (
@@ -159,6 +159,7 @@ class ValidationManager:
             )
             await self.validate_trace_results(
                 user_operation,
+                entrypoint,
                 sender_stake_info,
                 factory_stake_info,
                 paymaster_stake_info,
@@ -173,22 +174,17 @@ class ValidationManager:
         return is_sender_staked, user_operation_hash
 
     async def simulate_validation_without_tracing(
-        self, user_operation: UserOperation
+        self, user_operation: UserOperation, entrypoint:str
     ) -> tuple[str, str]:
         call_data = encode_simulate_validation_calldata(user_operation)
 
         params = [
             {
-                "from": "0x0000000000000000000000000000000000000000",
-                "to": self.entrypoint,
+                "from": self.bundler_address,
+                "to": entrypoint,
                 "data": call_data,
             },
             "latest",
-            {
-                "0x0000000000000000000000000000000000000000": {
-                    "balance": "0x21E19E0C9BAB2400000"  # to make sure that the zero address is wel funded for gas estimation
-                },
-            }
         ]
 
         result = await send_rpc_request_to_eth_client(
@@ -206,7 +202,6 @@ class ValidationManager:
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
                 result["error"]["message"],
-                "",
             )
 
         error_data = result["error"]["data"]
@@ -216,19 +211,19 @@ class ValidationManager:
         return solidity_error_selector, solidity_error_params
 
     async def simulate_validation_with_tracing(
-        self, user_operation: UserOperation, gas_price_hex: int
+        self, user_operation: UserOperation, entrypoint:str, gas_price_hex: int, block_number:str
     ) -> str:
         call_data = encode_simulate_validation_calldata(user_operation)
 
         params = [
             {
                 "from": self.bundler_address,
-                "to": self.entrypoint,
+                "to": entrypoint,
                 "data": call_data,
                 "gasLimit": 0,
                 "gasPrice": gas_price_hex,
             },
-            "latest",
+            block_number,
             {"tracer": self.bundler_collector_tracer},
         ]
 
@@ -245,18 +240,17 @@ class ValidationManager:
                 ValidationExceptionCode.SimulateValidation,
                 res["error"]["message"]
                 + " - Try reducing maxFeePerGas or contact the bundler maintainer if the bundler account is not sufficiently funded",
-                "",
             )
         else:
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
                 "Invalide Validation result from debug_traceCall",
-                "",
             )
 
     async def validate_trace_results(
         self,
         user_operation: UserOperation,
+        entrypoint: str,
         sender_stake_info: StakeInfo,
         factory_stake_info: StakeInfo,
         paymaster_stake_info: StakeInfo,
@@ -287,10 +281,11 @@ class ValidationManager:
             entities_addreses.append(paymaster_address_lowercase)
 
         associated_slots_per_entity = ValidationManager.parse_entity_slots(
-            entities_addreses, debug_data.keccak
+            entities_addreses, set(debug_data.keccak)
         )
 
         self.validate_entity_storage_access(
+            entrypoint,
             sender_address_lowercase,
             "sender",
             associated_slots_per_entity,
@@ -305,6 +300,7 @@ class ValidationManager:
 
         if factory_address_lowercase is not None:
             self.validate_entity_storage_access(
+                entrypoint,
                 factory_address_lowercase,
                 "factory",
                 associated_slots_per_entity,
@@ -324,6 +320,7 @@ class ValidationManager:
 
         if paymaster_address_lowercase is not None:
             self.validate_entity_storage_access(
+                entrypoint,
                 paymaster_address_lowercase,
                 "paymaster",
                 associated_slots_per_entity,
@@ -343,7 +340,6 @@ class ValidationManager:
                 raise ValidationException(
                     ValidationExceptionCode.OpcodeValidation,
                     "unstaked paymaster must not return context",
-                    "",
                 )
 
         if len(associated_addresses_lowercase) > 0:
@@ -360,6 +356,7 @@ class ValidationManager:
 
     def validate_entity_storage_access(
         self,
+        entrypoint: str,
         entity_address: str,
         entity_title: str,
         associated_slots_per_entity: list[str],
@@ -376,7 +373,7 @@ class ValidationManager:
         for contract_address in access.keys():
             if contract_address == sender_address_lowercase:
                 continue  # allowed to access sender's storage
-            elif contract_address == self.entrypoint.lower():
+            elif contract_address == entrypoint.lower():
                 continue
 
             storage_slots = access[contract_address]
@@ -420,7 +417,6 @@ class ValidationManager:
                                 contract_address,
                             )
                         ),
-                        "",
                     )
                 if not is_staked and require_stake_slot is not None:
                     raise ValidationException(
@@ -436,7 +432,6 @@ class ValidationManager:
                                 contract_address,
                             )
                         ),
-                        "",
                     )
 
     async def check_banned_op_codes(
@@ -486,18 +481,18 @@ class ValidationManager:
         opcode_source: str,
         is_factory: bool = False,
     ) -> None:
-        found_opcodes = {
-            opcode
-            for opcode in opcodes.keys()
-            if opcode in self.banned_opcodes
-        }
+        # found_opcodes = {
+        #     opcode
+        #     for opcode in opcodes.keys()
+        #     if opcode in self.banned_opcodes
+        # }
+        found_opcodes = opcodes.keys() & self.banned_opcodes
         number_of_opcodes = len(found_opcodes)
         if number_of_opcodes > 0:
             opcodes_str = " ".join([opcode for opcode in found_opcodes])
             raise ValidationException(
                 ValidationExceptionCode.OpcodeValidation,
                 opcode_source + " uses banned opcode: " + opcodes_str,
-                "",
             )
 
         if "CREATE2" in opcodes:
@@ -507,7 +502,6 @@ class ValidationManager:
                 raise ValidationException(
                     ValidationExceptionCode.OpcodeValidation,
                     opcode_source + " uses banned opcode: " + "CREATE2",
-                    "",
                 )
 
     async def get_addresses_code_hash(self, addresses: list[str]) -> str:
@@ -539,28 +533,25 @@ class ValidationManager:
             raise ValidationException(
                 ValidationExceptionCode.InvalidSignature,
                 "Invalid UserOp signature or paymaster signature",
-                "",
             )
 
         if validAfter is None or validAfter > (time.time() / 1000) - 30:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
                 "Transaction is not valid yet",
-                "",
             )
 
         if deadline is None or deadline + 30 < (time.time() / 1000):
             raise ValidationException(
                 ValidationExceptionCode.ExpiresShortly,
                 "Transaction will expire shortly or has expired.",
-                "",
             )
 
     @staticmethod
     def is_slot_associated_with_address(
         slot, address: str, associated_slots: list[str]
     ) -> bool:
-        address_lowercase = address[2:].lower()
+        address_lowercase = address[2:]#.lower()
         address_padded = "0x000000000000000000000000" + address_lowercase
         address_lowercase = "0x" + address_lowercase
 
@@ -608,7 +599,6 @@ class ValidationManager:
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
                 reason,
-                "",
             )
 
         return_info_arr = validation_result_decoded[0]
@@ -646,24 +636,36 @@ class ValidationManager:
         )
 
     @staticmethod
-    def parse_entity_slots(entities: list[str], keccak_list: list[str]):
+    def parse_entity_slots(entities: list[str], keccak_list_unique: list[str]):
+        # print(keccak_list)
         entity_slots = dict()
-        for slot_keccak in keccak_list:
-            for address in entities:
-                address_lowercase = address[2:].lower()
-                address_padded = (
-                    "0x000000000000000000000000" + address_lowercase
-                )
-                address_lowercase = "0x" + address_lowercase
-                if address not in entity_slots:
-                    entity_slots[address] = []
+        # for slot_keccak in keccak_list:
+        #     for address in entities:
+        #         address_lowercase = address[2:].lower()
+        #         address_padded = (
+        #             "0x000000000000000000000000" + address_lowercase
+        #         )
+        #         address_lowercase = "0x" + address_lowercase
+        #         if address not in entity_slots:
+        #             entity_slots[address] = []
 
-                current_entity_slot = entity_slots[address]
-                if address_padded in slot_keccak:
-                    keccak_hash = keccak(bytes.fromhex(slot_keccak[2:]))
-                    slot = keccak_hash.hex()
-                    if slot not in current_entity_slot:
-                        current_entity_slot.append(slot)
+        #         current_entity_slot = entity_slots[address]
+        #         if address_padded in slot_keccak:
+        #             keccak_hash = keccak(bytes.fromhex(slot_keccak[2:]))
+        #             slot = keccak_hash.hex()
+        #             if slot not in current_entity_slot:
+        #                 current_entity_slot.append(slot)
+        # for slot_keccak in keccak_list:
+        #     map()
+        entities_addresses_padded_pair_list = map(
+            lambda address: (address, "0x000000000000000000000000" + address[2:]), 
+            entities
+            )
+
+        [update_current_entity_slot(slot_keccak, address, address_padded, entity_slots) 
+         for address, address_padded in entities_addresses_padded_pair_list
+         for slot_keccak in keccak_list_unique]
+        # print(entity_slots)
         return entity_slots
 
     @staticmethod
@@ -745,3 +747,20 @@ class ValidationManager:
         )
         user_operation_hash = "0x" + decoded_result[1].hex()
         return user_operation_hash
+
+def update_current_entity_slot(slot_keccak, address, address_padded, entity_slots):
+        # address_lowercase = address[2:]#.lower()
+        # address_padded = (
+        #     "0x000000000000000000000000" + address[2:]
+        # )
+        # address_lowercase = "0x" + address_lowercase
+        if address not in entity_slots:
+            entity_slots[address] = []
+
+        current_entity_slot = entity_slots[address]
+        if address_padded in slot_keccak:
+            # keccak_hash = keccak(bytes.fromhex(slot_keccak[2:]))
+            # slot = keccak_hash.hex()
+            slot = keccak(bytes.fromhex(slot_keccak[2:])).hex()
+            if slot not in current_entity_slot:
+                current_entity_slot.append(slot)

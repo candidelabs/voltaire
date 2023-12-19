@@ -1,0 +1,22 @@
+[package]
+name = "voltaire-p2p"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+p2p_voltaire_network = { path = "./p2p_network" }
+network_manager = { path = "./network_manager" }
+task_executor = { path = "./p2p_network/task_executor" }
+slog-term = "2"
+tokio = { version = "1.14.0", features = ["time", "macros", "tracing"] }
+exit-future = "0.2"
+futures = "0.3.28"
+slog-async = "2"
+slog = { version = "2.5.2", features = ["max_level_trace"] }
+strum = { version = "0.24", features = ["derive"] }
+types = { path =  "./p2p_network/types" }
+clap = { version = "2.34.0", feature= ["cargo"]}
+unused_port = { path = "./p2p_network/unused_port" }
+# network = { path =  "./network" }

@@ -1,6 +1,13 @@
 tests
 dist
 docs
+scripts
+voltaire_p2p
+cache
+.venv
+.flake8
+.hypothesis
+.vscode
 .pytest_cache
 .git
 .cache

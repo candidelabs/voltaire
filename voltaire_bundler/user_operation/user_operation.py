@@ -5,6 +5,8 @@ from voltaire_bundler.bundler.exceptions import (
 )
 import re
 
+from voltaire_bundler.typing import MempoolId
+
 
 @dataclass()
 class UserOperation:
@@ -23,6 +25,8 @@ class UserOperation:
     associated_addresses: list()
     factory_address_lowercase: str | None
     paymaster_address_lowercase: str | None
+    valid_mempools_ids: MempoolId
+    user_operation_hash: str
     jsonRequestDict: InitVar[dict]
 
     def __init__(self, jsonRequestDict):
@@ -30,7 +34,6 @@ class UserOperation:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
                 "Invalide UserOperation",
-                "",
             )
         self.verify_fields_exist(jsonRequestDict)
 
@@ -62,6 +65,10 @@ class UserOperation:
 
         self.associated_addresses = []
 
+        self.valid_mempools_ids = []
+
+        self.user_operation_hash = ""
+
         self._set_factory_and_paymaster_address()
 
     @staticmethod
@@ -85,7 +92,6 @@ class UserOperation:
                 raise ValidationException(
                     ValidationExceptionCode.InvalidFields,
                     f"UserOperation missing {field} field",
-                    "",
                 )
 
     def get_user_operation_dict(self) -> tuple:
@@ -148,9 +154,6 @@ class UserOperation:
 
 
 def verify_and_get_address(value) -> str:
-    if value is None:
-        return 0
-
     address_pattern = "^0x[0-9,a-f,A-F]{40}$"
     if isinstance(value, str) and re.match(address_pattern, value) is not None:
         return value
@@ -158,7 +161,6 @@ def verify_and_get_address(value) -> str:
         raise ValidationException(
             ValidationExceptionCode.InvalidFields,
             f"Invalide address value : {value}",
-            "",
         )
 
 
@@ -172,13 +174,11 @@ def verify_and_get_uint(value) -> int:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
                 f"Invalide uint hex value : {value}",
-                "",
             )
     else:
         raise ValidationException(
             ValidationExceptionCode.InvalidFields,
             f"Invalide uint hex value : {value}",
-            "",
         )
 
 
@@ -193,13 +193,11 @@ def verify_and_get_bytes(value) -> bytes:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
                 f"Invalide bytes value : {value}",
-                "",
             )
     else:
         raise ValidationException(
             ValidationExceptionCode.InvalidFields,
             f"Invalide bytes value : {value}",
-            "",
         )
 
 

@@ -47,13 +47,13 @@ class Endpoint:
         self.event_names = []
         self.response_functions_list = []
 
-    async def start_server(self) -> None:
+    async def start_server(self, filepath:str) -> None:
         """
         Starts the Enpoint server to listen to requests on an IPC socket
         It creates the .ipc file if it doesn't exist
         """
         logging.info("Starting " + self.id)
-        filepath = self.id + ".ipc"
+        # filepath = self.id + ".ipc"
         server = await asyncio.start_unix_server(
             self._handle_request_cb, filepath
         )
@@ -124,8 +124,8 @@ class Endpoint:
             index = self.event_names.index(request_event["request_type"])
             response_function = self.response_functions_list[index]
             response_event =  await response_function(request_event["request_arguments"])
-            # if request_event["request_type"] != "p2p_gossib_received":
-            await _broadcast(response_event, writer)
+            if "p2p_received" not in request_event["request_type"]:
+                await _broadcast(response_event, writer)
         finally:
             writer.close()
             await writer.wait_closed() # waits for the stream to close in case of unexpected interruption
@@ -167,9 +167,12 @@ class Client:
         RequestEvents and waits for a ResponseEvent.
         """
         # filepath = self.server_id + ".ipc"
-        filepath = "/home/sherif/code/crypto/voltaire_mod/p2p_endpoint.ipc"
-        _, writer = await asyncio.open_unix_connection(filepath)
-
+        filepath = "p2p_endpoint.ipc"
+        try:
+            _, writer = await asyncio.open_unix_connection(filepath)
+        except ConnectionRefusedError:
+            return
+        
         await _broadcast(request_event, writer)
 
 async def _listen(

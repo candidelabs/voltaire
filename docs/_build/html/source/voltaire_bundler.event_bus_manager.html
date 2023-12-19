@@ -1,0 +1,191 @@
+
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta charset="utf-8" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>voltaire_bundler.event_bus_manager package &#8212; Voltaire v0.1.0a23 documentation</title>
+    <link rel="stylesheet" href="../_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+    <script src="../_static/jquery.js"></script>
+    <script src="../_static/underscore.js"></script>
+    <script src="../_static/doctools.js"></script>
+    <script src="../_static/language_data.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+   
+  <link rel="stylesheet" href="../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="voltaire-bundler-event-bus-manager-package">
+<h1>voltaire_bundler.event_bus_manager package<a class="headerlink" href="#voltaire-bundler-event-bus-manager-package" title="Permalink to this headline">¶</a></h1>
+<section id="submodules">
+<h2>Submodules<a class="headerlink" href="#submodules" title="Permalink to this headline">¶</a></h2>
+</section>
+<section id="module-voltaire_bundler.event_bus_manager.endpoint">
+<span id="voltaire-bundler-event-bus-manager-endpoint-module"></span><h2>voltaire_bundler.event_bus_manager.endpoint module<a class="headerlink" href="#module-voltaire_bundler.event_bus_manager.endpoint" title="Permalink to this headline">¶</a></h2>
+<p>This module is a simple event bus implementation for message based interprocess 
+communiction.
+It is uses unix IPC sockets to send messages between python threads, also between python
+threads and the Rust p2p thread.
+Note: Voltaire p2p implementation is written in rust, as the python libp2p 
+implementation is not maintained.
+The main architecture consist of Endpoints(server) and Clients. Each Endpoint can 
+receive requests from Clients.
+Each Endpoint has its own IPC file which it listens to for messages from clients.</p>
+<p>based on :<a class="reference external" href="https://github.com/ethereum/trinity/issues/507">https://github.com/ethereum/trinity/issues/507</a></p>
+<dl class="class">
+<dt id="voltaire_bundler.event_bus_manager.endpoint.Client">
+<em class="property">class </em><code class="sig-prename descclassname">voltaire_bundler.event_bus_manager.endpoint.</code><code class="sig-name descname">Client</code><span class="sig-paren">(</span><em class="sig-param">id: str</em><span class="sig-paren">)</span><a class="headerlink" href="#voltaire_bundler.event_bus_manager.endpoint.Client" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>This Class represent a client that can send RequestEvent to an Endpoint(server) and
+receives a ResponseEvent</p>
+<dl class="method">
+<dt id="voltaire_bundler.event_bus_manager.endpoint.Client.request">
+<em class="property">async </em><code class="sig-name descname">request</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#voltaire_bundler.event_bus_manager.endpoint.Client.request" title="Permalink to this definition">¶</a></dt>
+<dd><p>This function establish a Unix socket connection to an Endpoint and sends a
+RequestEvents and waits for a ResponseEvent.</p>
+</dd></dl>
+
+<dl class="attribute">
+<dt id="voltaire_bundler.event_bus_manager.endpoint.Client.server_id">
+<code class="sig-name descname">server_id</code><em class="property"> = None</em><a class="headerlink" href="#voltaire_bundler.event_bus_manager.endpoint.Client.server_id" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="class">
+<dt id="voltaire_bundler.event_bus_manager.endpoint.Endpoint">
+<em class="property">class </em><code class="sig-prename descclassname">voltaire_bundler.event_bus_manager.endpoint.</code><code class="sig-name descname">Endpoint</code><span class="sig-paren">(</span><em class="sig-param">id: str</em><span class="sig-paren">)</span><a class="headerlink" href="#voltaire_bundler.event_bus_manager.endpoint.Endpoint" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>This is a class representation of an Endpoint that can receive request from
+clients.
+each event name in the event_names list correspond to an function object in the
+response_functions_list that can process a RequestEvent and return a ResponseEvent.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>event_names</strong> (<em>list</em><em>[</em><em>str</em><em>]</em>) – A list of event names</p></li>
+<li><p><strong>response_functions_list</strong> – A list of function objects that can process requests</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="method">
+<dt id="voltaire_bundler.event_bus_manager.endpoint.Endpoint.add_event_and_response_function">
+<code class="sig-name descname">add_event_and_response_function</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#voltaire_bundler.event_bus_manager.endpoint.Endpoint.add_event_and_response_function" title="Permalink to this definition">¶</a></dt>
+<dd><p>Adds an event name and it’s function object.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="voltaire_bundler.event_bus_manager.endpoint.Endpoint.add_events_and_response_functions_by_prefix">
+<code class="sig-name descname">add_events_and_response_functions_by_prefix</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#voltaire_bundler.event_bus_manager.endpoint.Endpoint.add_events_and_response_functions_by_prefix" title="Permalink to this definition">¶</a></dt>
+<dd><p>When a class inherets the Enpoint class, this functions can add all functions
+in the class that has a specific prefix to the event_names and the 
+reponse_functions_list based on the function name.
+This way a function only needs to include a certain prefix in it’s name to
+be included automatically.</p>
+</dd></dl>
+
+<dl class="attribute">
+<dt id="voltaire_bundler.event_bus_manager.endpoint.Endpoint.event_names">
+<code class="sig-name descname">event_names</code><em class="property">: list</em><em class="property"> = Field(name=None,type=None,default=&lt;dataclasses._MISSING_TYPE object&gt;,default_factory=list[str],init=True,repr=True,hash=None,compare=True,metadata=mappingproxy({}),kw_only=&lt;dataclasses._MISSING_TYPE object&gt;,_field_type=None)</em><a class="headerlink" href="#voltaire_bundler.event_bus_manager.endpoint.Endpoint.event_names" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="attribute">
+<dt id="voltaire_bundler.event_bus_manager.endpoint.Endpoint.response_functions_list">
+<code class="sig-name descname">response_functions_list</code><em class="property">: list</em><em class="property"> = Field(name=None,type=None,default=&lt;dataclasses._MISSING_TYPE object&gt;,default_factory=&lt;class 'list'&gt;,init=True,repr=True,hash=None,compare=True,metadata=mappingproxy({}),kw_only=&lt;dataclasses._MISSING_TYPE object&gt;,_field_type=None)</em><a class="headerlink" href="#voltaire_bundler.event_bus_manager.endpoint.Endpoint.response_functions_list" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="voltaire_bundler.event_bus_manager.endpoint.Endpoint.start_server">
+<em class="property">async </em><code class="sig-name descname">start_server</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; None<a class="headerlink" href="#voltaire_bundler.event_bus_manager.endpoint.Endpoint.start_server" title="Permalink to this definition">¶</a></dt>
+<dd><p>Starts the Enpoint server to listen to requests on an IPC socket
+It creates the .ipc file if it doesn’t exist</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="module-voltaire_bundler.event_bus_manager">
+<span id="module-contents"></span><h2>Module contents<a class="headerlink" href="#module-voltaire_bundler.event_bus_manager" title="Permalink to this headline">¶</a></h2>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../index.html">Voltaire</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../index.html">Documentation overview</a><ul>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2023, Candide Labs.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 2.4.5</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../_sources/source/voltaire_bundler.event_bus_manager.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

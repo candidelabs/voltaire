@@ -6,3 +6,10 @@ keystore
 **/.aws
 **/.ssh
 dist/
+target/
+cache/
+enr.dat
+key
+metadata
+.hypothesis
+.pytest_cache

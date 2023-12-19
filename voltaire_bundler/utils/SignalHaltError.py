@@ -1,6 +1,7 @@
 from asyncio.events import AbstractEventLoop
 from signal import Signals
 from sys import stderr
+from subprocess import Popen
 
 # credits : https://stackoverflow.com/a/68732870
 
@@ -19,6 +20,8 @@ class SignalHaltError(SystemExit):
         return f"\nExitted due to {self.signal_enum.name}"
 
 
-def immediate_exit(signal_enum: Signals, loop: AbstractEventLoop) -> None:
+def immediate_exit(signal_enum: Signals, loop: AbstractEventLoop, p2p:Popen|None) -> None:
+    if p2p is not None:
+        p2p.terminate()
     loop.stop()
     raise SignalHaltError(signal_enum=signal_enum)

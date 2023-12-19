@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from typing import List
 
 from eth_abi import encode, decode
 
@@ -14,63 +15,68 @@ MIN_PRICE_BUMP = 10
 @dataclass
 class SenderMempool:
     address: str
-    mempool_members_list: list = field(default_factory=list[MempoolMember])
+    user_operation_hashs_to_mempool_members: dict[str,MempoolMember]
 
     async def add_user_operation(
-        self, new_user_operation: UserOperation, is_sender_staked: bool
+        self, new_user_operation: UserOperation, 
+        new_user_operation_hash: str, 
+        is_sender_staked: bool
     ):
-        new_mempool_manager = MempoolMember(
+        new_mempool_member = MempoolMember(
             new_user_operation, 
             MempoolMemberStatus.RECEVIED
         )
-        sender_operations_num = len(self.mempool_members_list)
+        sender_operations_num = len(self.user_operation_hashs_to_mempool_members)
 
         if sender_operations_num == 0:
-            self.mempool_members_list.append(new_mempool_manager)
+            self.user_operation_hashs_to_mempool_members[new_user_operation_hash] = new_mempool_member
         elif (
             is_sender_staked
             or sender_operations_num <= MAX_MEMPOOL_USEROPS_PER_SENDER
         ):
-            existing_mempool_member_with_same_nonce = (
-                self._get_user_operation_with_same_nonce(
+            existing_mempool_member_hash_with_same_nonce = (
+                self._get_user_operation_hash_with_same_nonce(
                     new_user_operation.nonce
                 )
             )
-            if existing_mempool_member_with_same_nonce is not None:
+            if existing_mempool_member_hash_with_same_nonce is not None:
                 self.replace_user_operation(
-                    new_user_operation, existing_mempool_member_with_same_nonce
+                    new_mempool_member,
+                    new_user_operation_hash, 
+                    existing_mempool_member_hash_with_same_nonce
                 )
             elif (
                 is_sender_staked
                 or sender_operations_num < MAX_MEMPOOL_USEROPS_PER_SENDER
             ):
-                self.mempool_members_list.append(new_mempool_manager)
+                self.user_operation_hashs_to_mempool_members[new_user_operation_hash] = new_mempool_member
             else:
                 raise ValidationException(
                     ValidationExceptionCode.InvalidFields,
                     "invalid UserOperation struct/fields",
-                    "",
                 )
 
     def replace_user_operation(
         self,
-        new_user_operation: UserOperation,
-        existing_mempool_member_with_same_nonce: MempoolMember,
+        new_mempool_member: MempoolMember,
+        new_user_operation_hash: str,
+        existing_mempool_member_hash_with_same_nonce: str,
     ) -> None:
         if self._check_if_new_operation_can_replace_existing_operation(
-            new_user_operation, existing_mempool_member_with_same_nonce.user_operation
+            new_mempool_member.user_operation, 
+            self.user_operation_hashs_to_mempool_members[existing_mempool_member_hash_with_same_nonce].user_operation
         ):
-            index = self.mempool_members_list.index(existing_mempool_member_with_same_nonce)
-            self.mempool_members_list[index].user_operation = new_user_operation
+            del self.user_operation_hashs_to_mempool_members[existing_mempool_member_hash_with_same_nonce]
+            self.user_operation_hashs_to_mempool_members[new_user_operation_hash] = new_mempool_member
         else:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
                 "invalid UserOperation struct/fields",
-                "",
             )
 
+    @staticmethod
     def _check_if_new_operation_can_replace_existing_operation(
-        self, new_operation: UserOperation, existing_operation: UserOperation
+        new_operation: UserOperation, existing_operation: UserOperation
     ) -> bool:
         if new_operation.nonce != existing_operation.nonce:
             return False
@@ -99,12 +105,12 @@ class SenderMempool:
     def _calculate_min_fee_to_replace(fee) -> int:
         return round(fee * (100 + MIN_PRICE_BUMP) / 100)
 
-    def _get_user_operation_with_same_nonce(
+    def _get_user_operation_hash_with_same_nonce(
         self, nonce
     ) -> MempoolMember | None:
-        for mempool_member in self.mempool_members_list:
-            if mempool_member.user_operation.nonce == nonce:
-                return mempool_member
+        for user_operation_hash in self.user_operation_hashs_to_mempool_members:
+            if self.user_operation_hashs_to_mempool_members[user_operation_hash].user_operation.nonce == nonce:
+                return user_operation_hash
         return None
 
     @staticmethod
