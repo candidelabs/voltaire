@@ -92,6 +92,24 @@ poetry run python3 -m voltaire_bundler --entrypoint $ENTRYPOINT --bundler_secret
 
 Follow the instruction in <a href='https://github.com/eth-infinitism/bundler-spec-tests'>eth-infinitism/bundler-spec-tests</a> to install dependencies and run the test
 
+## P2P rust section development
+
+### Install Rust
+```
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+### Install build dependencies
+```
+sudo apt install musl-tools
+rustup target add x86_64-unknown-linux-musl
+```
+
+### Build the rust section using script
+```
+poetry run build_p2p
+```
+
 ## Contributions
 
 Thank you for considering contributing to open-source code! We welcome contributions and are grateful for even the smallest of fixes. 
@@ -116,3 +134,4 @@ None of this would have been possible without the following teams and organizati
 * <a href='https://eips.ethereum.org/EIPS/eip-4337'>EIP-4337: Account Abstraction via Entry Point Contract specification </a>
 * <a href='https://github.com/eth-infinitism/bundler'>eth-infinitism/bundler</a>
 * Voltaire is funded exclusively by [The Ethereum Foundation](https://ethereum.foundation/)
+* <a href='https://github.com/sigp/lighthouse'>Lighthouse: Ethereum consensus client</a>
