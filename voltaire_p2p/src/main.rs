@@ -1,10 +1,10 @@
-use std::{sync::Arc, path::PathBuf, net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs}, str::FromStr};
+use std::{sync::Arc, path::PathBuf, net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs}, str::FromStr, time::Duration};
 
 use clap::ArgMatches;
 use p2p_voltaire_network::{NetworkConfig, ListenAddress, Multiaddr, multiaddr::Protocol, discv5::Enr, PeerIdSerialized};
 use network_manager::NetworkService;
 use task_executor::TaskExecutor;
-use tokio::runtime;
+use tokio::{runtime, time::sleep};
 use types::eth_spec::MinimalEthSpec;
 use tokio::runtime::Runtime;
 use slog::{Drain, o, Logger, warn};
@@ -42,8 +42,6 @@ fn main(){
 
     let task_executor = TaskExecutor::new(handle.clone(), exit, log.clone(), shutdown_tx);
 
-    // let args = cmd_args::CmdArgs::get_cmd_args();
-    // let cli_args = App::new("MyApp").get_matches();
     let cli_args = cli_args::cli_app().get_matches();
 
     let topics_str = cli_args
@@ -53,16 +51,6 @@ fn main(){
     let mut config = NetworkConfig::default();
 
     set_network_config(&mut config,&cli_args, &log).unwrap();
-    // config.discv5_config.table_filter = |_| true; // Do not ignore local IPs
-    // config.set_ipv4_listening_address(
-    //     args.enr_address,
-    //     args.enr_tcp4_port,
-    //     args.enr_udp4_port, 
-    //     args.enr_udp4_port);
-    // config.enr_udp4_port = Some(args.enr_udp4_port);
-    // config.enr_tcp4_port = Some(args.enr_tcp4_port);
-    // config.enr_address = (Some(args.enr_address), None);
-    // config.upnp_enabled = args.upnp_enabled;
 
     config.topics.append(&mut topics_str.map(|x| x.to_string()).collect());
 
@@ -70,16 +58,14 @@ fn main(){
     // config.boot_nodes_enr.append(&mut args.boot_nodes_enr.clone());
 
 
-    let _ = handle.block_on( 
-         NetworkService::<EthSpec>::start(
+    let _ = handle.block_on( async move{
+         let _ = NetworkService::<EthSpec>::start(
             &config,
-            task_executor,
-        )
-    );
-
-    // let raw_runtime = Arc::try_unwrap(runtime).unwrap();
-    // raw_runtime.shutdown_timeout(tokio::time::Duration::from_secs(3000));
-
+            task_executor.clone(),
+        ).await
+        .map_err(|e| format!("Failed to start network: {:?}", e));
+        task_executor.exit().await;
+    });
 }
 
 

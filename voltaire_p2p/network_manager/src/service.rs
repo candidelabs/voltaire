@@ -277,11 +277,7 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
         };
 
         network_service.spawn_service(executor, network_senders.network_send());
-
-        loop{
-            tokio::time::interval(Duration::from_secs(100000)).tick().await;
-        }
-        // 
+        
         Ok(network_globals)
     }
 
