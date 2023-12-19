@@ -4,7 +4,7 @@ use clap::ArgMatches;
 use p2p_voltaire_network::{NetworkConfig, ListenAddress, Multiaddr, multiaddr::Protocol, discv5::Enr, PeerIdSerialized};
 use network_manager::NetworkService;
 use task_executor::TaskExecutor;
-use tokio::{runtime, time::sleep};
+use tokio::runtime;
 use types::eth_spec::MinimalEthSpec;
 use tokio::runtime::Runtime;
 use slog::{Drain, o, Logger, warn};
@@ -53,10 +53,6 @@ fn main(){
     set_network_config(&mut config,&cli_args, &log).unwrap();
 
     config.topics.append(&mut topics_str.map(|x| x.to_string()).collect());
-
-       
-    // config.boot_nodes_enr.append(&mut args.boot_nodes_enr.clone());
-
 
     let _ = handle.block_on( async move{
          let _ = NetworkService::<EthSpec>::start(

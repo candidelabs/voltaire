@@ -218,12 +218,8 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
             }
         }
 
-        // // build the current enr_fork_id for adding to our local ENR
-        // let enr_fork_id = beacon_chain.enr_fork_id();
-
-
         // launch libp2p service
-        let (mut libp2p, network_globals) =
+        let (libp2p, network_globals) =
             Network::new(executor.clone(), /*service_context,*/ config.clone(),&network_log).await?;
 
         // // Repopulate the DHT with stored ENR's if discovery is not disabled.
@@ -238,17 +234,11 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
         //     }
         // }
 
-        // launch derived network services
-
         // router task
         let router_send = Router::spawn(
-            // beacon_chain.clone(),
             network_globals.clone(),
             network_senders.network_send(),
             executor.clone(),
-            // invalid_block_storage,
-            // beacon_processor_send,
-            // beacon_processor_reprocess_tx,
             network_log.clone(),
         ).await.unwrap();
 
