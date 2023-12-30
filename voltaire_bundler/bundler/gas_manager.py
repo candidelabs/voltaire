@@ -29,8 +29,10 @@ from voltaire_bundler.utils.encode import (
     encode_gasEstimateL1Component_calldata,
 )
 
-MAX_VERIFICATION_GAS_LIMIT = 10000000
-MIN_CALL_GAS_LIMIT = 21000
+ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+MAX_VERIFICATION_GAS_LIMIT = 10_000_000
+MIN_CALL_GAS_LIMIT = 21_000
+MAX_CALL_GAS_LIMIT = 30_000_000
 
 class GasManager:
     ethereum_node_url: str
@@ -60,22 +62,22 @@ class GasManager:
     ) -> [str, str, str]:
         latest_block_number, latest_block_basefee, latest_block_gas_limit_hex = await get_latest_block_info(self.ethereum_node_url)
 
+        # calculate preverification_gas
         preverification_gas = await self.get_preverification_gas(
             user_operation, entrypoint, latest_block_number, latest_block_basefee
         )
         preverification_gas_hex = hex(preverification_gas)
-
         user_operation.pre_verification_gas = preverification_gas
+
+        # set verification_gas_limit to MAX_VERIFICATION_GAS_LIMIT to prevent out of gas revert
         user_operation.verification_gas_limit = MAX_VERIFICATION_GAS_LIMIT
 
+        # Call simulateHandleOp with call_gas_limit = 0 and pass callData to simulateHandleOp target param
+        # to be able to get determine if callData reverted and retrieve the revert error
         call_data = user_operation.call_data
-        user_operation.call_data = bytes(0)
-        user_operation.call_gas_limit = 0 #
-
-        # Call simulateHandleOp with empty callData and pass callData to simulateHandleOp target param
-        # to be able to get determine if callData was reverted and retrieve the revert error
+        user_operation.call_gas_limit = 0
         (
-            preOpGas,
+            _,
             _,
             targetSuccess,
             targetResult,
@@ -92,21 +94,33 @@ class GasManager:
             raise ExecutionException(
                 ExecutionExceptionCode.EXECUTION_REVERTED, targetResult,
             )
-        user_operation.call_data = call_data
-        verification_gas_limit = math.ceil(
-            (preOpGas - user_operation.pre_verification_gas) * 1.1
+
+        # max_fee_per_gas can't be zero as call_gas_limit depends on paid
+        if user_operation.max_fee_per_gas == 0:
+            user_operation.max_fee_per_gas = 1
+
+        # Call simulateHandleOp to calculate verification_gas_limit and call_gas_limit
+        user_operation.call_gas_limit = MAX_CALL_GAS_LIMIT
+        (
+            preOpGas,
+            paid,
+            _,
+            _,
+        ) = await self.simulate_handle_op(
+            user_operation,
+            entrypoint,
+            latest_block_number,
+            latest_block_gas_limit_hex,
         )
+
+        verification_gas_limit = preOpGas - user_operation.pre_verification_gas
         verification_gas_hex = hex(verification_gas_limit)
 
-        call_gas_limit_hex = await self.estimate_call_gas_limit(
-                call_data="0x" + user_operation.call_data.hex(),
-                _from=entrypoint,
-                to=user_operation.sender_address,
+        user_op_gas = min(
+            user_operation.max_fee_per_gas, 
+            user_operation.max_priority_fee_per_gas + latest_block_basefee
             )
-        if call_gas_limit_hex == "0x":
-            call_gas_limit = 0
-        else:
-            call_gas_limit = int(call_gas_limit_hex, 16)
+        call_gas_limit = math.ceil(paid / user_op_gas)
 
         call_gas_limit = max(MIN_CALL_GAS_LIMIT, call_gas_limit)
         call_gas_limit_hex = hex(call_gas_limit)
@@ -146,7 +160,7 @@ class GasManager:
         entrypoint:str,
         bloch_number_hex: str,
         gasLimit,
-        target: str = "0x0000000000000000000000000000000000000000",
+        target: str = ZERO_ADDRESS,
         target_call_data: bytes = bytes(0),
     ):
         # simulateHandleOp(entrypoint solidity function) will always revert
@@ -164,15 +178,15 @@ class GasManager:
 
         params = [
             {
-                "from": "0x0000000000000000000000000000000000000000",
+                "from": ZERO_ADDRESS,
                 "to": entrypoint,
                 "data": call_data,
-                "gas": gasLimit,
+                # "gas": gasLimit,
                 # "gasPrice": "0x0",
             },
             bloch_number_hex,
             {
-                "0x0000000000000000000000000000000000000000": {
+                ZERO_ADDRESS: {
                     "balance": "0x21E19E0C9BAB2400000"  # to make sure that the zero address is wel funded for gas estimation
                 },
                 user_operation.sender_address: {  # to make sure that the sender address is wel funded for gas estimation
@@ -336,7 +350,7 @@ class GasManager:
         # currently most bundles contains a singler useroperations
         # so l1 fees is calculated for the full handleops transaction 
         handleops_calldata = encode_handleops_calldata(
-            user_operations_list, "0x0000000000000000000000000000000000000000"
+            user_operations_list, ZERO_ADDRESS
         )
 
         optimism_gas_oracle_contract_address = (
@@ -353,7 +367,7 @@ class GasManager:
 
         params = [
             {
-                "from": "0x0000000000000000000000000000000000000000",
+                "from": ZERO_ADDRESS,
                 "to": optimism_gas_oracle_contract_address,
                 "data": call_data,
             },
@@ -388,7 +402,7 @@ class GasManager:
         user_operations_list = [user_operation.to_list()]
 
         handleops_calldata = encode_handleops_calldata(
-            user_operations_list, "0x0000000000000000000000000000000000000000"
+            user_operations_list, ZERO_ADDRESS
         )
 
         call_data = encode_gasEstimateL1Component_calldata(
@@ -397,7 +411,7 @@ class GasManager:
 
         params = [
             {
-                "from": "0x0000000000000000000000000000000000000000",
+                "from": ZERO_ADDRESS,
                 "to": arbitrum_nodeInterface_address,
                 "data": call_data,
             },
