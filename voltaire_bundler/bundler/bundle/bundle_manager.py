@@ -215,8 +215,46 @@ class BundlerManager:
                     self.send_bundle(user_operations)
             else:
                 logging.info(
-                    "Failed to send bundle. Dropping all user operations"
+                    "Failed to send bundle. Dropping all user operations" + str(result["error"])
                 )
+            """
+            # ErrAlreadyKnown is returned if the transactions is already contained
+	        # within the pool.
+            elif "already known" in result["error"]:
+                pass
+            #ErrInvalidSender is returned if the transaction contains an invalid signature.
+            elif "invalid sender" in result["error"]:
+                pass
+            # ErrUnderpriced is returned if a transaction's gas price is below the minimum
+	        # configured for the transaction pool.
+            elif "transaction underpriced" in result["error"]:
+                pass
+            # ErrReplaceUnderpriced is returned if a transaction is attempted to be replaced
+	        # with a different one without the required price bump.
+            elif "replacement transaction underpriced" in result["error"]:
+                pass
+            # ErrAccountLimitExceeded is returned if a transaction would exceed the number
+	        # allowed by a pool for a single account.
+            elif "account limit exceeded" in result["error"]:
+                pass
+            # ErrGasLimit is returned if a transaction's requested gas limit exceeds the
+	        # maximum allowance of the current block.
+            elif "exceeds block gas limit" in result["error"]:
+                pass
+            # ErrNegativeValue is a sanity error to ensure no one is able to specify a
+	        # transaction with a negative value.
+            elif "negative value" in result["error"]:
+                pass
+            # ErrOversizedData is returned if the input data of a transaction is greater
+	        # than some meaningful limit a user might use. This is not a consensus error
+	        # making the transaction invalid, rather a DOS protection.
+            elif "oversized data" in result["error"]:
+                pass
+            # ErrFutureReplacePending is returned if a future transaction replaces a pending
+	        # one. Future transactions should only be able to replace other future transactions.
+            elif "future transaction tries to replace pending" in result["error"]:
+                pass
+            """
 
         else:
             transaction_hash = result["result"]
