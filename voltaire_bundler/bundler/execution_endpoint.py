@@ -207,12 +207,13 @@ class ExecutionEndpoint(Endpoint):
     async def execute_cron_job(self) -> None:
         if self.disable_p2p:
             if self.bundle_interval > 0:
-                try:
-                    await self.bundle_manager.send_next_bundle()
-                except (ValidationException, ExecutionException) as excp:
-                    logging.exception(excp.message)
+                while True:
+                    try:
+                        await self.bundle_manager.send_next_bundle()
+                    except (ValidationException, ExecutionException) as excp:
+                        logging.exception(excp.message)
 
-            await asyncio.sleep(self.bundle_interval)
+                    await asyncio.sleep(self.bundle_interval)
         else:
             heartbeat_counter = 0
             heartbeat_interval = 0.1 #decisecond
