@@ -199,13 +199,12 @@ class GasManager:
         result = await send_rpc_request_to_eth_client(
             self.ethereum_node_url, "eth_call", params
         )
-        if (
-            "error" not in result
-            or "execution reverted" not in result["error"]["message"]
-        ):
+
+        if ("error" not in result):
             raise ValueError("simulateHandleOp didn't revert!")
 
         elif (
+            "execution reverted" not in result["error"]["message"] or
             "data" not in result["error"] or len(result["error"]["data"]) < 10
         ):
             raise ValidationException(
