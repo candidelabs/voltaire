@@ -119,8 +119,9 @@ class GasManager:
         user_op_gas = min(
             user_operation.max_fee_per_gas, 
             user_operation.max_priority_fee_per_gas + latest_block_basefee
-            )
-        call_gas_limit = math.ceil(paid / user_op_gas)
+        )
+
+        call_gas_limit = math.ceil(paid / user_op_gas) - preOpGas
 
         call_gas_limit = max(MIN_CALL_GAS_LIMIT, call_gas_limit)
         call_gas_limit_hex = hex(call_gas_limit)
