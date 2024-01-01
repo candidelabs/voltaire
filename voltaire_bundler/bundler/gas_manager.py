@@ -3,6 +3,8 @@ from functools import reduce
 import math
 from eth_abi import encode, decode
 
+from eth_utils import keccak
+
 from voltaire_bundler.user_operation.user_operation import UserOperation
 from voltaire_bundler.user_operation.user_operation_handler import (
     UserOperationHandler,
@@ -177,6 +179,8 @@ class GasManager:
 
         call_data = function_selector + params.hex()
 
+        sender_deposit_slot_index = self.calculate_sender_deposit_slot_index(user_operation.sender_address)
+
         params = [
             {
                 "from": ZERO_ADDRESS,
@@ -187,12 +191,16 @@ class GasManager:
             },
             bloch_number_hex,
             {
+                # override the zero address balance with a high value as it is the "from"
                 ZERO_ADDRESS: {
-                    "balance": "0x21E19E0C9BAB2400000"  # to make sure that the zero address is wel funded for gas estimation
+                    "balance": "0x314dc6448d9338c15b0a00000000"
                 },
-                user_operation.sender_address: {  # to make sure that the sender address is wel funded for gas estimation
-                    "balance": "0x21E19E0C9BAB2400000"
-                },
+                # override the sender deposit slot with the highest deposit value 10^15 eth
+                (entrypoint): {
+                    "stateDiff": {
+                    (sender_deposit_slot_index): "0x000000000000000000000000000000000000314dc6448d9338c15b0a00000000" #112 bit allows for 10^15 eth
+                    },
+                }
             },
         ]
 
@@ -506,3 +514,12 @@ class GasManager:
         )
 
         return math.ceil(pre_verification_gas)
+
+    @staticmethod
+    def calculate_sender_deposit_slot_index(sender_address, slot = 0): #deposits is at slot 0
+        return "0x" + keccak(
+                encode(
+                    ["uint256", "uint256"],
+                    [int(sender_address, 16), slot]
+                )
+            ).hex()
