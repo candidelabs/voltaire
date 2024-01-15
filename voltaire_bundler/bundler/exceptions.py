@@ -28,3 +28,7 @@ class ExecutionExceptionCode(Enum):
 class ExecutionException(Exception):
     exception_code: ExecutionExceptionCode
     message: str
+
+@dataclass
+class MethodNotFoundException(Exception):
+    exception_code: ExecutionExceptionCode
