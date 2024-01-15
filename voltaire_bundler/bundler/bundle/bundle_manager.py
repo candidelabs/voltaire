@@ -89,8 +89,8 @@ class BundlerManager:
             user_operations_list, self.bundler_address
         )
 
-        gas_estimation_op = self.gas_manager.estimate_call_gas_limit(
-            call_data,
+        gas_estimation_op = self.gas_manager.estimate_call_gas_limit_using_eth_estimate(
+            bytes.fromhex(call_data[2:]),
             _from=self.bundler_address,
             to=entrypoint,
         )

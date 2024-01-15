@@ -1,6 +1,7 @@
 import asyncio
 from functools import reduce
 import math
+from typing import Any
 from eth_abi import encode, decode
 
 from eth_utils import keccak
@@ -13,6 +14,7 @@ from voltaire_bundler.user_operation.user_operation_handler import (
 from voltaire_bundler.bundler.exceptions import (
     ExecutionException,
     ExecutionExceptionCode,
+    MethodNotFoundException,
     ValidationException,
     ValidationExceptionCode,
 )
@@ -42,6 +44,7 @@ class GasManager:
     is_legacy_mode: bool
     max_fee_per_gas_percentage_multiplier: int
     max_priority_fee_per_gas_percentage_multiplier: int
+    estimate_gas_with_override_enabled: bool
 
     def __init__(
         self, 
@@ -56,13 +59,17 @@ class GasManager:
         self.is_legacy_mode = is_legacy_mode
         self.max_fee_per_gas_percentage_multiplier = max_fee_per_gas_percentage_multiplier
         self.max_priority_fee_per_gas_percentage_multiplier = max_priority_fee_per_gas_percentage_multiplier
+        self.estimate_gas_with_override_enabled = True
 
     async def estimate_callgaslimit_and_preverificationgas_and_verificationgas(
         self, 
         user_operation: UserOperation,
-        entrypoint:str, 
+        entrypoint:str,
+        state_override_set_dict:dict[str, Any]
     ) -> [str, str, str]:
+        
         latest_block_number, latest_block_basefee, latest_block_gas_limit_hex = await get_latest_block_info(self.ethereum_node_url)
+        latest_block_basefee_hex = hex(latest_block_basefee)
 
         # calculate preverification_gas
         preverification_gas = await self.get_preverification_gas(
@@ -74,74 +81,258 @@ class GasManager:
         # set verification_gas_limit to MAX_VERIFICATION_GAS_LIMIT to prevent out of gas revert
         user_operation.verification_gas_limit = MAX_VERIFICATION_GAS_LIMIT
 
-        # Call simulateHandleOp with call_gas_limit = 0 and pass callData to simulateHandleOp target param
-        # to be able to get determine if callData reverted and retrieve the revert error
-        call_data = user_operation.call_data
-        user_operation.call_gas_limit = 0
-        (
-            _,
-            _,
-            targetSuccess,
-            targetResult,
-        ) = await self.simulate_handle_op(
-            user_operation,
+        call_gas_limit_hex= await self.estimate_call_gas_limit(
             entrypoint,
-            latest_block_number,
-            latest_block_gas_limit_hex,
             user_operation.sender_address,
-            call_data,
+            user_operation.init_code,
+            user_operation.call_data,
+            latest_block_number,
+            latest_block_basefee_hex,
+            state_override_set_dict,
         )
-
-        if not targetSuccess:
-            raise ExecutionException(
-                ExecutionExceptionCode.EXECUTION_REVERTED, targetResult,
-            )
-
-        # max_fee_per_gas can't be zero as call_gas_limit depends on paid
-        if user_operation.max_fee_per_gas == 0:
-            user_operation.max_fee_per_gas = 1
-
-        # Call simulateHandleOp to calculate verification_gas_limit and call_gas_limit
-        user_operation.call_gas_limit = MAX_CALL_GAS_LIMIT
-        (
-            preOpGas,
-            paid,
-            _,
-            _,
-        ) = await self.simulate_handle_op(
+        verification_gas_hex = await self.estimate_verification_gas_limit(
             user_operation,
             entrypoint,
             latest_block_number,
-            latest_block_gas_limit_hex,
+            latest_block_basefee_hex,
+            state_override_set_dict,
         )
-
-        verification_gas_limit = preOpGas - user_operation.pre_verification_gas
-        verification_gas_hex = hex(verification_gas_limit)
-
-        user_op_gas = min(
-            user_operation.max_fee_per_gas, 
-            user_operation.max_priority_fee_per_gas + latest_block_basefee
-        )
-
-        call_gas_limit = math.ceil(paid / user_op_gas) - preOpGas
-
-        call_gas_limit = max(MIN_CALL_GAS_LIMIT, call_gas_limit)
-        call_gas_limit_hex = hex(call_gas_limit)
-
         return (
             call_gas_limit_hex,
             preverification_gas_hex,
             verification_gas_hex,
         )
+    
+    async def estimate_verification_gas_limit(
+        self,
+        user_operation: UserOperation,
+        entrypoint:str,
+        block_number_hex: str,
+        latest_block_basefee_hex: str,
+        state_override_set_dict:dict[str, Any]
+    ) -> str:
+        user_operation.call_gas_limit = MAX_CALL_GAS_LIMIT
+        (
+            preOpGas,
+            _,
+            _,
+            _,
+        ) = await self.simulate_handle_op(
+            user_operation,
+            entrypoint,
+            block_number_hex,
+            latest_block_basefee_hex,
+            state_override_set_dict,
+        )
+        
+        verification_gas_limit = preOpGas - user_operation.pre_verification_gas
 
-    async def estimate_call_gas_limit(self, call_data, _from, to):
-        if call_data == "0x":
-            return "0x"
+        verification_gas_hex = hex(verification_gas_limit)
 
-        params = [{"from": _from, "to": to, "data": call_data}]
+        return verification_gas_hex
 
+    async def estimate_call_gas_limit(
+        self,
+        entrypoint:str,
+        sender_address:str,
+        init_code:str,
+        call_data:str,
+        block_number_hex: str,
+        latest_block_basefee_hex: str,
+        state_override_set_dict:dict[str, Any],
+    ) -> str:
+        call_gas_limit_hex = "0x"
+        is_state_override_empty_or_none = not bool(state_override_set_dict) or state_override_set_dict is None
+
+        if(
+            len(init_code) == 0 and 
+            (self.estimate_gas_with_override_enabled or is_state_override_empty_or_none)
+        ):
+            try:
+                call_gas_limit_hex = await self.estimate_call_gas_limit_using_eth_estimate_modified(
+                    call_data,
+                    entrypoint,
+                    sender_address,
+                    block_number_hex,
+                    state_override_set_dict,
+                )
+            except MethodNotFoundException:
+                self.estimate_gas_with_override_enabled = False
+                call_gas_limit_hex = await self.estimate_call_gas_limit_binary_search(
+                    entrypoint,
+                    sender_address,
+                    init_code,
+                    call_data,
+                    block_number_hex,
+                    latest_block_basefee_hex,
+                    state_override_set_dict,
+                )
+        else:
+            call_gas_limit_hex = await self.estimate_call_gas_limit_binary_search(
+                entrypoint,
+                sender_address,
+                init_code,
+                call_data,
+                block_number_hex,
+                latest_block_basefee_hex,
+                state_override_set_dict,
+            )
+        return call_gas_limit_hex
+
+    async def find_max_min_gas(
+            self,
+            entrypoint:str,
+            sender_address:str,
+            init_code:str,
+            call_data:str,
+            block_number_hex: str,
+            latest_block_basefee_hex: str,
+            state_override_set_dict:dict[str, Any],
+            gas_used:int
+    ):
+        success = False
+        index = 1
+        min_gas = gas_used
+        max_gas = 2 * gas_used
+        while(max_gas < MAX_CALL_GAS_LIMIT):
+            success, gas_used, data = await self.get_call_data_gas_used(
+                entrypoint,
+                sender_address,
+                init_code,
+                call_data,
+                max_gas,
+                block_number_hex,
+                latest_block_basefee_hex,
+                state_override_set_dict
+            )
+            if success:
+                break
+            else:
+                index = index + 1
+                min_gas = max_gas
+                max_gas = math.ceil(2**index * gas_used)
+
+                if max_gas > MAX_CALL_GAS_LIMIT:
+                    max_gas = MAX_CALL_GAS_LIMIT
+
+        return max_gas, min_gas
+
+    async def estimate_call_gas_limit_using_eth_estimate_modified(
+        self,
+        call_data:str,
+        entrypoint:str,
+        sender_address:str,
+        block_number_hex: str,
+        state_override_set_dict:dict[str, Any],
+    ) -> str:
+
+        call_gas_limit = await self.estimate_call_gas_limit_using_eth_estimate(
+            call_data,
+            entrypoint,
+            sender_address,
+            block_number_hex,
+            state_override_set_dict,
+        )
+        #remove call extra calldata cost
+        packed_length = len(call_data)
+        zero_byte_count = call_data.count(b"\x00")
+        non_zero_byte_count = packed_length - zero_byte_count
+        call_data_cost = zero_byte_count * 4 + non_zero_byte_count * 16
+
+        call_gas_limit = int(call_gas_limit, 16)- (21000 + call_data_cost)
+        call_gas_limit_hex = hex(call_gas_limit)
+        return call_gas_limit_hex
+
+    async def estimate_call_gas_limit_binary_search(
+        self,
+        entrypoint:str,
+        sender_address:str,
+        init_code:str,
+        call_data:str,
+        block_number_hex: str,
+        latest_block_basefee_hex: str,
+        state_override_set_dict:dict[str, Any],
+    ) -> str:
+        success, gas_used, _ = await self.get_call_data_gas_used(
+            entrypoint,
+            sender_address,
+            init_code,
+            call_data,
+            MAX_CALL_GAS_LIMIT,
+            block_number_hex,
+            latest_block_basefee_hex,
+            state_override_set_dict
+        )
+        
+        right, left = await self.find_max_min_gas(
+            entrypoint,
+            sender_address,
+            init_code,
+            call_data,
+            block_number_hex,
+            latest_block_basefee_hex,
+            state_override_set_dict,
+            gas_used
+        )
+
+        while(left + 5000 < right):
+            mid = left + math.ceil((right-left) / 2)
+            success, gas_used, data = await self.get_call_data_gas_used(
+                entrypoint,
+                sender_address,
+                init_code,
+                call_data,
+                mid,
+                block_number_hex,
+                latest_block_basefee_hex,
+                state_override_set_dict
+            )
+            if success:
+                right = mid
+            else:
+                left = mid + 1
+
+        call_gas_limit = right
+        return hex(call_gas_limit)
+
+    async def get_call_data_gas_used(
+        self,
+        entrypoint:str,
+        sender:str,
+        init_code:str,
+        call_data:str,
+        call_gas_limit:int,
+        block_number_hex: str,
+        latest_block_basefee: str,
+        state_override_set_dict:dict[str, Any]
+    ) -> int:
+
+        function_selector = "0x2ab48e82"
+        params = encode(
+            ["address", "bytes", "bytes", "uint256"], 
+            [sender, init_code, call_data, call_gas_limit]
+        )
+        call_data = function_selector + params.hex()
+
+        default_state_overrides = {
+            # GasHelper Bytecode to be deployed at the entrypoint address
+            entrypoint: {
+                "code": "0x608060405234801561000f575f80fd5b5060043610610034575f3560e01c80632ab48e8214610038578063570e1a3614610063575b5f80fd5b61004b610046366004610261565b61008e565b60405161005a939291906102e6565b60405180910390f35b610076610071366004610343565b61017d565b6040516001600160a01b03909116815260200161005a565b5f80606086156100ff57604051632b870d1b60e11b8152309063570e1a36906100bd908b908b90600401610382565b6020604051808303815f875af11580156100d9573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906100fd91906103b0565b505b5f5a9050896001600160a01b031685888860405161011e9291906103d2565b5f604051808303815f8787f1925050503d805f8114610158576040519150601f19603f3d011682016040523d82523d5f602084013e61015d565b606091505b5090945091505a61016e90826103e1565b92505096509650969350505050565b5f8061018c6014828587610406565b6101959161042d565b60601c90505f6101a88460148188610406565b8080601f0160208091040260200160405190810160405280939291908181526020018383808284375f92018290525084519495509360209350849250905082850182875af190505f519350806101fc575f93505b50505092915050565b6001600160a01b0381168114610219575f80fd5b50565b5f8083601f84011261022c575f80fd5b50813567ffffffffffffffff811115610243575f80fd5b60208301915083602082850101111561025a575f80fd5b9250929050565b5f805f805f8060808789031215610276575f80fd5b863561028181610205565b9550602087013567ffffffffffffffff8082111561029d575f80fd5b6102a98a838b0161021c565b909750955060408901359150808211156102c1575f80fd5b506102ce89828a0161021c565b979a9699509497949695606090950135949350505050565b83151581525f60208460208401526060604084015283518060608501525f5b8181101561032157858101830151858201608001528201610305565b505f608082860101526080601f19601f83011685010192505050949350505050565b5f8060208385031215610354575f80fd5b823567ffffffffffffffff81111561036a575f80fd5b6103768582860161021c565b90969095509350505050565b60208152816020820152818360408301375f818301604090810191909152601f909201601f19160101919050565b5f602082840312156103c0575f80fd5b81516103cb81610205565b9392505050565b818382375f9101908152919050565b8181038181111561040057634e487b7160e01b5f52601160045260245ffd5b92915050565b5f8085851115610414575f80fd5b83861115610420575f80fd5b5050820193919092039150565b6bffffffffffffffffffffffff19813581811691601485101561045a5780818660140360031b1b83161692505b50509291505056fea2646970667358221220c1f32188b95def9ba16ddcd88c16ae85d53bdec7f0d7ff767d14629aa9489aca64736f6c63430008160033"
+            }
+        }
+
+        params = [
+            {
+                "from": ZERO_ADDRESS,
+                "to": entrypoint,
+                "data": call_data,
+                "gasPrice": latest_block_basefee,
+            },
+            block_number_hex,
+            default_state_overrides | state_override_set_dict,
+        ]
         result = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_estimateGas", params
+            self.ethereum_node_url, "eth_call", params
         )
         if "error" in result:
             errorMessage = result["error"]["message"]
@@ -153,16 +344,66 @@ class GasManager:
                 ExecutionExceptionCode.EXECUTION_REVERTED,
                 errorMessage + " " + bytes.fromhex(errorParams[-64:]).decode("ascii"),
             )
-        call_gas_limit = result["result"]
+        success, gas_used, data = decode(["bool", "uint256", "bytes"], bytes.fromhex(result["result"][2:]))
 
+        return success, gas_used, data
+
+    async def estimate_call_gas_limit_using_eth_estimate(
+        self,
+        call_data, 
+        _from, 
+        to,
+        block_number_hex = "latest",
+        state_override_set_dict = {},
+    ):
+        if call_data == "0x":
+            return "0x"
+        
+        params = [
+            {
+                "from": _from,
+                "to": to, 
+                "data": "0x" + call_data.hex(),
+            },
+            block_number_hex,
+            #state_override_set_dict,
+        ]
+
+        is_state_override_empty = not bool(state_override_set_dict)
+
+        if(state_override_set_dict is not None and not is_state_override_empty):
+            params.append(state_override_set_dict)
+
+        result = await send_rpc_request_to_eth_client(
+            self.ethereum_node_url, "eth_estimateGas", params
+        )
+        if "error" in result:
+            errorMessage = result["error"]["message"]
+            errorParams = ""
+            if "code" in result["error"]:
+                code = result["error"]["code"]
+                if code == "-32601" and code == "-32602":
+                    raise MethodNotFoundException(code)
+
+            if "data" in result["error"]:
+                errorData = result["error"]["data"]
+                errorParams = errorData[10:]
+            raise ExecutionException(
+                ExecutionExceptionCode.EXECUTION_REVERTED,
+                errorMessage + " " + bytes.fromhex(errorParams[-64:]).decode("ascii"),
+            )
+        
+        call_gas_limit = result["result"]
+        
         return call_gas_limit
 
     async def simulate_handle_op(
         self,
         user_operation: UserOperation,
         entrypoint:str,
-        bloch_number_hex: str,
-        gasLimit,
+        block_number_hex: str,
+        latest_block_basefee: str,
+        state_override_set_dict: dict[str, Any],
         target: str = ZERO_ADDRESS,
         target_call_data: bytes = bytes(0),
     ):
@@ -179,29 +420,40 @@ class GasManager:
 
         call_data = function_selector + params.hex()
 
-        sender_deposit_slot_index = self.calculate_sender_deposit_slot_index(user_operation.sender_address)
+        default_state_overrides = {
+            # override the zero address balance with a high value as it is the "from"
+            ZERO_ADDRESS: {
+                "balance": "0x314dc6448d9338c15b0a00000000"
+            },
+        }
+        #if there is no paymaster, override the sender's balance for gas estimation
+        if(len(user_operation.paymaster_and_data) == 0):
+            if(target == ZERO_ADDRESS):
+                # if the target is zero, simulate_handle_op is called to estimate gas limits
+                # override the sender balance with the high value of 10^15 eth
+                default_state_overrides[user_operation.sender_address] = {
+                    "balance": "0x314dc6448d9338c15b0a00000000"
+                }
+            else:
+                # if the target is not zero, simulate_handle_op is called to detect calldata reverts
+                # override the sender deposit slot on the entrypoint contract with the highest deposit value 10^15 eth
+                # to detect eth balance reverts. in this cse we don't care about verification gas accuracy
+                sender_deposit_slot_index = self.calculate_sender_deposit_slot_index(user_operation.sender_address)
+                default_state_overrides[(entrypoint)] = {
+                    "stateDiff": {
+                        (sender_deposit_slot_index): "0x000000000000000000000000000000000000314dc6448d9338c15b0a00000000" #112 bit allows for 10^15 eth
+                    },
+                }
 
         params = [
             {
                 "from": ZERO_ADDRESS,
                 "to": entrypoint,
                 "data": call_data,
-                # "gas": gasLimit,
-                # "gasPrice": "0x0",
+                "gasPrice": latest_block_basefee,
             },
-            bloch_number_hex,
-            {
-                # override the zero address balance with a high value as it is the "from"
-                ZERO_ADDRESS: {
-                    "balance": "0x314dc6448d9338c15b0a00000000"
-                },
-                # override the sender deposit slot with the highest deposit value 10^15 eth
-                (entrypoint): {
-                    "stateDiff": {
-                    (sender_deposit_slot_index): "0x000000000000000000000000000000000000314dc6448d9338c15b0a00000000" #112 bit allows for 10^15 eth
-                    },
-                }
-            },
+            block_number_hex,
+            default_state_overrides | state_override_set_dict,
         ]
 
         result = await send_rpc_request_to_eth_client(
