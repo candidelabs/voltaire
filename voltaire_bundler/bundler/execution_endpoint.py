@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import os
-from typing import List
+from typing import Any, List
 import math
 from voltaire_bundler.bundler.mempool.mempool_info import DEFAULT_MEMPOOL_INFO
 
@@ -281,11 +281,19 @@ class ExecutionEndpoint(Endpoint):
         self, req_arguments: []
     ) -> dict:
         user_operation: UserOperation = UserOperation(req_arguments[0])
-        entrypoint_address = req_arguments[1]
+        entrypoint_address:str = req_arguments[1]
+        state_override_set_dict:dict[str, Any] = req_arguments[2]
+
         if entrypoint_address not in self.entrypoints_to_local_mempools:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
                 "Unsupported entrypoint",
+            )
+
+        if state_override_set_dict is not None and not isinstance(state_override_set_dict, dict):
+            raise ValidationException(
+                ValidationExceptionCode.InvalidFields,
+                "Invalide state override set",
             )
 
         (
@@ -295,6 +303,7 @@ class ExecutionEndpoint(Endpoint):
         ) = await self.gas_manager.estimate_callgaslimit_and_preverificationgas_and_verificationgas(
             user_operation, 
             entrypoint_address,
+            state_override_set_dict,
         )
 
         estimated_gas_json = {

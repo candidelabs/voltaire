@@ -92,12 +92,14 @@ async def eth_supportedEntryPoints() -> Result:
 @REQUEST_TIME_eth_estimateUserOperationGas.time()
 @method
 async def eth_estimateUserOperationGas(
-        userOperationJson: dict[str, Any], entrypoint: str
+        userOperationJson: dict[str, Any], 
+        entrypoint: str,
+        state_override_set:dict[str, Any]={},
         ) -> Result:
     result = await _handle_rpc_request(
         endpoint_id="bundler_endpoint",
         request_type="rpc_estimateUserOperationGas",
-        request_arguments=[userOperationJson, entrypoint],
+        request_arguments=[userOperationJson, entrypoint,state_override_set],
     )
     return result
 
