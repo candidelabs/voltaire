@@ -422,6 +422,8 @@ def init_entrypoint_and_mempool_data(args:Namespace):
                 if entrypoint in DEFAULT_MEMPOOL_INFO:
                     if args.chain_id in DEFAULT_MEMPOOL_INFO[entrypoint]:
                         entrypoint_mempool_ids[index] = DEFAULT_MEMPOOL_INFO[entrypoint][args.chain_id]
+                    elif args.disable_p2p:
+                        entrypoint_mempool_ids[index] = "" #set mempool id to empty string if disable_p2p
                     else:
                         logging.error(f"Chain without default mempool ids : {entrypoint}, please specify the mempool id")
                         sys.exit(1)
