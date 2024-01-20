@@ -6,7 +6,6 @@ from eth_abi import encode, decode
 from voltaire_bundler.user_operation.user_operation import UserOperation
 from ..exceptions import ValidationException, ValidationExceptionCode
 from voltaire_bundler.user_operation.models import DepositInfo
-from .mempool_member import MempoolMember, MempoolMemberStatus
 
 MAX_MEMPOOL_USEROPS_PER_SENDER = 4
 MIN_PRICE_BUMP = 10
@@ -15,41 +14,37 @@ MIN_PRICE_BUMP = 10
 @dataclass
 class SenderMempool:
     address: str
-    user_operation_hashs_to_mempool_members: dict[str,MempoolMember]
+    user_operation_hashs_to_user_operation: dict[str,UserOperation]
 
     async def add_user_operation(
         self, new_user_operation: UserOperation, 
         new_user_operation_hash: str, 
         is_sender_staked: bool
     ):
-        new_mempool_member = MempoolMember(
-            new_user_operation, 
-            MempoolMemberStatus.RECEVIED
-        )
-        sender_operations_num = len(self.user_operation_hashs_to_mempool_members)
+        sender_operations_num = len(self.user_operation_hashs_to_user_operation)
 
         if sender_operations_num == 0:
-            self.user_operation_hashs_to_mempool_members[new_user_operation_hash] = new_mempool_member
+            self.user_operation_hashs_to_user_operation[new_user_operation_hash] = new_user_operation
         elif (
             is_sender_staked
             or sender_operations_num <= MAX_MEMPOOL_USEROPS_PER_SENDER
         ):
-            existing_mempool_member_hash_with_same_nonce = (
+            existing_user_operation_hash_with_same_nonce = (
                 self._get_user_operation_hash_with_same_nonce(
                     new_user_operation.nonce
                 )
             )
-            if existing_mempool_member_hash_with_same_nonce is not None:
+            if existing_user_operation_hash_with_same_nonce is not None:
                 self.replace_user_operation(
-                    new_mempool_member,
+                    new_user_operation,
                     new_user_operation_hash, 
-                    existing_mempool_member_hash_with_same_nonce
+                    existing_user_operation_hash_with_same_nonce
                 )
             elif (
                 is_sender_staked
                 or sender_operations_num < MAX_MEMPOOL_USEROPS_PER_SENDER
             ):
-                self.user_operation_hashs_to_mempool_members[new_user_operation_hash] = new_mempool_member
+                self.user_operation_hashs_to_user_operation[new_user_operation_hash] = new_user_operation
             else:
                 raise ValidationException(
                     ValidationExceptionCode.InvalidFields,
@@ -58,16 +53,16 @@ class SenderMempool:
 
     def replace_user_operation(
         self,
-        new_mempool_member: MempoolMember,
+        new_user_operation: UserOperation,
         new_user_operation_hash: str,
-        existing_mempool_member_hash_with_same_nonce: str,
+        existing_user_operation_hash_with_same_nonce: str,
     ) -> None:
         if self._check_if_new_operation_can_replace_existing_operation(
-            new_mempool_member.user_operation, 
-            self.user_operation_hashs_to_mempool_members[existing_mempool_member_hash_with_same_nonce].user_operation
+            new_user_operation, 
+            self.user_operation_hashs_to_user_operation[existing_user_operation_hash_with_same_nonce]
         ):
-            del self.user_operation_hashs_to_mempool_members[existing_mempool_member_hash_with_same_nonce]
-            self.user_operation_hashs_to_mempool_members[new_user_operation_hash] = new_mempool_member
+            del self.user_operation_hashs_to_user_operation[existing_user_operation_hash_with_same_nonce]
+            self.user_operation_hashs_to_user_operation[new_user_operation_hash] = new_user_operation
         else:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
@@ -107,9 +102,9 @@ class SenderMempool:
 
     def _get_user_operation_hash_with_same_nonce(
         self, nonce
-    ) -> MempoolMember | None:
-        for user_operation_hash in self.user_operation_hashs_to_mempool_members:
-            if self.user_operation_hashs_to_mempool_members[user_operation_hash].user_operation.nonce == nonce:
+    ) -> UserOperation | None:
+        for user_operation_hash in self.user_operation_hashs_to_user_operation:
+            if self.user_operation_hashs_to_user_operation[user_operation_hash].nonce == nonce:
                 return user_operation_hash
         return None
 
