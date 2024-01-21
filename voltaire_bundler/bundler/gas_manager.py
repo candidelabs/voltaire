@@ -366,7 +366,7 @@ class GasManager:
                 "data": "0x" + call_data.hex(),
             },
             block_number_hex,
-            #state_override_set_dict,
+            state_override_set_dict,
         ]
 
         is_state_override_empty = not bool(state_override_set_dict)
@@ -382,7 +382,7 @@ class GasManager:
             errorParams = ""
             if "code" in result["error"]:
                 code = result["error"]["code"]
-                if code == "-32601" and code == "-32602":
+                if code == -32601 or code == -32602:
                     raise MethodNotFoundException(code)
 
             if "data" in result["error"]:
