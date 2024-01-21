@@ -22,7 +22,7 @@ For a quick bundler instance, use one of our [public hosted endpoints](https://d
 Deploy Voltaire using the latest docker image
 
 ```
-docker run --net=host --rm -ti ghcr.io/candidelabs/voltaire/voltaire-bundler:latest --entrypoint $ENTRYPOINT --bundler_secret $BUNDLER_SECRET --rpc_url $RPC_URL --rpc_port $PORT --ethereum_node_url $ETHEREUM_NODE_URL --chain_id $CHAIN_ID --verbose
+docker run --net=host --rm -ti ghcr.io/candidelabs/voltaire/voltaire-bundler:latest --bundler_secret $BUNDLER_SECRET --rpc_url $RPC_URL --rpc_port $PORT --ethereum_node_url $ETHEREUM_NODE_URL --chain_id $CHAIN_ID --verbose --unsafe --disable_p2p
 ```
 
 # Development
