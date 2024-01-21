@@ -253,10 +253,10 @@ def initialize_argument_parser() -> ArgumentParser:
     parser.add_argument(
         "--max_fee_per_gas_percentage_multiplier",
         type=unsigned_int,
-        help="modify the bundle max_fee_per_gas value as the following formula [bundle_max_fee_per_gas = block_max_fee_per_gas * max_fee_per_gas_percentage_multiplier /100], defaults to 100",
+        help="modify the bundle max_fee_per_gas value as the following formula [bundle_max_fee_per_gas = block_max_fee_per_gas * max_fee_per_gas_percentage_multiplier /100], defaults to 110",
         nargs="?",
-        const=100,
-        default=100,
+        const=110,
+        default=110,
     )
 
     parser.add_argument(
@@ -264,8 +264,8 @@ def initialize_argument_parser() -> ArgumentParser:
         type=unsigned_int,
         help="modify the bundle max_priority_fee_per_gas value as the following formula [bundle_max_priority_fee_per_gas = block_max_priority_fee_per_gas * max_priority_fee_per_gas_percentage_multiplier /100], defaults to 100",
         nargs="?",
-        const=100,
-        default=100,
+        const=110,
+        default=110,
     )
 
     parser.add_argument(
