@@ -209,6 +209,7 @@ class ExecutionEndpoint(Endpoint):
             if self.bundle_interval > 0:
                 while True:
                     try:
+                        await self.bundle_manager.update_send_queue()
                         await self.bundle_manager.send_next_bundle()
                     except (ValidationException, ExecutionException) as excp:
                         logging.exception(excp.message)
@@ -229,6 +230,7 @@ class ExecutionEndpoint(Endpoint):
                     await self.update_p2p_gossip()
                     await self.update_p2p_peer_ids_to_user_ops_hashes_queue()
                     if self.bundle_interval > 0 and (heartbeat_counter % deciseconds_per_bundle == 0):
+                        await self.bundle_manager.update_send_queue()
                         await self.bundle_manager.send_next_bundle()
                 except (ValidationException, ExecutionException) as excp:
                     logging.exception(excp.message)
@@ -384,6 +386,7 @@ class ExecutionEndpoint(Endpoint):
     async def _event_debug_bundler_sendBundleNow(
         self, req_arguments: []
     ) -> None:
+        await self.bundle_manager.update_send_queue()
         await self.bundle_manager.send_next_bundle()
 
         return "ok"
