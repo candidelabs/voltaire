@@ -472,7 +472,7 @@ async def get_init_data(args:Namespace)-> InitData:
 
     ethereum_node_chain_id_hex = await check_valid_ethereum_rpc_and_get_chain_id(args.ethereum_node_url)
 
-    if hex(args.chain_id) != ethereum_node_chain_id_hex:
+    if hex(args.chain_id) != ethereum_node_chain_id_hex.lower():
         logging.error(f'Invalide chain id {args.chain_id} with Eth node {args.ethereum_node_url}')
         sys.exit(1)
 
