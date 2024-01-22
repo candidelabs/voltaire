@@ -253,7 +253,7 @@ class GasManager:
         latest_block_basefee_hex: str,
         state_override_set_dict:dict[str, Any],
     ) -> str:
-        success, gas_used, _ = await self.get_call_data_gas_used(
+        success, gas_used, data = await self.get_call_data_gas_used(
             entrypoint,
             sender_address,
             init_code,
@@ -263,6 +263,12 @@ class GasManager:
             latest_block_basefee_hex,
             state_override_set_dict
         )
+        #if not successful with MAX_CALL_GAS_LIMIT, then return EXECUTION_REVERTED
+        if not success:
+            raise ExecutionException(
+                ExecutionExceptionCode.EXECUTION_REVERTED,
+                data,
+            )
         
         right, left = await self.find_max_min_gas(
             entrypoint,
