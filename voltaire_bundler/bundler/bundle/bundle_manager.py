@@ -182,7 +182,6 @@ class BundlerManager:
             rpc_call,
             [sign_store_txn.rawTransaction.hex()],
         )
-        print(result)
         if "error" in result:
             if "data" in result[
                 "error"
