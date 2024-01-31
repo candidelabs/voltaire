@@ -74,11 +74,10 @@ class BundlerManager:
             numbder_of_user_operations = len(send_queue)
 
             if numbder_of_user_operations > 0:
-                await self.send_bundle(user_operations, entrypoint)
                 logging.info(
-                    f"Sending bundle with {len(user_operations)} user operations"
+                    f"Sending bundle with {numbder_of_user_operations} user operations"
                 )
-            self.entrypoints_addresses_to_send_queue[entrypoint] = []
+                self.entrypoints_addresses_to_send_queue[entrypoint] = await self.send_bundle(user_operations, entrypoint)
 
     async def update_send_queue(self) -> None:
         for entrypoint, mempool_manager in self.entrypoints_addresses_to_local_mempools.items():
@@ -227,10 +226,13 @@ class BundlerManager:
                 if len(user_operations) > 0:
                     self.send_bundle(user_operations)
             elif "message" in result["error"]:
+                logging.info(
+                    "Failed to send bundle." + str(result["error"])
+                )
                 # ErrAlreadyKnown is returned if the transactions is already contained
                 # within the pool.
                 if "already known" in result["error"]["message"]:
-                    pass #todo
+                    return []
                 #ErrInvalidSender is returned if the transaction contains an invalid signature.
                 elif "invalid sender" in result["error"]["message"]:
                     pass #todo
@@ -241,21 +243,23 @@ class BundlerManager:
                     #if the gas_price_percentage_multiplier reached 200, drop the user_operations
                     if self.gas_price_percentage_multiplier <= 200:
                         self.gas_price_percentage_multiplier += 10
-                        self.entrypoints_addresses_to_send_queue[entrypoint] += user_operations
+                        return user_operation
                     else:
                         logging.info(
                             "Failed to send bundle. Dropping all user operations" + str(result["error"])
                         )
+                        return []
                 # ErrReplaceUnderpriced is returned if a transaction is attempted to be replaced
                 # with a different one without the required price bump.
                 elif "replacement transaction underpriced" in result["error"]["message"]:
                     if self.gas_price_percentage_multiplier <= 200:
                         self.gas_price_percentage_multiplier += 10
-                        self.entrypoints_addresses_to_send_queue[entrypoint] += user_operations
+                        return user_operation
                     else:
                         logging.info(
                             "Failed to send bundle. Dropping all user operations" + str(result["error"])
                         )
+                        return []
                 # ErrAccountLimitExceeded is returned if a transaction would exceed the number
                 # allowed by a pool for a single account.
                 elif "account limit exceeded" in result["error"]["message"]:
@@ -285,6 +289,7 @@ class BundlerManager:
                 logging.info(
                     "Failed to send bundle. Dropping all user operations" + str(result["error"])
                 )
+                return []
 
         else:
             transaction_hash = result["result"]
@@ -300,6 +305,7 @@ class BundlerManager:
                     user_operation.factory_address_lowercase,
                     user_operation.paymaster_address_lowercase,
                 )
+            return []
 
     def update_included_status(
         self, sender_address: str, factory_address: str, paymaster_address: str
