@@ -45,10 +45,12 @@ class UserOperationHandler:
 
     async def get_user_operation_by_hash(
         self, user_operation_hash: str, entrypoint:str
-    ) -> tuple:
+    ) -> tuple | None:
         event_log_info = await self.get_user_operation_event_log_info(
             user_operation_hash, entrypoint
         )
+        if event_log_info == None:
+            return None
         log_object = event_log_info[0]
         transaction_hash = log_object.transactionHash
 
@@ -61,14 +63,37 @@ class UserOperationHandler:
         return user_operation, block_number, block_hash, transaction_hash
 
     async def get_user_operation_by_hash_rpc(
-        self, user_operation_hash: str, entrypoint:str
-    ) -> dict:
+        self, user_operation_hash: str, entrypoint:str, senders_mempools,
+    ) -> dict | None:
+        user_operation_by_hash = await self.get_user_operation_by_hash(user_operation_hash, entrypoint)
+        if user_operation_by_hash == None:
+            user_operation_hashs_to_user_operation = reduce(
+                lambda a, b: a|b,
+                (
+                    map(
+                        lambda sender_mempool: sender_mempool.user_operation_hashs_to_user_operation,
+                        senders_mempools
+                    )
+                ),
+                []
+            )
+            if user_operation_hash in user_operation_hashs_to_user_operation:
+                user_operation_by_hash_json = {
+                    "userOperation": user_operation_hashs_to_user_operation[user_operation_hash],
+                    "entryPoint": entrypoint,
+                    "blockNumber": None,
+                    "blockHash": None,
+                    "transactionHash": None,
+                }
+                return user_operation_by_hash_json
+            else:
+                return None
         (
             handle_op_input,
             block_number,
             block_hash,
             transaction_hash,
-        ) = await self.get_user_operation_by_hash(user_operation_hash, entrypoint)
+        ) = user_operation_by_hash
 
         user_operation = UserOperationHandler.decode_handle_op_input(
             handle_op_input
@@ -98,7 +123,12 @@ class UserOperationHandler:
 
     async def get_user_operation_receipt(
         self, user_operation_hash: str, entrypoint:str
-    ) -> tuple[ReceiptInfo, UserOperationReceiptInfo]:
+    ) -> tuple[ReceiptInfo, UserOperationReceiptInfo] | None:
+        event_log_info = await self.get_user_operation_event_log_info(
+            user_operation_hash, entrypoint
+        )
+        if event_log_info == None:
+            return None
         (
             log_object,
             userOpHash,
@@ -109,8 +139,7 @@ class UserOperationHandler:
             actualGasCost,
             actualGasUsed,
             logs,
-        ) = await self.get_user_operation_event_log_info(
-            user_operation_hash, entrypoint)
+        ) = event_log_info
 
         transaction = await self.get_transaction_receipt(
             log_object.transactionHash
@@ -151,11 +180,15 @@ class UserOperationHandler:
 
     async def get_user_operation_receipt_rpc(
         self, user_operation_hash: str, entrypoint:str
-    ) -> dict:
+    ) -> dict | None:
+        user_operation_receipt = await self.get_user_operation_receipt(user_operation_hash, entrypoint)
+
+        if user_operation_receipt == None:
+            return None
         (
             receipt_info,
             user_operation_receipt_info,
-        ) = await self.get_user_operation_receipt(user_operation_hash, entrypoint)
+        ) = user_operation_receipt
 
         receipt_info_json = {
             "blockHash": receipt_info.blockHash,
@@ -190,14 +223,11 @@ class UserOperationHandler:
 
     async def get_user_operation_event_log_info(
         self, user_operation_hash: str, entrypoint:str
-    ) -> tuple:
+    ) -> tuple | None:
         res = await self.get_user_operation_logs(user_operation_hash, entrypoint)
 
         if "result" not in res or len(res["result"]) < 1:
-            raise ValidationException(
-                ValidationExceptionCode.INVALID_USEROPHASH,
-                "can't find user operation with hash : " + user_operation_hash,
-            )
+            return None
         logs = res["result"]
         log = res["result"][0]
 

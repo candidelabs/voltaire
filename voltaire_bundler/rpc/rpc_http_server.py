@@ -59,7 +59,7 @@ async def _handle_rpc_request(
 
     logging.debug(f"{request_type} RPC served")
 
-    if "is_error" in resp and resp["is_error"]:
+    if resp != None and "is_error" in resp and resp["is_error"]:
         error: ValidationException | ExecutionException = resp["payload"]
         error_code = error.exception_code.value
         error_message = str(error.message)

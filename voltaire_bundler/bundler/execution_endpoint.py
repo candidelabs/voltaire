@@ -356,9 +356,12 @@ class ExecutionEndpoint(Endpoint):
                 "Missing/invalid userOpHash",
             )
         for entrypoint in self.entrypoints_to_local_mempools:
+            entrypoint_senders_mempools = self.entrypoints_to_local_mempools[entrypoint].senders_to_senders_mempools.values()
             user_operation_by_hash_json = (
                 await self.user_operation_handler.get_user_operation_by_hash_rpc(
-                    user_operation_hash, entrypoint
+                    user_operation_hash, 
+                    entrypoint,
+                    entrypoint_senders_mempools,
                 )
             )
         return user_operation_by_hash_json
