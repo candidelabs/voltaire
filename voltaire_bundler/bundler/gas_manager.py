@@ -443,12 +443,19 @@ class GasManager:
                 # if the target is not zero, simulate_handle_op is called to detect calldata reverts
                 # override the sender deposit slot on the entrypoint contract with the highest deposit value 10^15 eth
                 # to detect eth balance reverts. in this cse we don't care about verification gas accuracy
-                sender_deposit_slot_index = self.calculate_sender_deposit_slot_index(user_operation.sender_address)
+                sender_deposit_slot_index = self.calculate_deposit_slot_index(user_operation.sender_address)
                 default_state_overrides[(entrypoint)] = {
                     "stateDiff": {
                         (sender_deposit_slot_index): "0x000000000000000000000000000000000000314dc6448d9338c15b0a00000000" #112 bit allows for 10^15 eth
                     },
                 }
+        else:
+            paymaster_deposit_slot_index = self.calculate_deposit_slot_index("0x" + user_operation.paymaster_and_data[:20].hex())
+            default_state_overrides[(entrypoint)] = {
+                "stateDiff": {
+                    (paymaster_deposit_slot_index): "0x000000000000000000000000000000000000314dc6448d9338c15b0a00000000" #112 bit allows for 10^15 eth
+                },
+            }
 
         params = [
             {
@@ -458,8 +465,10 @@ class GasManager:
                 "gasPrice": latest_block_basefee,
             },
             block_number_hex,
-            default_state_overrides | state_override_set_dict,
+            # default_state_overrides | state_override_set_dict,
         ]
+        if(bool(default_state_overrides | state_override_set_dict)):
+            params.append(default_state_overrides | state_override_set_dict)
 
         result = await send_rpc_request_to_eth_client(
             self.ethereum_node_url, "eth_call", params
@@ -773,10 +782,10 @@ class GasManager:
         return math.ceil(pre_verification_gas)
 
     @staticmethod
-    def calculate_sender_deposit_slot_index(sender_address, slot = 0): #deposits is at slot 0
+    def calculate_deposit_slot_index(address, slot = 0): #deposits is at slot 0
         return "0x" + keccak(
                 encode(
                     ["uint256", "uint256"],
-                    [int(sender_address, 16), slot]
+                    [int(address, 16), slot]
                 )
             ).hex()
