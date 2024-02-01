@@ -243,7 +243,7 @@ class BundlerManager:
                     #if the gas_price_percentage_multiplier reached 200, drop the user_operations
                     if self.gas_price_percentage_multiplier <= 200:
                         self.gas_price_percentage_multiplier += 10
-                        return user_operation
+                        return user_operations
                     else:
                         logging.info(
                             "Failed to send bundle. Dropping all user operations" + str(result["error"])
@@ -254,7 +254,7 @@ class BundlerManager:
                 elif "replacement transaction underpriced" in result["error"]["message"]:
                     if self.gas_price_percentage_multiplier <= 200:
                         self.gas_price_percentage_multiplier += 10
-                        return user_operation
+                        return user_operations
                     else:
                         logging.info(
                             "Failed to send bundle. Dropping all user operations" + str(result["error"])
