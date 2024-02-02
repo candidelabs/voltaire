@@ -637,26 +637,7 @@ class ValidationManager:
 
     @staticmethod
     def parse_entity_slots(entities: list[str], keccak_list_unique: list[str]):
-        # print(keccak_list)
         entity_slots = dict()
-        # for slot_keccak in keccak_list:
-        #     for address in entities:
-        #         address_lowercase = address[2:].lower()
-        #         address_padded = (
-        #             "0x000000000000000000000000" + address_lowercase
-        #         )
-        #         address_lowercase = "0x" + address_lowercase
-        #         if address not in entity_slots:
-        #             entity_slots[address] = []
-
-        #         current_entity_slot = entity_slots[address]
-        #         if address_padded in slot_keccak:
-        #             keccak_hash = keccak(bytes.fromhex(slot_keccak[2:]))
-        #             slot = keccak_hash.hex()
-        #             if slot not in current_entity_slot:
-        #                 current_entity_slot.append(slot)
-        # for slot_keccak in keccak_list:
-        #     map()
         entities_addresses_padded_pair_list = map(
             lambda address: (address, "0x000000000000000000000000" + address[2:]), 
             entities
@@ -665,7 +646,6 @@ class ValidationManager:
         [update_current_entity_slot(slot_keccak, address, address_padded, entity_slots) 
          for address, address_padded in entities_addresses_padded_pair_list
          for slot_keccak in keccak_list_unique]
-        # print(entity_slots)
         return entity_slots
 
     @staticmethod
