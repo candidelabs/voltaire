@@ -19,12 +19,12 @@ async def test_eth_supportedEntryPoints(bundlerInstance):
     """
     Test eth_chainId
     """
-    chain_id = await send_rpc_request_to_eth_client(
+    supportedEntryPoints = await send_rpc_request_to_eth_client(
         "http://127.0.0.1:3000/rpc",
         "eth_supportedEntryPoints",
         [],
     )
-    assert chain_id['result'] == ["0x4AC842ABD525EEC0094951f892A8013Af1c78764"]
+    assert supportedEntryPoints['result'] == ["0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"]
 
 @pytest.mark.asyncio
 async def test_eth_estimateUserOperationGas(bundlerInstance):
@@ -47,6 +47,6 @@ async def test_eth_estimateUserOperationGas(bundlerInstance):
             "paymasterAndData":"0x",
             "signature":"0x22a1f0d5746116becb77cb47a047cd61a71c4e69defa945680e7b1e468d3297f34d4a343bec3289de1337d264beea73c6c78c35eb15beb1f250b5122ec5957691c"
         },
-    "0x4AC842ABD525EEC0094951f892A8013Af1c78764"],
+    "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"],
     )
     assert result["error"]["message"] == 'AA20 account not deployed'
