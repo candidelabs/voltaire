@@ -87,7 +87,7 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
             user_operation: UserOperation,
             ) -> (str, str, List[MempoolId]):
         
-        latest_block_number, latest_block_basefee, _ = await get_latest_block_info(self.ethereum_node_url)
+        latest_block_number, latest_block_basefee, _, latest_block_timestamp = await get_latest_block_info(self.ethereum_node_url)
         self._verify_entities_reputation(
             user_operation.sender_address,
             user_operation.factory_address_lowercase,
@@ -109,9 +109,8 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
             user_operation, 
             self.entrypoint, 
             "latest", 
-            # latest_block_basefee,
             gas_price_hex,
-            # "latest"
+            latest_block_timestamp,
         )
         new_sender = None
         new_sender_address = user_operation.sender_address
@@ -158,7 +157,7 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
             peer_id: str, 
             verified_at_block_hash: str
             ) -> None:
-        latest_block_number, latest_block_basefee, _ = await get_latest_block_info(self.ethereum_node_url)
+        latest_block_number, latest_block_basefee, _, latest_block_timestamp = await get_latest_block_info(self.ethereum_node_url)
 
         try:
             self._verify_entities_reputation(
@@ -183,8 +182,8 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
                 user_operation, 
                 self.entrypoint, 
                 latest_block_number, 
-                # latest_block_basefee,
-                gas_price_hex
+                gas_price_hex,
+                latest_block_timestamp
             )
 
             if self.is_hash_seen(user_operation_hash):
@@ -201,8 +200,8 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
                     user_operation, 
                     self.entrypoint, 
                     verified_at_block_hash, 
-                    # latest_block_basefee,
-                    gas_price_hex
+                    gas_price_hex,
+                    latest_block_timestamp
                 )
             except ValidationException as excp:
                 self.reputation_manager.ban_entity(peer_id)

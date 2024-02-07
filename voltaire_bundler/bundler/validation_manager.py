@@ -105,8 +105,8 @@ class ValidationManager:
         user_operation: UserOperation,
         entrypoint:str,
         block_number:str,
-        # latest_block_basefee: int,
-        gas_price_hex:str
+        gas_price_hex:str,
+        latest_block_timestamp: int
     ) -> bool:
         # await self.gas_manager.verify_preverification_gas_and_verification_gas_limit(
         #     user_operation, entrypoint, latest_block_number, latest_block_basefee
@@ -147,7 +147,7 @@ class ValidationManager:
             is_sender_staked,
         ) = ValidationManager.decode_validation_result(validation_result)
 
-        self.verify_sig_and_timestamp(user_operation, return_info)
+        self.verify_sig_and_timestamp(return_info, latest_block_timestamp)
 
         if self.is_unsafe:
             user_operation_hash = UserOperationHandler.get_user_operation_hash(
@@ -522,12 +522,12 @@ class ValidationManager:
         return result["error"]["data"]
 
     def verify_sig_and_timestamp(
-        self, user_operation: UserOperation, return_info: ReturnInfo
+        self, 
+        return_info: ReturnInfo,
+        latest_block_timestamp: int
     ) -> None:
-        pre_operation_gas = return_info.preOpGas
         sigFailed = return_info.sigFailed
-        validAfter = return_info.validAfter
-        deadline = return_info.validUntil
+        validUntil = return_info.validUntil
 
         if sigFailed:
             raise ValidationException(
@@ -535,13 +535,7 @@ class ValidationManager:
                 "Invalid UserOp signature or paymaster signature",
             )
 
-        if validAfter is None or validAfter > (time.time() / 1000) - 30:
-            raise ValidationException(
-                ValidationExceptionCode.InvalidFields,
-                "Transaction is not valid yet",
-            )
-
-        if deadline is None or deadline + 30 < (time.time() / 1000):
+        if validUntil is None or validUntil < latest_block_timestamp + 30:
             raise ValidationException(
                 ValidationExceptionCode.ExpiresShortly,
                 "Transaction will expire shortly or has expired.",

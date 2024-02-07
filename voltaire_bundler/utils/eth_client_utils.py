@@ -24,22 +24,23 @@ async def send_rpc_request_to_eth_client(
             resp = await response.read()
             return json.loads(resp)
 
-async def get_latest_block_info(ethereum_node_url) -> dict:
-        raw_res = await send_rpc_request_to_eth_client(
-            ethereum_node_url, "eth_getBlockByNumber", ["latest", False]
-        )
-        latest_block = raw_res["result"]
+async def get_latest_block_info(ethereum_node_url) -> [str,int,str,int]:
+    raw_res = await send_rpc_request_to_eth_client(
+        ethereum_node_url, "eth_getBlockByNumber", ["latest", False]
+    )
+    latest_block = raw_res["result"]
 
-        latest_block_number = latest_block["number"]
+    latest_block_number = latest_block["number"]
 
-        if "baseFeePerGas" in latest_block:
-            latest_block_basefee = int(latest_block["baseFeePerGas"], 16)
-        else: #for block requested before the EIP-1559 upgrade
-            latest_block_basefee = 0 
-        
-        latest_block_gas_limit_hex = latest_block["gasLimit"]
+    if "baseFeePerGas" in latest_block:
+        latest_block_basefee = int(latest_block["baseFeePerGas"], 16)
+    else: #for block requested before the EIP-1559 upgrade
+        latest_block_basefee = 0 
+    
+    latest_block_gas_limit_hex = latest_block["gasLimit"]
+    latest_block_timestamp = int(latest_block["timestamp"], 16)
 
-        return latest_block_number, latest_block_basefee, latest_block_gas_limit_hex
+    return latest_block_number, latest_block_basefee, latest_block_gas_limit_hex, latest_block_timestamp
 
 @dataclass
 class DebugEntityData:
