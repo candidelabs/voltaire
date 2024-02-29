@@ -4,6 +4,7 @@ import math
 from typing import List
 
 from eth_account import Account
+from voltaire_bundler.bundler.exceptions import ExecutionException
 
 from voltaire_bundler.utils.eth_client_utils import (
     send_rpc_request_to_eth_client,
@@ -92,7 +93,7 @@ class BundlerManager:
             self, 
             user_operations: list[UserOperation],
             entrypoint:str
-            ) -> None:
+            ) -> list[UserOperation]:
         user_operations_list = []
         for user_operation in user_operations:
             user_operations_list.append(user_operation.to_list())
@@ -129,7 +130,10 @@ class BundlerManager:
             )
             tasks_arr.append(block_max_priority_fee_per_gas_op)
 
-        tasks = await asyncio.gather(*tasks_arr)
+        try:
+            tasks = await asyncio.gather(*tasks_arr)
+        except ExecutionException:
+            return []
 
         gas_estimation = tasks[0]
         block_max_fee_per_gas = tasks[1]["result"]
@@ -283,8 +287,9 @@ class BundlerManager:
                     pass #todo
                 else:
                     logging.info(
-                    "Failed to send bundle. Dropping all user operations" + str(result["error"])
-                )
+                        "Failed to send bundle. Dropping all user operations" + str(result["error"])
+                    )
+                    return []
             else:
                 logging.info(
                     "Failed to send bundle. Dropping all user operations" + str(result["error"])
