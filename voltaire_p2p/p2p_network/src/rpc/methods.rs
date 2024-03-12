@@ -6,7 +6,7 @@ use regex::bytes::Regex;
 use serde::{Serialize, Deserialize};
 use ssz_derive::{Decode, Encode};
 use ssz_types::{
-    typenum::{U1024, U256, U46,U4096, U66, U34, U32, U33},
+    typenum::{U1024, U256, U46,U4096, U66, U34, U32, U64},
     VariableList, FixedVector,
 };
 use types::eth_spec::EthSpec;
@@ -64,11 +64,10 @@ impl ToString for ErrorType {
 
 /// The STATUS request/response handshake message.
 #[derive(Encode, Decode, Clone, Debug, PartialEq)]
-#[ssz(struct_behaviour = "transparent")]
 pub struct StatusMessage {
-    /// The fork version of the chain we are broadcasting.
-    // pub supported_mempools: VariableList<VariableList<u8, MaxOpsPerRequest>,MaxOpsPerRequest>
-    pub supported_mempools: VariableList<FixedVector<u8, U46>, MaxOpsPerRequest>
+    pub chain_id: u64,
+    pub block_hash: FixedVector<u8, U32>,
+    pub block_number: u64
 }
 
 /// The PING request/response message.
@@ -407,11 +406,12 @@ impl std::fmt::Display for RPCResponseErrorCode {
 
 impl std::fmt::Display for StatusMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let supported_mempools_string:Vec<String> = self.supported_mempools.to_vec().iter().map(
-            |mempool| std::str::from_utf8(&mempool.to_vec()).unwrap().to_string()
-        ).collect();
-        let supported_mempools_string_joined = supported_mempools_string.join(",");
-        write!(f, "Status Message: Supported mempools: {}", supported_mempools_string_joined)
+        write!(
+            f, "Status Message: chain_id: {} {} {}", 
+            self.chain_id, 
+            std::str::from_utf8(&self.block_hash.to_vec()).unwrap(), 
+            self.block_number
+        )
     }
 }
 
@@ -485,8 +485,9 @@ impl slog::KV for StatusMessage {
         serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
         use slog::Value;
-        serializer.emit_arguments("supported_mempools", &format_args!("{:?}", self.supported_mempools))?;
-        // Value::serialize(&self.supported_mempools, record, "supported_mempools", serializer)?;
+        serializer.emit_arguments("chain_id", &format_args!("{:?}", self.chain_id))?;
+        serializer.emit_arguments("block_hash", &format_args!("{:?}", self.block_hash))?;
+        serializer.emit_arguments("block_number", &format_args!("{:?}", self.block_number))?;
         slog::Result::Ok(())
     }
 }

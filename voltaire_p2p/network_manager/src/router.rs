@@ -17,6 +17,8 @@ use p2p_voltaire_network::{
 
 use slog::{debug, o, trace};
 use slog::{error, warn};
+use ssz_types::typenum::U32;
+use ssz_types::FixedVector;
 use types::eth_spec::EthSpec;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -177,12 +179,10 @@ impl Router {
     ) {
         match response {
             Response::Status(status_message) => {
-                let supported_mempools_string:Vec<String> = status_message.supported_mempools.to_vec().iter().map(
-                    |mempool| std::str::from_utf8(&mempool.to_vec()).unwrap().to_string()
-                ).collect();
-                let supported_mempools_string_joined = supported_mempools_string.join(",");
                 debug!(self.log, "Received Status Response"; "peer_id" => %peer_id, 
-                    "supported mempools" => supported_mempools_string_joined
+                    "chain_id" => status_message.chain_id,
+                    "block_hash" => std::str::from_utf8(&status_message.block_hash.to_vec()).unwrap(),
+                    "block_number" => status_message.block_number,
                 );
             }
             Response::PooledUserOpHashes(pooled_user_op_hashes) => { 
@@ -252,16 +252,16 @@ impl Router {
     }
 
     fn send_status(&mut self, peer_id: PeerId) {
-        let topics = self.network_globals.gossipsub_subscriptions.read().clone().iter().map(|topic| topic.clone().mempool_id).collect::<Vec<_>>();
-        let status_message = status_message(topics/*&self.chain*/);
+        // let topics = self.network_globals.local_metadata.read().clone();
+        let status_message = status_message(0, FixedVector::<u8, U32>::default(),0);
 
-        let supported_mempools_string:Vec<String> = status_message.supported_mempools.to_vec().iter().map(
-            |mempool| std::str::from_utf8(&mempool.to_vec()).unwrap().to_string()
-        ).collect();
-        let supported_mempools_string_joined = supported_mempools_string.join(",");
-        debug!(self.log, "Sending Status Request"; "peer" => %peer_id, 
-            "supported mempools" => &supported_mempools_string_joined
-        );
+        // let supported_mempools_string:Vec<String> = status_message.supported_mempools.to_vec().iter().map(
+        //     |mempool| std::str::from_utf8(&mempool.to_vec()).unwrap().to_string()
+        // ).collect();
+        // let supported_mempools_string_joined = supported_mempools_string.join(",");
+        // debug!(self.log, "Sending Status Request"; "peer" => %peer_id, 
+        //     "supported mempools" => &supported_mempools_string_joined
+        // );
 
         self.network
             .send_processor_request(peer_id, Request::Status(status_message));
@@ -283,11 +283,11 @@ impl Router {
         status: StatusMessage,
     ) {
         debug!(self.log, "Received Status Request"; "peer_id" => %peer_id, &status);
-        let topics = self.network_globals.gossipsub_subscriptions.read().clone().iter().map(|topic| topic.clone().mempool_id).collect::<Vec<_>>();
+        // let topics = self.network_globals.gossipsub_subscriptions.read().clone().iter().map(|topic| topic.clone().mempool_id).collect::<Vec<_>>();
         // Say status back.
         self.network.send_response(
             peer_id,
-            Response::Status(status_message(topics/*&self.chain*/)),
+            Response::Status(status_message(0, FixedVector::<u8, U32>::default(),0)),
             request_id,
         );
     }

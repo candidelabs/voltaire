@@ -22,6 +22,7 @@ use crate::EnrExt;
 // use crate::Eth2Enr;
 use crate::{error, metrics, Enr, NetworkGlobals, PubsubMessage, TopicHash};
 use api_types::{PeerRequestId, Request, RequestId, Response};
+use futures::io::empty;
 use futures::stream::StreamExt;
 use gossipsub_scoring_parameters::{voltaire_gossip_thresholds, PeerScoreSettings};
 use libp2p::bandwidth::BandwidthSinks;
@@ -34,7 +35,7 @@ use libp2p::swarm::{Swarm, SwarmBuilder, SwarmEvent};
 use libp2p::PeerId;
 use slog::{crit, debug, info, o, trace, warn};
 use ssz_types::typenum::U46;
-use ssz_types::{VariableList, FixedVector};
+use ssz_types::{typenum::U32, FixedVector};
 use types::chain_spec::ChainSpec;
 use types::eth_spec::EthSpec;
 use std::path::PathBuf;
@@ -1395,7 +1396,13 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
             }
             Ok(RPCReceived::EndOfStream(id, termination)) => {
               
-                let response = Response::Status(StatusMessage { supported_mempools: VariableList::empty()});//TODO
+                let response = Response::Status(
+                    StatusMessage { 
+                        chain_id: 0,
+                        block_hash: FixedVector::<u8, U32>::default(),
+                        block_number: 0,
+                    }
+                );//TODO
                 self.build_response(id, peer_id, response)
             }
         }
