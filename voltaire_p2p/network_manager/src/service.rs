@@ -178,7 +178,7 @@ pub struct NetworkService<T: EthSpec> {
     /// voltaire.
     router_send: mpsc::UnboundedSender<RouterMessage>,
     /// A collection of global variables, accessible outside of the network service.
-    network_globals: Arc<NetworkGlobals<T>>,
+    network_globals: Arc<NetworkGlobals>,
     /// Stores potentially created UPnP mappings to be removed on shutdown. (TCP port and UDP
     /// ports).
     upnp_mappings: EstablishedUPnPMappings,
@@ -195,7 +195,7 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
     pub async fn start(
         config: &NetworkConfig,
         executor: task_executor::TaskExecutor,
-    ) -> error::Result<Arc<NetworkGlobals<T>>> {
+    ) -> error::Result<Arc<NetworkGlobals>> {
         let network_log = executor.log().clone();
         // build the channels for external comms
         let (network_senders, network_recievers) = NetworkSenders::new();
@@ -255,7 +255,7 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
 
         // create the network service and spawn the task
         let network_log = network_log.new(o!("service" => "network"));
-        let network_service = NetworkService {
+        let network_service:NetworkService<T> = NetworkService {
             libp2p,
             network_recv,
             router_send,
@@ -350,12 +350,8 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
 
                     _ = self.metrics_update.tick(), if self.metrics_enabled => {
                         // update various network metrics
-                        metrics::update_gossip_metrics::<T>(
-                            self.libp2p.gossipsub(),
-                            &self.network_globals,
-                            );
-                        // // update sync metrics
-                        // metrics::update_sync_metrics(&self.network_globals);
+                        metrics::update_gossip_metrics::<T>();
+                      
                     }
 
                     // handle a message sent to the network

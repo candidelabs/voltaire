@@ -57,12 +57,12 @@ impl<T: EthSpec> SSZSnappyInboundCodec<T> {
 }
 
 // Encoder for inbound streams: Encodes RPC Responses sent to peers.
-impl<TSpec: EthSpec> Encoder<RPCCodedResponse<TSpec>> for SSZSnappyInboundCodec<TSpec> {
+impl<TSpec: EthSpec> Encoder<RPCCodedResponse> for SSZSnappyInboundCodec<TSpec> {
     type Error = RPCError;
 
     fn encode(
         &mut self,
-        item: RPCCodedResponse<TSpec>,
+        item: RPCCodedResponse,
         dst: &mut BytesMut,
     ) -> Result<(), Self::Error> {
         let bytes = match &item {
@@ -246,7 +246,7 @@ impl<TSpec: EthSpec> Encoder<OutboundRequest<TSpec>> for SSZSnappyOutboundCodec<
 // We prefer to decode blocks and attestations with extra knowledge about the chain to perform
 // faster verification checks before decoding entire blocks/attestations.
 impl<TSpec: EthSpec> Decoder for SSZSnappyOutboundCodec<TSpec> {
-    type Item = RPCResponse<TSpec>;
+    type Item = RPCResponse;
     type Error = RPCError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -433,11 +433,11 @@ fn handle_rpc_request<T: EthSpec>(
 /// Decodes a `RPCResponse` from the byte stream.
 /// `decoded_buffer` should be an ssz-encoded bytestream with
 /// length = length-prefix received in the beginning of the stream.
-fn handle_rpc_response<T: EthSpec>(
+fn handle_rpc_response(
     versioned_protocol: SupportedProtocol,
     decoded_buffer: &[u8],
     // fork_name: Option<ForkName>,
-) -> Result<Option<RPCResponse<T>>, RPCError> {
+) -> Result<Option<RPCResponse>, RPCError> {
     match versioned_protocol {
         SupportedProtocol::StatusV1 => Ok(Some(RPCResponse::Status(
             StatusMessage::from_ssz_bytes(decoded_buffer)?,

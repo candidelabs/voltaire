@@ -61,8 +61,8 @@ pub enum Response {
     PooledUserOpsByHash(Option<PooledUserOpsByHash>),
 }
 
-impl<TSpec: EthSpec> std::convert::From<Response> for RPCCodedResponse<TSpec> {
-    fn from(resp: Response) -> RPCCodedResponse<TSpec> {
+impl std::convert::From<Response> for RPCCodedResponse {
+    fn from(resp: Response) -> RPCCodedResponse {
         match resp {
             Response::PooledUserOpHashes(r) => match r {
                 Some(b) => RPCCodedResponse::Success(RPCResponse::PooledUserOpHashes(b)),

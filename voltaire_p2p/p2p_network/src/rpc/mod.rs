@@ -63,7 +63,7 @@ pub enum RPCSend<Id, TSpec: EthSpec> {
     /// The `SubstreamId` must correspond to the RPC-given ID of the original request received from the
     /// peer. The second parameter is a single chunk of a response. These go over *inbound*
     /// connections.
-    Response(SubstreamId, RPCCodedResponse<TSpec>),
+    Response(SubstreamId, RPCCodedResponse),
     /// Voltaire has requested to terminate the connection with a goodbye message.
     Shutdown(Id, GoodbyeReason),
 }
@@ -81,7 +81,7 @@ pub enum RPCReceived<Id, T: EthSpec> {
     /// The `Id` corresponds to the application given ID of the original request sent to the
     /// peer. The second parameter is a single chunk of a response. These go over *outbound*
     /// connections.
-    Response(Id, RPCResponse<T>),
+    Response(Id, RPCResponse),
     /// Marks a request as completed
     EndOfStream(Id, ResponseTermination),
 }
@@ -167,7 +167,7 @@ impl<Id: ReqId, TSpec: EthSpec> RPC<Id, TSpec> {
         &mut self,
         peer_id: PeerId,
         id: (ConnectionId, SubstreamId),
-        event: RPCCodedResponse<TSpec>,
+        event: RPCCodedResponse,
     ) {
         self.events.push(ToSwarm::NotifyHandler {
             peer_id,

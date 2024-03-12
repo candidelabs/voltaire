@@ -150,7 +150,7 @@ struct InboundInfo<TSpec: EthSpec> {
     /// State of the substream.
     state: InboundState<TSpec>,
     /// Responses queued for sending.
-    pending_items: VecDeque<RPCCodedResponse<TSpec>>,
+    pending_items: VecDeque<RPCCodedResponse>,
     /// Protocol of the original request we received from the peer.
     protocol: Protocol,
     /// Responses that the peer is still expecting from us.
@@ -276,7 +276,7 @@ where
     /// Sends a response to a peer's request.
     // NOTE: If the substream has closed due to inactivity, or the substream is in the
     // wrong state a response will fail silently.
-    fn send_response(&mut self, inbound_id: SubstreamId, response: RPCCodedResponse<TSpec>) {
+    fn send_response(&mut self, inbound_id: SubstreamId, response: RPCCodedResponse) {
         // check if the stream matching the response still exists
         let inbound_info = if let Some(info) = self.inbound_substreams.get_mut(&inbound_id) {
             info
@@ -1039,7 +1039,7 @@ impl slog::Value for SubstreamId {
 /// error that occurred with sending a message is reported also.
 async fn send_message_to_inbound_substream<TSpec: EthSpec>(
     mut substream: InboundSubstream<TSpec>,
-    message: RPCCodedResponse<TSpec>,
+    message: RPCCodedResponse,
     last_chunk: bool,
 ) -> Result<(InboundSubstream<TSpec>, bool), RPCError> {
     if matches!(message, RPCCodedResponse::StreamTermination(_)) {

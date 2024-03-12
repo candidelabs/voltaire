@@ -13,7 +13,6 @@ use crate::{metrics, ClearDialError};
 use discv5::{enr::NodeId, Discv5, Discv5Event};
 pub use enr::{
     build_enr, create_enr_builder_from_config, load_enr_from_disk, use_or_load_enr, CombinedKey,
-    Eth2Enr,
 };
 pub use enr_ext::{peer_id_to_node_id, CombinedKeyExt, EnrExt};
 pub use libp2p::identity::{Keypair, PublicKey};
@@ -48,7 +47,7 @@ use tokio::sync::mpsc;
 use types::{EnrForkId};
 
 mod subnet_predicate;
-pub use subnet_predicate::subnet_predicate;
+// pub use subnet_predicate::subnet_predicate;
 
 use self::enr::MEMPOOL_SUBNETS_KEY;
 
@@ -115,8 +114,8 @@ impl std::fmt::Debug for SubnetQuery {
 
 #[derive(Debug, Clone, PartialEq)]
 enum QueryType {
-    /// We are searching for subnet peers.
-    Subnet(Vec<SubnetQuery>),
+    // /// We are searching for subnet peers.
+    // Subnet(Vec<SubnetQuery>),
     /// We are searching for more peers without ENR or time constraints.
     FindPeers,
 }
@@ -147,7 +146,7 @@ enum EventStream {
 
 /// The main discovery service. This can be disabled via CLI arguements. When disabled the
 /// underlying processes are not started, but this struct still maintains our current ENR.
-pub struct Discovery<TSpec: EthSpec> {
+pub struct Discovery {
     /// A collection of seen live ENRs for quick lookup and to map peer-id's to ENRs.
     cached_enrs: LruCache<PeerId, Enr>,
 
@@ -161,7 +160,7 @@ pub struct Discovery<TSpec: EthSpec> {
     discv5: Discv5,
 
     /// A collection of network constants that can be read from other threads.
-    network_globals: Arc<NetworkGlobals<TSpec>>,
+    network_globals: Arc<NetworkGlobals>,
 
     /// Indicates if we are actively searching for peers. We only allow a single FindPeers query at
     /// a time, regardless of the query concurrency.
@@ -191,12 +190,12 @@ pub struct Discovery<TSpec: EthSpec> {
     log: slog::Logger,
 }
 
-impl<TSpec: EthSpec> Discovery<TSpec> {
+impl Discovery {
     /// NOTE: Creating discovery requires running within a tokio execution environment.
     pub async fn new(
         local_key: Keypair,
         config: &NetworkConfig,
-        network_globals: Arc<NetworkGlobals<TSpec>>,
+        network_globals: Arc<NetworkGlobals>,
         log: &slog::Logger,
     ) -> error::Result<Self> {
         let log = log.clone();
@@ -362,7 +361,7 @@ impl<TSpec: EthSpec> Discovery<TSpec> {
         trace!(
             self.log,
             "Starting discovery query for subnets";
-            "subnets" => ?subnets_to_discover.iter().map(|s| s.subnet).collect::<Vec<_>>()
+            "subnets" => ?subnets_to_discover.iter().map(|s| s.subnet.clone()).collect::<Vec<_>>()
         );
         for subnet in subnets_to_discover {
             self.add_subnet_query(subnet.subnet, subnet.min_ttl, 0);
@@ -436,87 +435,87 @@ impl<TSpec: EthSpec> Discovery<TSpec> {
         Ok(())
     }
 
-    /// Adds/Removes a subnet from the ENR attnets/syncnets Bitfield
-    pub fn update_enr_bitfield(&mut self, subnet: Subnet, value: bool) -> Result<(), String> {
-        let local_enr = self.discv5.local_enr();
+    // /// Adds/Removes a subnet from the ENR attnets/syncnets Bitfield
+    // pub fn update_enr_bitfield(&mut self, subnet: Subnet, value: bool) -> Result<(), String> {
+    //     let local_enr = self.discv5.local_enr();
 
-        match subnet {
-            Subnet::Mempool(id) => {
-                let id = *id as usize;
-                let mut current_bitfield = local_enr.mempools_bitfield::<TSpec>()?;
-                if id >= current_bitfield.len() {
-                    return Err(format!(
-                        "Subnet id: {} is outside the ENR bitfield length: {}",
-                        id,
-                        current_bitfield.len()
-                    ));
-                }
+    //     match subnet {
+    //         Subnet::Mempool(id) => {
+    //             let id = *id as usize;
+    //             let mut current_bitfield = local_enr.mempools_bitfield()?;
+    //             if id >= current_bitfield.len() {
+    //                 return Err(format!(
+    //                     "Subnet id: {} is outside the ENR bitfield length: {}",
+    //                     id,
+    //                     current_bitfield.len()
+    //                 ));
+    //             }
 
-                // The bitfield is already set to required value
-                if current_bitfield
-                    .get(id)
-                    .map_err(|_| String::from("Subnet ID out of bounds"))?
-                    == value
-                {
-                    return Ok(());
-                }
+    //             // The bitfield is already set to required value
+    //             if current_bitfield
+    //                 .get(id)
+    //                 .map_err(|_| String::from("Subnet ID out of bounds"))?
+    //                 == value
+    //             {
+    //                 return Ok(());
+    //             }
 
-                // set the subnet bitfield in the ENR
-                current_bitfield.set(id, value).map_err(|_| {
-                    String::from("Subnet ID out of bounds, could not set subnet ID")
-                })?;
+    //             // set the subnet bitfield in the ENR
+    //             current_bitfield.set(id, value).map_err(|_| {
+    //                 String::from("Subnet ID out of bounds, could not set subnet ID")
+    //             })?;
 
-                // insert the bitfield into the ENR record
-                self.discv5
-                    .enr_insert(
-                        MEMPOOL_SUBNETS_KEY,
-                        &current_bitfield.as_ssz_bytes(),
-                    )
-                    .map_err(|e| format!("{:?}", e))?;
-            }
-            // Subnet::SyncCommittee(id) => {
-            //     let id = *id as usize;
-            //     let mut current_bitfield = local_enr.sync_committee_bitfield::<TSpec>()?;
+    //             // insert the bitfield into the ENR record
+    //             self.discv5
+    //                 .enr_insert(
+    //                     MEMPOOL_SUBNETS_KEY,
+    //                     &current_bitfield.as_ssz_bytes(),
+    //                 )
+    //                 .map_err(|e| format!("{:?}", e))?;
+    //         }
+    //         // Subnet::SyncCommittee(id) => {
+    //         //     let id = *id as usize;
+    //         //     let mut current_bitfield = local_enr.sync_committee_bitfield::<TSpec>()?;
 
-            //     if id >= current_bitfield.len() {
-            //         return Err(format!(
-            //             "Subnet id: {} is outside the ENR bitfield length: {}",
-            //             id,
-            //             current_bitfield.len()
-            //         ));
-            //     }
+    //         //     if id >= current_bitfield.len() {
+    //         //         return Err(format!(
+    //         //             "Subnet id: {} is outside the ENR bitfield length: {}",
+    //         //             id,
+    //         //             current_bitfield.len()
+    //         //         ));
+    //         //     }
 
-            //     // The bitfield is already set to required value
-            //     if current_bitfield
-            //         .get(id)
-            //         .map_err(|_| String::from("Subnet ID out of bounds"))?
-            //         == value
-            //     {
-            //         return Ok(());
-            //     }
+    //         //     // The bitfield is already set to required value
+    //         //     if current_bitfield
+    //         //         .get(id)
+    //         //         .map_err(|_| String::from("Subnet ID out of bounds"))?
+    //         //         == value
+    //         //     {
+    //         //         return Ok(());
+    //         //     }
 
-            //     // set the subnet bitfield in the ENR
-            //     current_bitfield.set(id, value).map_err(|_| {
-            //         String::from("Subnet ID out of bounds, could not set subnet ID")
-            //     })?;
+    //         //     // set the subnet bitfield in the ENR
+    //         //     current_bitfield.set(id, value).map_err(|_| {
+    //         //         String::from("Subnet ID out of bounds, could not set subnet ID")
+    //         //     })?;
 
-            //     // insert the bitfield into the ENR record
-            //     self.discv5
-            //         .enr_insert(
-            //             SYNC_COMMITTEE_BITFIELD_ENR_KEY,
-            //             &current_bitfield.as_ssz_bytes(),
-            //         )
-            //         .map_err(|e| format!("{:?}", e))?;
-            // }
-        }
+    //         //     // insert the bitfield into the ENR record
+    //         //     self.discv5
+    //         //         .enr_insert(
+    //         //             SYNC_COMMITTEE_BITFIELD_ENR_KEY,
+    //         //             &current_bitfield.as_ssz_bytes(),
+    //         //         )
+    //         //         .map_err(|e| format!("{:?}", e))?;
+    //         // }
+    //     }
 
-        // replace the global version
-        *self.network_globals.local_enr.write() = self.discv5.local_enr();
+    //     // replace the global version
+    //     *self.network_globals.local_enr.write() = self.discv5.local_enr();
 
-        // persist modified enr to disk
-        enr::save_enr_to_disk(Path::new(&self.enr_dir), &self.local_enr(), &self.log);
-        Ok(())
-    }
+    //     // persist modified enr to disk
+    //     enr::save_enr_to_disk(Path::new(&self.enr_dir), &self.local_enr(), &self.log);
+    //     Ok(())
+    // }
 
     // /// Updates the `eth2` field of our local ENR.
     // pub fn update_eth2_enr(&mut self, enr_fork_id: EnrForkId) {
@@ -688,7 +687,7 @@ impl<TSpec: EthSpec> Discovery<TSpec> {
                     .network_globals
                     .peers
                     .read()
-                    .good_peers_on_subnet(subnet_query.subnet)
+                    .good_peers_on_subnet(/*subnet_query.subnet*/)
                     .count();
 
                 if peers_on_subnet >= TARGET_SUBNET_PEERS {
@@ -707,27 +706,27 @@ impl<TSpec: EthSpec> Discovery<TSpec> {
                     "peers_to_find" => target_peers,
                 );
 
-                filtered_subnets.push(subnet_query.subnet);
+                filtered_subnets.push(subnet_query.subnet.clone());
                 true
             })
             .collect();
 
-        // Only start a discovery query if we have a subnet to look for.
-        if !filtered_subnet_queries.is_empty() {
-            // build the subnet predicate as a combination of the eth2_fork_predicate and the subnet predicate
-            let subnet_predicate = subnet_predicate::<TSpec>(filtered_subnets, &self.log);
+        // // Only start a discovery query if we have a subnet to look for.
+        // if !filtered_subnet_queries.is_empty() {
+        //     // build the subnet predicate as a combination of the eth2_fork_predicate and the subnet predicate
+        //     let subnet_predicate = subnet_predicate(filtered_subnets, &self.log);
 
-            debug!(
-                self.log,
-                "Starting grouped subnet query";
-                "subnets" => ?filtered_subnet_queries,
-            );
-            self.start_query(
-                QueryType::Subnet(filtered_subnet_queries),
-                TARGET_PEERS_FOR_GROUPED_QUERY,
-                subnet_predicate,
-            );
-        }
+        //     debug!(
+        //         self.log,
+        //         "Starting grouped subnet query";
+        //         "subnets" => ?filtered_subnet_queries,
+        //     );
+        //     self.start_query(
+        //         QueryType::Subnet(filtered_subnet_queries),
+        //         TARGET_PEERS_FOR_GROUPED_QUERY,
+        //         subnet_predicate,
+        //     );
+        // }
     }
 
     /// Search for a specified number of new peers using the underlying discovery mechanism.
@@ -804,97 +803,97 @@ impl<TSpec: EthSpec> Discovery<TSpec> {
                     }
                 }
             }
-            QueryType::Subnet(queries) => {
-                let subnets_searched_for: Vec<Subnet> =
-                    queries.iter().map(|query| query.subnet).collect();
-                match query.result {
-                    Ok(r) if r.is_empty() => {
-                        debug!(self.log, "Grouped subnet discovery query yielded no results."; "subnets_searched_for" => ?subnets_searched_for);
-                        queries.iter().for_each(|query| {
-                            self.add_subnet_query(query.subnet, query.min_ttl, query.retries + 1);
-                        })
-                    }
-                    Ok(r) => {
-                        debug!(self.log, "Peer grouped subnet discovery request completed"; "peers_found" => r.len(), "subnets_searched_for" => ?subnets_searched_for);
+            // QueryType::Subnet(queries) => {
+            //     let subnets_searched_for: Vec<Subnet> =
+            //         queries.iter().map(|query| query.subnet).collect();
+            //     match query.result {
+            //         Ok(r) if r.is_empty() => {
+            //             debug!(self.log, "Grouped subnet discovery query yielded no results."; "subnets_searched_for" => ?subnets_searched_for);
+            //             queries.iter().for_each(|query| {
+            //                 self.add_subnet_query(query.subnet, query.min_ttl, query.retries + 1);
+            //             })
+            //         }
+            //         Ok(r) => {
+            //             debug!(self.log, "Peer grouped subnet discovery request completed"; "peers_found" => r.len(), "subnets_searched_for" => ?subnets_searched_for);
 
-                        let mut mapped_results = HashMap::new();
+            //             let mut mapped_results = HashMap::new();
 
-                        // cache the found ENR's
-                        for enr in r.iter().cloned() {
-                            self.cached_enrs.put(enr.peer_id(), enr);
-                        }
+            //             // cache the found ENR's
+            //             for enr in r.iter().cloned() {
+            //                 self.cached_enrs.put(enr.peer_id(), enr);
+            //             }
 
-                        // Map each subnet query's min_ttl to the set of ENR's returned for that subnet.
-                        queries.iter().for_each(|query| {
-                            let query_str = match query.subnet {
-                                Subnet::Mempool(_) => "attestation",
-                                // Subnet::SyncCommittee(_) => "sync_committee",
-                            };
+            //             // Map each subnet query's min_ttl to the set of ENR's returned for that subnet.
+            //             queries.iter().for_each(|query| {
+            //                 let query_str = match query.subnet {
+            //                     Subnet::Mempool(_) => "attestation",
+            //                     // Subnet::SyncCommittee(_) => "sync_committee",
+            //                 };
 
-                            if let Some(v) = metrics::get_int_counter(
-                                &metrics::TOTAL_SUBNET_QUERIES,
-                                &[query_str],
-                            ) {
-                                v.inc();
-                            }
-                            // A subnet query has completed. Add back to the queue, incrementing retries.
-                            self.add_subnet_query(query.subnet, query.min_ttl, query.retries + 1);
+            //                 if let Some(v) = metrics::get_int_counter(
+            //                     &metrics::TOTAL_SUBNET_QUERIES,
+            //                     &[query_str],
+            //                 ) {
+            //                     v.inc();
+            //                 }
+            //                 // A subnet query has completed. Add back to the queue, incrementing retries.
+            //                 self.add_subnet_query(query.subnet, query.min_ttl, query.retries + 1);
 
-                            // Check the specific subnet against the enr
-                            let subnet_predicate =
-                                subnet_predicate::<TSpec>(vec![query.subnet], &self.log);
+            //                 // Check the specific subnet against the enr
+            //                 let subnet_predicate =
+            //                     subnet_predicate(vec![query.subnet], &self.log);
 
-                            r.clone()
-                                .into_iter()
-                                .filter(|enr| subnet_predicate(enr))
-                                .for_each(|enr| {
-                                    if let Some(v) = metrics::get_int_counter(
-                                        &metrics::SUBNET_PEERS_FOUND,
-                                        &[query_str],
-                                    ) {
-                                        v.inc();
-                                    }
-                                    let other_min_ttl = mapped_results.get_mut(&enr);
+            //                 r.clone()
+            //                     .into_iter()
+            //                     .filter(|enr| subnet_predicate(enr))
+            //                     .for_each(|enr| {
+            //                         if let Some(v) = metrics::get_int_counter(
+            //                             &metrics::SUBNET_PEERS_FOUND,
+            //                             &[query_str],
+            //                         ) {
+            //                             v.inc();
+            //                         }
+            //                         let other_min_ttl = mapped_results.get_mut(&enr);
 
-                                    // map peer IDs to the min_ttl furthest in the future
-                                    match (query.min_ttl, other_min_ttl) {
-                                        // update the mapping if the min_ttl is greater
-                                        (
-                                            Some(min_ttl_instant),
-                                            Some(Some(other_min_ttl_instant)),
-                                        ) => {
-                                            if min_ttl_instant
-                                                .saturating_duration_since(*other_min_ttl_instant)
-                                                > DURATION_DIFFERENCE
-                                            {
-                                                *other_min_ttl_instant = min_ttl_instant;
-                                            }
-                                        }
-                                        // update the mapping if we have a specified min_ttl
-                                        (Some(min_ttl), Some(None)) => {
-                                            mapped_results.insert(enr, Some(min_ttl));
-                                        }
-                                        // first seen min_ttl for this enr
-                                        (min_ttl, None) => {
-                                            mapped_results.insert(enr, min_ttl);
-                                        }
-                                        (None, Some(Some(_))) => {} // Don't replace the existing specific min_ttl
-                                        (None, Some(None)) => {} // No-op because this is a duplicate
-                                    }
-                                });
-                        });
+            //                         // map peer IDs to the min_ttl furthest in the future
+            //                         match (query.min_ttl, other_min_ttl) {
+            //                             // update the mapping if the min_ttl is greater
+            //                             (
+            //                                 Some(min_ttl_instant),
+            //                                 Some(Some(other_min_ttl_instant)),
+            //                             ) => {
+            //                                 if min_ttl_instant
+            //                                     .saturating_duration_since(*other_min_ttl_instant)
+            //                                     > DURATION_DIFFERENCE
+            //                                 {
+            //                                     *other_min_ttl_instant = min_ttl_instant;
+            //                                 }
+            //                             }
+            //                             // update the mapping if we have a specified min_ttl
+            //                             (Some(min_ttl), Some(None)) => {
+            //                                 mapped_results.insert(enr, Some(min_ttl));
+            //                             }
+            //                             // first seen min_ttl for this enr
+            //                             (min_ttl, None) => {
+            //                                 mapped_results.insert(enr, min_ttl);
+            //                             }
+            //                             (None, Some(Some(_))) => {} // Don't replace the existing specific min_ttl
+            //                             (None, Some(None)) => {} // No-op because this is a duplicate
+            //                         }
+            //                     });
+            //             });
 
-                        if mapped_results.is_empty() {
-                            return None;
-                        } else {
-                            return Some(mapped_results);
-                        }
-                    }
-                    Err(e) => {
-                        warn!(self.log,"Grouped subnet discovery query failed"; "subnets_searched_for" => ?subnets_searched_for, "error" => %e);
-                    }
-                }
-            }
+            //             if mapped_results.is_empty() {
+            //                 return None;
+            //             } else {
+            //                 return Some(mapped_results);
+            //             }
+            //         }
+            //         Err(e) => {
+            //             warn!(self.log,"Grouped subnet discovery query failed"; "subnets_searched_for" => ?subnets_searched_for, "error" => %e);
+            //         }
+            //     }
+            // }
         }
         None
     }
@@ -913,7 +912,7 @@ impl<TSpec: EthSpec> Discovery<TSpec> {
 
 /* NetworkBehaviour Implementation */
 
-impl<TSpec: EthSpec> NetworkBehaviour for Discovery<TSpec> {
+impl NetworkBehaviour for Discovery {
     // Discovery is not a real NetworkBehaviour...
     type ConnectionHandler = ConnectionHandler;
     type ToSwarm = DiscoveredPeers;
@@ -1058,7 +1057,7 @@ impl<TSpec: EthSpec> NetworkBehaviour for Discovery<TSpec> {
     }
 }
 
-impl<TSpec: EthSpec> Discovery<TSpec> {
+impl Discovery {
     fn on_dial_failure(&mut self, peer_id: Option<PeerId>, error: &DialError) {
         if let Some(peer_id) = peer_id {
             match error {

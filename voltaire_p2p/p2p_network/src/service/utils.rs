@@ -15,7 +15,7 @@ use prometheus_client::registry::Registry;
 use slog::{debug, warn};
 use ssz::Decode;
 use ssz::Encode;
-use ssz_types::Bitfield;
+use ssz_types::{Bitfield, VariableList};
 use types::EnrForkId;
 use types::chain_spec::ChainSpec;
 use types::eth_spec::EthSpec;
@@ -174,16 +174,16 @@ pub fn strip_peer_id(addr: &mut Multiaddr) {
 }
 
 /// Load metadata from persisted file. Return default metadata if loading fails.
-pub fn load_or_build_metadata<E: EthSpec>(
+pub fn load_or_build_metadata(
     network_dir: &std::path::Path,
     log: &slog::Logger,
-) -> MetaData<E> {
+) -> MetaData {
     // We load a V2 metadata version by default (regardless of current fork)
     // since a V2 metadata can be converted to V1. The RPC encoder is responsible
     // for sending the correct metadata version based on the negotiated protocol version.
     let mut meta_data = MetaData {
         seq_number: 0,
-        mempool_nets: Bitfield::new(),
+        supported_mempools: VariableList::empty(),
     };
     // Read metadata from persisted file if available
     let metadata_path = network_dir.join(METADATA_FILENAME);
@@ -192,11 +192,11 @@ pub fn load_or_build_metadata<E: EthSpec>(
         if metadata_file.read_to_end(&mut metadata_ssz).is_ok() {
             // Attempt to read a MetaDataV2 version from the persisted file,
             // if that fails, read MetaDataV1
-            match MetaData::<E>::from_ssz_bytes(&metadata_ssz) {
+            match MetaData::from_ssz_bytes(&metadata_ssz) {
                 Ok(persisted_metadata) => {
                     meta_data.seq_number = persisted_metadata.seq_number;
                     // Increment seq number if persisted attnet is not default
-                    if persisted_metadata.mempool_nets != meta_data.mempool_nets
+                    if persisted_metadata.supported_mempools != meta_data.supported_mempools
                         // || persisted_metadata.syncnets != meta_data.syncnets
                     {
                         meta_data.seq_number += 1;
@@ -204,7 +204,7 @@ pub fn load_or_build_metadata<E: EthSpec>(
                     debug!(log, "Loaded metadata from disk");
                 }
                 Err(_) => {
-                    match MetaData::<E>::from_ssz_bytes(&metadata_ssz) {
+                    match MetaData::from_ssz_bytes(&metadata_ssz) {
                         Ok(persisted_metadata) => {
                             // let persisted_metadata = MetaData::V1(persisted_metadata);
                             // Increment seq number as the persisted metadata version is updated
@@ -262,9 +262,9 @@ pub(crate) fn create_whitelist_filter(
 }
 
 /// Persist metadata to disk
-pub(crate) fn save_metadata_to_disk<E: EthSpec>(
+pub(crate) fn save_metadata_to_disk(
     dir: &Path,
-    metadata: MetaData<E>,
+    metadata: MetaData,
     log: &slog::Logger,
 ) {
     let _ = std::fs::create_dir_all(dir);

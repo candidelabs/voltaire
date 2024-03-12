@@ -293,10 +293,7 @@ pub fn update_bandwidth_metrics(bandwidth: Arc<BandwidthSinks>) {
     );
 }
 
-pub fn update_gossip_metrics <T: EthSpec>(
-    gossipsub: &Gossipsub,
-    network_globals: &Arc<NetworkGlobals<T>>,
-) {
+pub fn update_gossip_metrics <T: EthSpec>() {
     // Mesh peers per client
     // Reset the gauges
     for client_kind in ClientKind::iter() {
@@ -311,71 +308,4 @@ pub fn update_gossip_metrics <T: EthSpec>(
             0_i64,
         );
     }
-
-    // for topic_hash in gossipsub.topics() {
-    //     if let Ok(topic) = GossipTopic::decode(topic_hash.as_str()) {
-    //         match topic.kind() {
-    //             GossipKind::Attestation(_subnet_id) => {}
-    //             GossipKind::BeaconBlock => {
-    //                 for peer_id in gossipsub.mesh_peers(topic_hash) {
-    //                     let client = network_globals
-    //                         .peers
-    //                         .read()
-    //                         .peer_info(peer_id)
-    //                         .map(|peer_info| peer_info.client().kind.into())
-    //                         .unwrap_or_else(|| "Unknown");
-    //                     if let Some(v) =
-    //                         get_int_gauge(&BEACON_BLOCK_MESH_PEERS_PER_CLIENT, &[client])
-    //                     {
-    //                         v.inc()
-    //                     };
-    //                 }
-    //             }
-    //             GossipKind::BeaconAggregateAndProof => {
-    //                 for peer_id in gossipsub.mesh_peers(topic_hash) {
-    //                     let client = network_globals
-    //                         .peers
-    //                         .read()
-    //                         .peer_info(peer_id)
-    //                         .map(|peer_info| peer_info.client().kind.into())
-    //                         .unwrap_or_else(|| "Unknown");
-    //                     if let Some(v) = get_int_gauge(
-    //                         &BEACON_AGGREGATE_AND_PROOF_MESH_PEERS_PER_CLIENT,
-    //                         &[client],
-    //                     ) {
-    //                         v.inc()
-    //                     };
-    //                 }
-    //             }
-    //             GossipKind::SyncCommitteeMessage(_subnet_id) => {}
-    //             _kind => {}
-    //         }
-    //     }
-    // }
 }
-
-// pub fn update_sync_metrics (network_globals: &Arc<NetworkGlobals>) {
-//     // reset the counts
-//     if PEERS_PER_SYNC_TYPE
-//         .as_ref()
-//         .map(|metric| metric.reset())
-//         .is_err()
-//     {
-//         return;
-//     };
-
-//     // count per sync status, the number of connected peers
-//     let mut peers_per_sync_type = FnvHashMap::default();
-//     for sync_type in network_globals
-//         .peers
-//         .read()
-//         .connected_peers()
-//         .map(|(_peer_id, info)| info.sync_status().as_str())
-//     {
-//         *peers_per_sync_type.entry(sync_type).or_default() += 1;
-//     }
-
-//     for (sync_type, peer_count) in peers_per_sync_type {
-//         set_gauge_entry(&PEERS_PER_SYNC_TYPE, &[sync_type], peer_count);
-//     }
-// }

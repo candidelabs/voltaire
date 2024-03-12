@@ -1,5 +1,6 @@
 use libp2p::gossipsub::{IdentTopic as Topic, TopicHash};
 use serde_derive::{Deserialize, Serialize};
+use ssz_types::FixedVector;
 use strum::AsRefStr;
 use types::{subnet_id::SubnetId};
 
@@ -103,7 +104,7 @@ impl GossipTopic {
 
     pub fn subnet_id(&self) -> Option<Subnet> {
         match self.kind() {
-            GossipKind::UserOperationsWithEntryPoint => Some(Subnet::Mempool(SubnetId::new(1))),
+            GossipKind::UserOperationsWithEntryPoint => Some(Subnet::Mempool(self.mempool_id.clone())),
             _ => None,
         }
     }

@@ -105,15 +105,15 @@ impl<T: EthSpec> MetadataRequest<T> {
 //     )
 // )]
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Serialize)]
-#[serde(bound = "T: EthSpec")]
-pub struct MetaData<T: EthSpec> {
+pub struct MetaData {
     /// A sequential counter indicating when data gets modified.
     pub seq_number: u64,
+
     /// The persistent mempool subnet bitfield.
-    pub mempool_nets: MempoolNetsBitfield<T>,
+    pub supported_mempools: VariableList<FixedVector<u8, U32>, MaxOpsPerRequest>,
 }
 
-impl<T: EthSpec> MetaData<T> {
+impl MetaData {
     /// Returns a MetaData response from self.
     pub fn metadata(&self) -> Self {
        self.clone()
@@ -265,7 +265,7 @@ impl PooledUserOpsByHashRequest {
 // Collection of enums and structs used by the Codecs to encode/decode RPC messages
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum RPCResponse<T: EthSpec> {
+pub enum RPCResponse {
     /// A HELLO message.
     Status(StatusMessage),
 
@@ -279,7 +279,7 @@ pub enum RPCResponse<T: EthSpec> {
     Pong(Ping),
 
     /// A response to a META_DATA request.
-    MetaData(MetaData<T>),
+    MetaData(MetaData),
 }
 
 /// Indicates which response is being terminated by a stream termination response.
@@ -295,9 +295,9 @@ pub enum ResponseTermination {
 /// The structured response containing a result/code indicating success or failure
 /// and the contents of the response
 #[derive(Debug, Clone)]
-pub enum RPCCodedResponse<T: EthSpec> {
+pub enum RPCCodedResponse {
     /// The response is a successful.
-    Success(RPCResponse<T>),
+    Success(RPCResponse),
 
     Error(RPCResponseErrorCode, ErrorType),
 
@@ -317,7 +317,7 @@ pub enum RPCResponseErrorCode {
     Unknown,
 }
 
-impl<T: EthSpec> RPCCodedResponse<T> {
+impl RPCCodedResponse {
     /// Used to encode the response in the codec.
     pub fn as_u8(&self) -> Option<u8> {
         match self {
@@ -379,7 +379,7 @@ impl RPCResponseErrorCode {
 }
 
 use super::Protocol;
-impl<T: EthSpec> RPCResponse<T> {
+impl RPCResponse {
     pub fn protocol(&self) -> Protocol {
         match self {
             RPCResponse::Status(_) => Protocol::Status,
@@ -415,7 +415,7 @@ impl std::fmt::Display for StatusMessage {
     }
 }
 
-impl<T: EthSpec> std::fmt::Display for RPCResponse<T> {
+impl std::fmt::Display for RPCResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RPCResponse::Status(status) => write!(f, "{}", status),
@@ -431,7 +431,7 @@ impl<T: EthSpec> std::fmt::Display for RPCResponse<T> {
     }
 }
 
-impl<T: EthSpec> std::fmt::Display for RPCCodedResponse<T> {
+impl std::fmt::Display for RPCCodedResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RPCCodedResponse::Success(res) => write!(f, "{}", res),

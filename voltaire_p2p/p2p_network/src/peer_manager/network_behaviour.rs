@@ -20,7 +20,7 @@ use crate::{metrics, ClearDialError};
 use super::peerdb::BanResult;
 use super::{ConnectingType, PeerManager, PeerManagerEvent, ReportSource};
 
-impl<TSpec: EthSpec> NetworkBehaviour for PeerManager<TSpec> {
+impl NetworkBehaviour for PeerManager {
     type ConnectionHandler = ConnectionHandler;
     type ToSwarm = PeerManagerEvent;
 
@@ -192,7 +192,7 @@ impl<TSpec: EthSpec> NetworkBehaviour for PeerManager<TSpec> {
     }
 }
 
-impl<TSpec: EthSpec> PeerManager<TSpec> {
+impl PeerManager {
     fn on_connection_established(
         &mut self,
         peer_id: PeerId,

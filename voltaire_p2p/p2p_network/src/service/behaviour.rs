@@ -30,11 +30,11 @@ where
     /// The Eth2 RPC specified in the wire-0 protocol.
     pub eth2_rpc: RPC<RequestId<AppReqId>, TSpec>,
     /// Discv5 Discovery protocol.
-    pub discovery: Discovery<TSpec>,
+    pub discovery: Discovery,
     /// Keep regular connection to peers and disconnect if absent.
     // NOTE: The id protocol is used for initial interop. This will be removed by mainnet.
     /// Provides IP addresses and peer information.
     pub identify: identify::Behaviour,
     /// The peer manager that keeps track of peer's reputation and status.
-    pub peer_manager: PeerManager<TSpec>,
+    pub peer_manager: PeerManager,
 }

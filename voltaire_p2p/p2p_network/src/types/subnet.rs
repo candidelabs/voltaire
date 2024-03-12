@@ -1,4 +1,5 @@
 use serde::Serialize;
+use ssz_types::{typenum::U32, FixedVector};
 use types::subnet_id::SubnetId;
 use std::time::Instant;
 // use types::{SubnetId, SyncSubnetId};
@@ -7,10 +8,10 @@ use std::time::Instant;
 ///
 /// Used for subscribing to the appropriate gossipsub subnets and mark
 /// appropriate metadata bitfields.
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, PartialEq, Hash)]
 pub enum Subnet {
     /// Represents a gossipsub attestation subnet and the metadata `attnets` field.
-    Mempool(SubnetId),
+    Mempool(String),
     // /// Represents a gossipsub sync committee subnet and the metadata `syncnets` field.
     // SyncCommittee(SyncSubnetId),
 }

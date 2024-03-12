@@ -2,7 +2,7 @@ use self::behaviour::Behaviour;
 use self::gossip_cache::GossipCache;
 use crate::config::{gossipsub_config, GossipsubConfigParams, NetworkLoad};
 use crate::discovery::{
-    subnet_predicate, DiscoveredPeers, Discovery, FIND_NODE_QUERY_CLOSEST_PEERS,
+    DiscoveredPeers, Discovery, FIND_NODE_QUERY_CLOSEST_PEERS,
 };
 use crate::peer_manager::{
     config::Config as PeerManagerCfg, peerdb::score::PeerAction, peerdb::score::ReportSource,
@@ -19,7 +19,7 @@ use crate::types::{
     SnappyTransform, Subnet, SubnetDiscovery,
 };
 use crate::EnrExt;
-use crate::Eth2Enr;
+// use crate::Eth2Enr;
 use crate::{error, metrics, Enr, NetworkGlobals, PubsubMessage, TopicHash};
 use api_types::{PeerRequestId, Request, RequestId, Response};
 use futures::stream::StreamExt;
@@ -122,7 +122,7 @@ pub struct Network<AppReqId: ReqId, TSpec: EthSpec> {
     swarm: libp2p::swarm::Swarm<Behaviour<AppReqId, TSpec>>,
     /* Auxiliary Fields */
     /// A collections of variables accessible outside the network service.
-    network_globals: Arc<NetworkGlobals<TSpec>>,
+    network_globals: Arc<NetworkGlobals>,
     // /// Keeps track of the current EnrForkId for upgrading gossipsub topics.
     // // NOTE: This can be accessed via the network_globals ENR. However we keep it here for quick
     // // lookups for every gossipsub message send.
@@ -150,7 +150,7 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
         // ctx: ServiceContext<'_>,
         config: Config,
         log: &slog::Logger,
-    ) -> error::Result<(Self, Arc<NetworkGlobals<TSpec>>)> {
+    ) -> error::Result<(Self, Arc<NetworkGlobals>)> {
         let log = log.new(o!("service"=> "libp2p"));
         // let mut config = ctx.config.clone();
         trace!(log, "Libp2p Service starting");
@@ -551,7 +551,7 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
         &mut self.swarm.behaviour_mut().eth2_rpc
     }
     /// Discv5 Discovery protocol.
-    pub fn discovery_mut(&mut self) -> &mut Discovery<TSpec> {
+    pub fn discovery_mut(&mut self) -> &mut Discovery {
         &mut self.swarm.behaviour_mut().discovery
     }
     /// Provides IP addresses and peer information.
@@ -559,7 +559,7 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
         &mut self.swarm.behaviour_mut().identify
     }
     /// The peer manager that keeps track of peer's reputation and status.
-    pub fn peer_manager_mut(&mut self) -> &mut PeerManager<TSpec> {
+    pub fn peer_manager_mut(&mut self) -> &mut PeerManager {
         &mut self.swarm.behaviour_mut().peer_manager
     }
 
@@ -572,7 +572,7 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
         &self.swarm.behaviour().eth2_rpc
     }
     /// Discv5 Discovery protocol.
-    pub fn discovery(&self) -> &Discovery<TSpec> {
+    pub fn discovery(&self) -> &Discovery {
         &self.swarm.behaviour().discovery
     }
     /// Provides IP addresses and peer information.
@@ -580,7 +580,7 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
         &self.swarm.behaviour().identify
     }
     /// The peer manager that keeps track of peer's reputation and status.
-    pub fn peer_manager(&self) -> &PeerManager<TSpec> {
+    pub fn peer_manager(&self) -> &PeerManager {
         &self.swarm.behaviour().peer_manager
     }
 
@@ -911,16 +911,16 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
         self.discovery_mut().add_enr(enr);
     }
 
-    /// Updates a subnet value to the ENR attnets/syncnets bitfield.
-    ///
-    /// The `value` is `true` if a subnet is being added and false otherwise.
-    pub fn update_enr_subnet(&mut self, subnet_id: Subnet, value: bool) {
-        if let Err(e) = self.discovery_mut().update_enr_bitfield(subnet_id, value) {
-            crit!(self.log, "Could not update ENR bitfield"; "error" => e);
-        }
-        // update the local meta data which informs our peers of the update during PINGS
-        self.update_metadata_bitfields();
-    }
+    // /// Updates a subnet value to the ENR attnets/syncnets bitfield.
+    // ///
+    // /// The `value` is `true` if a subnet is being added and false otherwise.
+    // pub fn update_enr_subnet(&mut self, subnet_id: Subnet, value: bool) {
+    //     if let Err(e) = self.discovery_mut().update_enr_bitfield(subnet_id, value) {
+    //         crit!(self.log, "Could not update ENR bitfield"; "error" => e);
+    //     }
+    //     // update the local meta data which informs our peers of the update during PINGS
+    //     self.update_metadata_bitfields();
+    // }
 
     /// Attempts to discover new peers for a given subnet. The `min_ttl` gives the time at which we
     /// would like to retain the peers for.
@@ -949,7 +949,7 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
                     .network_globals
                     .peers
                     .read()
-                    .good_peers_on_subnet(s.subnet)
+                    .good_peers_on_subnet(/*s.subnet*/)
                     .count();
                 if peers_on_subnet >= TARGET_SUBNET_PEERS {
                     trace!(
@@ -965,7 +965,7 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
                 // If we connect to the cached peers before the discovery query starts, then we potentially
                 // save a costly discovery query.
                 } else {
-                    self.dial_cached_enrs_in_subnet(s.subnet);
+                    // self.dial_cached_enrs_in_subnet(s.subnet);
                     true
                 }
             })
@@ -987,37 +987,37 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
 
     /* Private internal functions */
 
-    /// Updates the current meta data of the node to match the local ENR.
-    fn update_metadata_bitfields(&mut self) {
-        let local_mempool_nets = self
-            .discovery_mut()
-            .local_enr()
-            .mempools_bitfield::<TSpec>()
-            .expect("Local discovery must have attestation bitfield");
+    // /// Updates the current meta data of the node to match the local ENR.
+    // fn update_metadata_bitfields(&mut self) {
+    //     let local_mempool_nets = self
+    //         .discovery_mut()
+    //         .local_enr()
+    //         .mempools_bitfield::<TSpec>()
+    //         .expect("Local discovery must have attestation bitfield");
 
-        // let local_syncnets = self
-        //     .discovery_mut()
-        //     .local_enr()
-        //     .sync_committee_bitfield::<TSpec>()
-        //     .expect("Local discovery must have sync committee bitfield");
+    //     // let local_syncnets = self
+    //     //     .discovery_mut()
+    //     //     .local_enr()
+    //     //     .sync_committee_bitfield::<TSpec>()
+    //     //     .expect("Local discovery must have sync committee bitfield");
 
-        {
-            // write lock scope
-            let mut meta_data = self.network_globals.local_metadata.write();
+    //     {
+    //         // write lock scope
+    //         let mut meta_data = self.network_globals.local_metadata.write();
 
-            meta_data.seq_number += 1;
-            meta_data.mempool_nets = local_mempool_nets;
-            // if let Ok(syncnets) = meta_data.syncnets_mut() {
-            //     *syncnets = local_syncnets;
-            // }
-        }
-        // Save the updated metadata to disk
-        utils::save_metadata_to_disk(
-            &self.network_dir,
-            self.network_globals.local_metadata.read().clone(),
-            &self.log,
-        );
-    }
+    //         meta_data.seq_number += 1;
+    //         meta_data.mempool_nets = local_mempool_nets;
+    //         // if let Ok(syncnets) = meta_data.syncnets_mut() {
+    //         //     *syncnets = local_syncnets;
+    //         // }
+    //     }
+    //     // Save the updated metadata to disk
+    //     utils::save_metadata_to_disk(
+    //         &self.network_dir,
+    //         self.network_globals.local_metadata.read().clone(),
+    //         &self.log,
+    //     );
+    // }
 
     /// Sends a Ping request to the peer.
     fn ping(&mut self, peer_id: PeerId) {
@@ -1136,16 +1136,17 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
     /// Dial cached Enrs in discovery service that are in the given `subnet_id` and aren't
     /// in Connected, Dialing or Banned state.
     fn dial_cached_enrs_in_subnet(&mut self, subnet: Subnet) {
-        let predicate = subnet_predicate::<TSpec>(vec![subnet], &self.log);
+        // let predicate = subnet_predicate(vec![subnet], &self.log);
         let peers_to_dial: Vec<Enr> = self
             .discovery()
             .cached_enrs()
             .filter_map(|(_peer_id, enr)| {
-                if predicate(enr) {
-                    Some(enr.clone())
-                } else {
-                    None
-                }
+                // if predicate(enr) {
+                //     Some(enr.clone())
+                // } else {
+                //     None
+                // }
+                None
             })
             .collect();
 
@@ -1197,12 +1198,12 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
             }
             gossipsub::Event::Subscribed { peer_id, topic } => {
                 if let Ok(topic) = GossipTopic::decode(topic.as_str()) {
-                    if let Some(subnet_id) = topic.subnet_id() {
-                        self.network_globals
-                            .peers
-                            .write()
-                            .add_subscription(&peer_id, subnet_id);
-                    }
+                    // if let Some(subnet_id) = topic.subnet_id() {
+                    //     self.network_globals
+                    //         .peers
+                    //         .write()
+                    //         .add_subscription(&peer_id, subnet_id);
+                    // }
                     // Try to send the cached messages for this topic
                     if let Some(msgs) = self.gossip_cache.retrieve(&topic) {
                         for data in msgs {
@@ -1238,10 +1239,10 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
             }
             gossipsub::Event::Unsubscribed { peer_id, topic } => {
                 if let Some(subnet_id) = subnet_from_topic_hash(&topic) {
-                    self.network_globals
-                        .peers
-                        .write()
-                        .remove_subscription(&peer_id, &subnet_id);
+                    // self.network_globals
+                    //     .peers
+                    //     .write()
+                    //     .remove_subscription(&peer_id, &subnet_id);
                 }
             }
             gossipsub::Event::GossipsubNotSupported { peer_id } => {

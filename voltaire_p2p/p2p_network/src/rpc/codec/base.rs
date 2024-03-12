@@ -23,7 +23,7 @@ pub trait OutboundCodec<TItem>: Encoder<TItem> + Decoder {
 
 pub struct BaseInboundCodec<TCodec, TSpec>
 where
-    TCodec: Encoder<RPCCodedResponse<TSpec>> + Decoder,
+    TCodec: Encoder<RPCCodedResponse> + Decoder,
     TSpec: EthSpec,
 {
     /// Inner codec for handling various encodings
@@ -33,7 +33,7 @@ where
 
 impl<TCodec, TSpec> BaseInboundCodec<TCodec, TSpec>
 where
-    TCodec: Encoder<RPCCodedResponse<TSpec>> + Decoder,
+    TCodec: Encoder<RPCCodedResponse> + Decoder,
     TSpec: EthSpec,
 {
     pub fn new(codec: TCodec) -> Self {
@@ -77,16 +77,16 @@ where
 /* Base Inbound Codec */
 
 // This Encodes RPC Responses sent to external peers
-impl<TCodec, TSpec> Encoder<RPCCodedResponse<TSpec>> for BaseInboundCodec<TCodec, TSpec>
+impl<TCodec, TSpec> Encoder<RPCCodedResponse> for BaseInboundCodec<TCodec, TSpec>
 where
     TSpec: EthSpec,
-    TCodec: Decoder + Encoder<RPCCodedResponse<TSpec>>,
+    TCodec: Decoder + Encoder<RPCCodedResponse>,
 {
-    type Error = <TCodec as Encoder<RPCCodedResponse<TSpec>>>::Error;
+    type Error = <TCodec as Encoder<RPCCodedResponse>>::Error;
 
     fn encode(
         &mut self,
-        item: RPCCodedResponse<TSpec>,
+        item: RPCCodedResponse,
         dst: &mut BytesMut,
     ) -> Result<(), Self::Error> {
         dst.clear();
@@ -103,7 +103,7 @@ where
 impl<TCodec, TSpec> Decoder for BaseInboundCodec<TCodec, TSpec>
 where
     TSpec: EthSpec,
-    TCodec: Encoder<RPCCodedResponse<TSpec>> + Decoder<Item = InboundRequest<TSpec>>,
+    TCodec: Encoder<RPCCodedResponse> + Decoder<Item = InboundRequest<TSpec>>,
 {
     type Item = InboundRequest<TSpec>;
     type Error = <TCodec as Decoder>::Error;
@@ -137,9 +137,9 @@ impl<TCodec, TSpec> Decoder for BaseOutboundCodec<TCodec, TSpec>
 where
     TSpec: EthSpec,
     TCodec: OutboundCodec<OutboundRequest<TSpec>, CodecErrorType = ErrorType>
-        + Decoder<Item = RPCResponse<TSpec>>,
+        + Decoder<Item = RPCResponse>,
 {
-    type Item = RPCCodedResponse<TSpec>;
+    type Item = RPCCodedResponse;
     type Error = <TCodec as Decoder>::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -155,7 +155,7 @@ where
         });
 
         let inner_result = {
-            if RPCCodedResponse::<TSpec>::is_response(response_code) {
+            if RPCCodedResponse::is_response(response_code) {
                 // decode an actual response and mutates the buffer if enough bytes have been read
                 // returning the result.
                 self.inner

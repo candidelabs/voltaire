@@ -67,9 +67,9 @@ pub const MIN_OUTBOUND_ONLY_FACTOR: f32 = 0.2;
 pub const PRIORITY_PEER_EXCESS: f32 = 0.2;
 
 /// The main struct that handles peer's reputation and connection status.
-pub struct PeerManager<TSpec: EthSpec> {
+pub struct PeerManager {
     /// Storage of network globals to access the `PeerDB`.
-    network_globals: Arc<NetworkGlobals<TSpec>>,
+    network_globals: Arc<NetworkGlobals>,
     /// A queue of events that the `PeerManager` is waiting to produce.
     events: SmallVec<[PeerManagerEvent; 16]>,
     /// A collection of inbound-connected peers awaiting to be Ping'd.
@@ -138,11 +138,11 @@ pub enum PeerManagerEvent {
     DiscoverSubnetPeers(Vec<SubnetDiscovery>),
 }
 
-impl<TSpec: EthSpec> PeerManager<TSpec> {
+impl PeerManager {
     // NOTE: Must be run inside a tokio executor.
     pub fn new(
         cfg: config::Config,
-        network_globals: Arc<NetworkGlobals<TSpec>>,
+        network_globals: Arc<NetworkGlobals>,
         log: &slog::Logger,
     ) -> error::Result<Self> {
         let config::Config {
@@ -658,7 +658,7 @@ impl<TSpec: EthSpec> PeerManager<TSpec> {
     }
 
     /// Received a metadata response from a peer.
-    pub fn meta_data_response(&mut self, peer_id: &PeerId, meta_data: MetaData<TSpec>) {
+    pub fn meta_data_response(&mut self, peer_id: &PeerId, meta_data: MetaData) {
         if let Some(peer_info) = self.network_globals.peers.write().peer_info_mut(peer_id) {
             if let Some(known_meta_data) = &peer_info.meta_data() {
                 if known_meta_data.seq_number < meta_data.seq_number {
@@ -848,45 +848,45 @@ impl<TSpec: EthSpec> PeerManager<TSpec> {
             .notify_disconnecting(&peer_id, false);
     }
 
-    /// Run discovery query for additional sync committee peers if we fall below `TARGET_PEERS`.
-    fn maintain_sync_committee_peers(&mut self) {
-        // Remove expired entries
-        self.sync_committee_subnets
-            .retain(|_, v| *v > Instant::now());
+    // /// Run discovery query for additional sync committee peers if we fall below `TARGET_PEERS`.
+    // fn maintain_sync_committee_peers(&mut self) {
+    //     // Remove expired entries
+    //     self.sync_committee_subnets
+    //         .retain(|_, v| *v > Instant::now());
 
-        let subnets_to_discover: Vec<SubnetDiscovery> = self
-            .sync_committee_subnets
-            .iter()
-            .filter_map(|(k, v)| {
-                if self
-                    .network_globals
-                    .peers
-                    .read()
-                    .good_peers_on_subnet(/*Subnet::SyncCommittee(*k)*/Subnet::Mempool(SubnetId::new(1)))
-                    .count()
-                    < TARGET_SUBNET_PEERS
-                {
-                    Some(SubnetDiscovery {
-                        subnet: Subnet::Mempool(SubnetId::new(1)),//Subnet::SyncCommittee(*k),
-                        min_ttl: Some(*v),
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect();
+    //     let subnets_to_discover: Vec<SubnetDiscovery> = self
+    //         .sync_committee_subnets
+    //         .iter()
+    //         .filter_map(|(k, v)| {
+    //             if self
+    //                 .network_globals
+    //                 .peers
+    //                 .read()
+    //                 .good_peers_on_subnet(/*Subnet::SyncCommittee(*k)*/Subnet::Mempool(SubnetId::new(1)))
+    //                 .count()
+    //                 < TARGET_SUBNET_PEERS
+    //             {
+    //                 Some(SubnetDiscovery {
+    //                     subnet: Subnet::Mempool(SubnetId::new(1)),//Subnet::SyncCommittee(*k),
+    //                     min_ttl: Some(*v),
+    //                 })
+    //             } else {
+    //                 None
+    //             }
+    //         })
+    //         .collect();
 
-        // request the subnet query from discovery
-        if !subnets_to_discover.is_empty() {
-            debug!(
-                self.log,
-                "Making subnet queries for maintaining sync committee peers";
-                "subnets" => ?subnets_to_discover.iter().map(|s| s.subnet).collect::<Vec<_>>()
-            );
-            self.events
-                .push(PeerManagerEvent::DiscoverSubnetPeers(subnets_to_discover));
-        }
-    }
+    //     // request the subnet query from discovery
+    //     if !subnets_to_discover.is_empty() {
+    //         debug!(
+    //             self.log,
+    //             "Making subnet queries for maintaining sync committee peers";
+    //             "subnets" => ?subnets_to_discover.iter().map(|s| s.subnet).collect::<Vec<_>>()
+    //         );
+    //         self.events
+    //             .push(PeerManagerEvent::DiscoverSubnetPeers(subnets_to_discover));
+    //     }
+    // }
 
     /// This function checks the status of our current peers and optionally requests a discovery
     /// query if we need to find more peers to maintain the current number of peers
@@ -1007,19 +1007,19 @@ impl<TSpec: EthSpec> PeerManager<TSpec> {
         }
 
         // 1. Look through peers that have the worst score (ignoring non-penalized scored peers).
-        prune_peers!(|info: &PeerInfo<TSpec>| { info.score().score() < 0.0 });
+        prune_peers!(|info: &PeerInfo| { info.score().score() < 0.0 });
 
-        // 2. Attempt to remove peers that are not subscribed to a subnet, if we still need to
-        //    prune more.
-        if peers_to_prune.len() < connected_peer_count.saturating_sub(self.target_peers) {
-            prune_peers!(|info: &PeerInfo<TSpec>| { !info.has_long_lived_subnet() });
-        }
+        // // 2. Attempt to remove peers that are not subscribed to a subnet, if we still need to
+        // //    prune more.
+        // if peers_to_prune.len() < connected_peer_count.saturating_sub(self.target_peers) {
+        //     prune_peers!(|info: &PeerInfo| { !info.has_long_lived_subnet() });
+        // }
 
         // 3. and 4. Remove peers that are too grouped on any given subnet. If all subnets are
         //    uniformly distributed, remove random peers.
         if peers_to_prune.len() < connected_peer_count.saturating_sub(self.target_peers) {
             // Of our connected peers, build a map from subnet_id -> Vec<(PeerId, PeerInfo)>
-            let mut subnet_to_peer: HashMap<Subnet, Vec<(PeerId, PeerInfo<TSpec>)>> =
+            let mut subnet_to_peer: HashMap<Subnet, Vec<(PeerId, PeerInfo)>> =
                 HashMap::new();
             // These variables are used to track if a peer is in a long-lived sync-committee as we
             // may wish to retain this peer over others when pruning.
@@ -1035,27 +1035,27 @@ impl<TSpec: EthSpec> PeerManager<TSpec> {
                     continue;
                 }
 
-                // Count based on long-lived subnets not short-lived subnets
-                // NOTE: There are only 4 sync committees. These are likely to be denser than the
-                // subnets, so our priority here to make the subnet peer count uniform, ignoring
-                // the dense sync committees.
-                for subnet in info.long_lived_subnets() {
-                    match subnet {
-                        Subnet::Mempool(_) => {
-                            subnet_to_peer
-                                .entry(subnet)
-                                .or_insert_with(Vec::new)
-                                .push((*peer_id, info.clone()));
-                        }
-                        // Subnet::SyncCommittee(id) => {
-                        //     *sync_committee_peer_count.entry(id).or_default() += 1;
-                        //     peer_to_sync_committee
-                        //         .entry(*peer_id)
-                        //         .or_default()
-                        //         .insert(id);
-                        // }
-                    }
-                }
+                // // Count based on long-lived subnets not short-lived subnets
+                // // NOTE: There are only 4 sync committees. These are likely to be denser than the
+                // // subnets, so our priority here to make the subnet peer count uniform, ignoring
+                // // the dense sync committees.
+                // for subnet in info.long_lived_subnets() {
+                //     match subnet {
+                //         Subnet::Mempool(_) => {
+                //             subnet_to_peer
+                //                 .entry(subnet)
+                //                 .or_insert_with(Vec::new)
+                //                 .push((*peer_id, info.clone()));
+                //         }
+                //         // Subnet::SyncCommittee(id) => {
+                //         //     *sync_committee_peer_count.entry(id).or_default() += 1;
+                //         //     peer_to_sync_committee
+                //         //         .entry(*peer_id)
+                //         //         .or_default()
+                //         //         .insert(id);
+                //         // }
+                //     }
+                // }
             }
 
             // Add to the peers to prune mapping
@@ -1069,7 +1069,7 @@ impl<TSpec: EthSpec> PeerManager<TSpec> {
                         // Order the peers by the number of subnets they are long-lived
                         // subscribed too, shuffle equal peers.
                         peers_on_subnet.shuffle(&mut rand::thread_rng());
-                        peers_on_subnet.sort_by_key(|(_, info)| info.long_lived_subnet_count());
+                        // peers_on_subnet.sort_by_key(|(_, info)| info.long_lived_subnet_count());
 
                         // Try and find a candidate peer to remove from the subnet.
                         // We ignore peers that would put us below our target outbound peers
@@ -1195,8 +1195,8 @@ impl<TSpec: EthSpec> PeerManager<TSpec> {
         // Update peer score metrics;
         self.update_peer_score_metrics();
 
-        // Maintain minimum count for sync committee peers.
-        self.maintain_sync_committee_peers();
+        // // Maintain minimum count for sync committee peers.
+        // self.maintain_sync_committee_peers();
 
         // Prune any excess peers back to our target in such a way that incentivises good scores and
         // a uniform distribution of subnets.

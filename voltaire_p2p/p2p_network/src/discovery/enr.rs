@@ -27,50 +27,6 @@ pub const MEMPOOL_SUBNETS_KEY: &str = "mempool_subnets";
 // /// The ENR field specifying the sync committee subnet bitfield.
 // pub const SYNC_COMMITTEE_BITFIELD_ENR_KEY: &str = "syncnets";
 
-/// Extension trait for ENR's within Eth2.
-pub trait Eth2Enr {
-    /// The attestation subnet bitfield associated with the ENR.
-    fn mempools_bitfield<TSpec: EthSpec>(
-        &self,
-    ) -> Result<MempoolNetsBitfield<TSpec>, &'static str>;
-
-    // /// The sync committee subnet bitfield associated with the ENR.
-    // fn sync_committee_bitfield<TSpec: EthSpec>(
-    //     &self,
-    // ) -> Result<EnrSyncCommitteeBitfield<TSpec>, &'static str>;
-
-    // fn eth2(&self) -> Result<EnrForkId, &'static str>;
-}
-
-impl Eth2Enr for Enr {
-    fn mempools_bitfield<TSpec: EthSpec>(
-        &self,
-    ) -> Result<MempoolNetsBitfield<TSpec>, &'static str> {
-        let bitfield_bytes = self
-            .get(MEMPOOL_SUBNETS_KEY)
-            .ok_or("ENR attestation bitfield non-existent")?;
-
-        BitVector::<TSpec::MempoolNetsBitfieldLength>::from_ssz_bytes(bitfield_bytes)
-            .map_err(|_| "Could not decode the ENR attnets bitfield")
-    }
-
-    // fn sync_committee_bitfield<TSpec: EthSpec>(
-    //     &self,
-    // ) -> Result<EnrSyncCommitteeBitfield<TSpec>, &'static str> {
-    //     let bitfield_bytes = self
-    //         .get(SYNC_COMMITTEE_BITFIELD_ENR_KEY)
-    //         .ok_or("ENR sync committee bitfield non-existent")?;
-
-    //     BitVector::<TSpec::SyncCommitteeSubnetCount>::from_ssz_bytes(bitfield_bytes)
-    //         .map_err(|_| "Could not decode the ENR syncnets bitfield")
-    // }
-
-    // fn eth2(&self) -> Result<EnrForkId, &'static str> {
-    //     let eth2_bytes = self.get(ETH2_ENR_KEY).ok_or("ENR has no eth2 field")?;
-
-    //     EnrForkId::from_ssz_bytes(eth2_bytes).map_err(|_| "Could not decode EnrForkId")
-    // }
-}
 
 /// Either use the given ENR or load an ENR from file if it exists and matches the current NodeId
 /// and sequence number.

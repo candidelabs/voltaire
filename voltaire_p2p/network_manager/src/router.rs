@@ -24,9 +24,9 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 
 /// Handles messages from the network and routes them to the appropriate service to be handled.
-pub struct Router<T: EthSpec> {
+pub struct Router {
     /// Access to the peer db and network information.
-    network_globals: Arc<NetworkGlobals<T>>,
+    network_globals: Arc<NetworkGlobals>,
     /// A network context to return and handle RPC requests.
     network: HandlerNetworkContext,
     /// The `Router` logger.
@@ -65,11 +65,11 @@ pub enum RouterMessage  {
     PooledUserOpsByHashRequest(RequestId, PeerId, PooledUserOpsByHashRequest),
 }
 
-impl<T: EthSpec> Router<T> {
+impl Router {
     /// Initializes and runs the Router.
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
-        network_globals: Arc<NetworkGlobals<T>>,
+        network_globals: Arc<NetworkGlobals>,
         network_send: mpsc::UnboundedSender<NetworkMessage>,
         executor: task_executor::TaskExecutor,
         log: slog::Logger,
@@ -184,10 +184,6 @@ impl<T: EthSpec> Router<T> {
                 debug!(self.log, "Received Status Response"; "peer_id" => %peer_id, 
                     "supported mempools" => supported_mempools_string_joined
                 );
-                // self.handle_beacon_processor_send_result(
-                //     self.network_beacon_processor
-                //         .send_status_message(peer_id, status_message),
-                // )
             }
             Response::PooledUserOpHashes(pooled_user_op_hashes) => { 
                 self.on_pooled_user_op_hashes_response(

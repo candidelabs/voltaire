@@ -29,9 +29,9 @@ const ALLOWED_NEGATIVE_GOSSIPSUB_FACTOR: f32 = 0.1;
 const DIAL_TIMEOUT: u64 = 15;
 
 /// Storage of known peers, their reputation and information
-pub struct PeerDB<TSpec: EthSpec> {
+pub struct PeerDB {
     /// The collection of known connected peers, their status and reputation
-    peers: HashMap<PeerId, PeerInfo<TSpec>>,
+    peers: HashMap<PeerId, PeerInfo>,
     /// The number of disconnected nodes in the database.
     disconnected_peers: usize,
     /// Counts banned peers in total and per ip
@@ -42,7 +42,7 @@ pub struct PeerDB<TSpec: EthSpec> {
     log: slog::Logger,
 }
 
-impl<TSpec: EthSpec> PeerDB<TSpec> {
+impl PeerDB {
     pub fn new(trusted_peers: Vec<PeerId>, disable_peer_scoring: bool, log: &slog::Logger) -> Self {
         // Initialize the peers hashmap with trusted peers
         let peers = trusted_peers
@@ -69,7 +69,7 @@ impl<TSpec: EthSpec> PeerDB<TSpec> {
     }
 
     /// Returns an iterator over all peers in the db.
-    pub fn peers(&self) -> impl Iterator<Item = (&PeerId, &PeerInfo<TSpec>)> {
+    pub fn peers(&self) -> impl Iterator<Item = (&PeerId, &PeerInfo)> {
         self.peers.iter()
     }
 
@@ -79,14 +79,14 @@ impl<TSpec: EthSpec> PeerDB<TSpec> {
     }
 
     /// Returns a peer's info, if known.
-    pub fn peer_info(&self, peer_id: &PeerId) -> Option<&PeerInfo<TSpec>> {
+    pub fn peer_info(&self, peer_id: &PeerId) -> Option<&PeerInfo> {
         self.peers.get(peer_id)
     }
 
     /// Returns a mutable reference to a peer's info if known.
     // VISIBILITY: The peer manager is able to modify some elements of the peer info, such as sync
     // status.
-    pub(super) fn peer_info_mut(&mut self, peer_id: &PeerId) -> Option<&mut PeerInfo<TSpec>> {
+    pub(super) fn peer_info_mut(&mut self, peer_id: &PeerId) -> Option<&mut PeerInfo> {
         self.peers.get_mut(peer_id)
     }
 
@@ -159,7 +159,7 @@ impl<TSpec: EthSpec> PeerDB<TSpec> {
     }
 
     /// Checks if the peer's known addresses are currently banned.
-    fn ip_is_banned(&self, peer: &PeerInfo<TSpec>) -> Option<IpAddr> {
+    fn ip_is_banned(&self, peer: &PeerInfo) -> Option<IpAddr> {
         peer.seen_ip_addresses()
             .find(|ip| self.banned_peers_count.ip_is_banned(ip))
     }
@@ -182,7 +182,7 @@ impl<TSpec: EthSpec> PeerDB<TSpec> {
     }
 
     /// Gives the ids and info of all known connected peers.
-    pub fn connected_peers(&self) -> impl Iterator<Item = (&PeerId, &PeerInfo<TSpec>)> {
+    pub fn connected_peers(&self) -> impl Iterator<Item = (&PeerId, &PeerInfo)> {
         self.peers.iter().filter(|(_, info)| info.is_connected())
     }
 
@@ -237,14 +237,14 @@ impl<TSpec: EthSpec> PeerDB<TSpec> {
     }
 
     /// Gives an iterator of all peers on a given subnet.
-    pub fn good_peers_on_subnet(&self, subnet: Subnet) -> impl Iterator<Item = &PeerId> {
+    pub fn good_peers_on_subnet(&self/*, subnet: Subnet*/) -> impl Iterator<Item = &PeerId> {
         self.peers
             .iter()
             .filter(move |(_, info)| {
                 // We check both the metadata and gossipsub data as we only want to count long-lived subscribed peers
                 info.is_connected()
-                    && info.on_subnet_metadata(&subnet)
-                    && info.on_subnet_gossipsub(&subnet)
+                    // && info.on_subnet_metadata(&subnet)
+                    // && info.on_subnet_gossipsub(&subnet)
                     && info.is_good_gossipsub_peer()
             })
             .map(|(peer_id, _)| peer_id)
@@ -276,7 +276,7 @@ impl<TSpec: EthSpec> PeerDB<TSpec> {
 
     /// Returns a vector of all connected peers sorted by score beginning with the worst scores.
     /// Ties get broken randomly.
-    pub fn worst_connected_peers(&self) -> Vec<(&PeerId, &PeerInfo<TSpec>)> {
+    pub fn worst_connected_peers(&self) -> Vec<(&PeerId, &PeerInfo)> {
         let mut connected = self
             .peers
             .iter()
@@ -290,9 +290,9 @@ impl<TSpec: EthSpec> PeerDB<TSpec> {
 
     /// Returns a vector containing peers (their ids and info), sorted by
     /// score from highest to lowest, and filtered using `is_status`
-    pub fn best_peers_by_status<F>(&self, is_status: F) -> Vec<(&PeerId, &PeerInfo<TSpec>)>
+    pub fn best_peers_by_status<F>(&self, is_status: F) -> Vec<(&PeerId, &PeerInfo)>
     where
-        F: Fn(&PeerInfo<TSpec>) -> bool,
+        F: Fn(&PeerInfo) -> bool,
     {
         let mut by_status = self
             .peers
@@ -306,7 +306,7 @@ impl<TSpec: EthSpec> PeerDB<TSpec> {
     /// Returns the peer with highest reputation that satisfies `is_status`
     pub fn best_by_status<F>(&self, is_status: F) -> Option<&PeerId>
     where
-        F: Fn(&PeerInfo<TSpec>) -> bool,
+        F: Fn(&PeerInfo) -> bool,
     {
         self.peers
             .iter()
@@ -597,21 +597,21 @@ impl<TSpec: EthSpec> PeerDB<TSpec> {
         }
     }
 
-    /// Adds a gossipsub subscription to a peer in the peerdb.
-    // VISIBILITY: The behaviour is able to adjust subscriptions.
-    pub(crate) fn add_subscription(&mut self, peer_id: &PeerId, subnet: Subnet) {
-        if let Some(info) = self.peers.get_mut(peer_id) {
-            info.insert_subnet(subnet);
-        }
-    }
+    // /// Adds a gossipsub subscription to a peer in the peerdb.
+    // // VISIBILITY: The behaviour is able to adjust subscriptions.
+    // pub(crate) fn add_subscription(&mut self, peer_id: &PeerId, subnet: Subnet) {
+    //     if let Some(info) = self.peers.get_mut(peer_id) {
+    //         info.insert_subnet(subnet);
+    //     }
+    // }
 
-    /// Removes a gossipsub subscription to a peer in the peerdb.
-    // VISIBILITY: The behaviour is able to adjust subscriptions.
-    pub(crate) fn remove_subscription(&mut self, peer_id: &PeerId, subnet: &Subnet) {
-        if let Some(info) = self.peers.get_mut(peer_id) {
-            info.remove_subnet(subnet);
-        }
-    }
+    // /// Removes a gossipsub subscription to a peer in the peerdb.
+    // // VISIBILITY: The behaviour is able to adjust subscriptions.
+    // pub(crate) fn remove_subscription(&mut self, peer_id: &PeerId, subnet: &Subnet) {
+    //     if let Some(info) = self.peers.get_mut(peer_id) {
+    //         info.remove_subnet(subnet);
+    //     }
+    // }
 
     // /// Extends the ttl of all peers on the given subnet that have a shorter
     // /// min_ttl than what's given.
@@ -1063,7 +1063,7 @@ impl<TSpec: EthSpec> PeerDB<TSpec> {
     fn handle_score_transition(
         previous_state: ScoreState,
         peer_id: &PeerId,
-        info: &PeerInfo<TSpec>,
+        info: &PeerInfo,
         log: &slog::Logger,
     ) -> ScoreTransitionResult {
         match (info.score_state(), previous_state) {

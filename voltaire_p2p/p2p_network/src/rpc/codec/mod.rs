@@ -19,10 +19,10 @@ pub enum OutboundCodec<TSpec: EthSpec> {
     SSZSnappy(BaseOutboundCodec<SSZSnappyOutboundCodec<TSpec>, TSpec>),
 }
 
-impl<T: EthSpec> Encoder<RPCCodedResponse<T>> for InboundCodec<T> {
+impl<T: EthSpec> Encoder<RPCCodedResponse> for InboundCodec<T> {
     type Error = RPCError;
 
-    fn encode(&mut self, item: RPCCodedResponse<T>, dst: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: RPCCodedResponse, dst: &mut BytesMut) -> Result<(), Self::Error> {
         match self {
             InboundCodec::SSZSnappy(codec) => codec.encode(item, dst),
         }
@@ -55,7 +55,7 @@ impl<TSpec: EthSpec> Encoder<OutboundRequest<TSpec>> for OutboundCodec<TSpec> {
 }
 
 impl<T: EthSpec> Decoder for OutboundCodec<T> {
-    type Item = RPCCodedResponse<T>;
+    type Item = RPCCodedResponse;
     type Error = RPCError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {

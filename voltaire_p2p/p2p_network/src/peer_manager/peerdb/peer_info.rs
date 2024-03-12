@@ -1,7 +1,7 @@
 use super::client::Client;
 use super::score::{PeerAction, Score, ScoreState};
 // use super::sync_status::SyncStatus;
-use crate::discovery::Eth2Enr;
+// use crate::discovery::Eth2Enr;
 use crate::{rpc::MetaData, types::Subnet};
 use discv5::Enr;
 use libp2p::core::multiaddr::{Multiaddr, Protocol};
@@ -18,8 +18,7 @@ use PeerConnectionStatus::*;
 
 /// Information about a given connected peer.
 #[derive(Clone, Debug, Serialize)]
-#[serde(bound = "T: EthSpec")]
-pub struct PeerInfo<T: EthSpec> {
+pub struct PeerInfo {
     /// The peers reputation
     score: Score,
     /// Client managing this peer
@@ -37,7 +36,7 @@ pub struct PeerInfo<T: EthSpec> {
     // sync_status: SyncStatus,
     /// The ENR subnet bitfield of the peer. This may be determined after it's initial
     /// connection.
-    meta_data: Option<MetaData<T>>,
+    meta_data: Option<MetaData>,
     /// Subnets the peer is connected to.
     subnets: HashSet<Subnet>,
     /// The time we would like to retain this peer. After this time, the peer is no longer
@@ -53,8 +52,8 @@ pub struct PeerInfo<T: EthSpec> {
     enr: Option<Enr>,
 }
 
-impl<TSpec: EthSpec> Default for PeerInfo<TSpec> {
-    fn default() -> PeerInfo<TSpec> {
+impl Default for PeerInfo {
+    fn default() -> PeerInfo {
         PeerInfo {
             score: Score::default(),
             client: Client::default(),
@@ -72,7 +71,7 @@ impl<TSpec: EthSpec> Default for PeerInfo<TSpec> {
     }
 }
 
-impl<T: EthSpec> PeerInfo<T> {
+impl PeerInfo {
     /// Return a PeerInfo struct for a trusted peer.
     pub fn trusted_peer_info() -> Self {
         PeerInfo {
@@ -82,22 +81,22 @@ impl<T: EthSpec> PeerInfo<T> {
         }
     }
 
-    /// Returns if the peer is subscribed to a given `Subnet` from the metadata attnets/syncnets field.
-    pub fn on_subnet_metadata(&self, subnet: &Subnet) -> bool {
-        if let Some(meta_data) = &self.meta_data {
-            match subnet {
-                Subnet::Mempool(id) => {
-                    return meta_data.mempool_nets.get(**id as usize).unwrap_or(false)
-                }
-                // Subnet::SyncCommittee(id) => {
-                //     return meta_data
-                //         .syncnets()
-                //         .map_or(false, |s| s.get(**id as usize).unwrap_or(false))
-                // }
-            }
-        }
-        false
-    }
+    // /// Returns if the peer is subscribed to a given `Subnet` from the metadata attnets/syncnets field.
+    // pub fn (&self, subnet: &Subnet) -> bool {
+    //     if let Some(meta_data) = &self.meta_data {
+    //         match subnet {
+    //             Subnet::Mempool(id) => {
+    //                 return meta_data.mempool_nets.get(**id as usize).unwrap_or(false)
+    //             }
+    //             // Subnet::SyncCommittee(id) => {
+    //             //     return meta_data
+    //             //         .syncnets()
+    //             //         .map_or(false, |s| s.get(**id as usize).unwrap_or(false))
+    //             // }
+    //         }
+    //     }
+    //     false
+    // }
 
     /// Obtains the client of the peer.
     pub fn client(&self) -> &Client {
@@ -120,7 +119,7 @@ impl<T: EthSpec> PeerInfo<T> {
     // }
 
     /// Returns the metadata for the peer if currently known.
-    pub fn meta_data(&self) -> Option<&MetaData<T>> {
+    pub fn meta_data(&self) -> Option<&MetaData> {
         self.meta_data.as_ref()
     }
 
@@ -145,86 +144,86 @@ impl<T: EthSpec> PeerInfo<T> {
         self.subnets.iter()
     }
 
-    /// Returns the number of long lived subnets a peer is subscribed to.
-    // NOTE: This currently excludes sync committee subnets
-    pub fn long_lived_subnet_count(&self) -> usize {
-        if let Some(meta_data) = self.meta_data.as_ref() {
-            return meta_data.mempool_nets.num_set_bits();
-        } else if let Some(enr) = self.enr.as_ref() {
-            if let Ok(attnets) = enr.mempools_bitfield::<T>() {
-                return attnets.num_set_bits();
-            }
-        }
-        0
-    }
+    // /// Returns the number of long lived subnets a peer is subscribed to.
+    // // NOTE: This currently excludes sync committee subnets
+    // pub fn long_lived_subnet_count(&self) -> usize {
+    //     if let Some(meta_data) = self.meta_data.as_ref() {
+    //         return meta_data.mempool_nets.num_set_bits();
+    //     } else if let Some(enr) = self.enr.as_ref() {
+    //         if let Ok(attnets) = enr.mempools_bitfield() {
+    //             return attnets.num_set_bits();
+    //         }
+    //     }
+    //     0
+    // }
 
-    /// Returns an iterator over the long-lived subnets if it has any.
-    pub fn long_lived_subnets(&self) -> Vec<Subnet> {
-        let mut long_lived_subnets = Vec::new();
-        // Check the meta_data
-        if let Some(meta_data) = self.meta_data.as_ref() {
-            for subnet in 0..=meta_data.mempool_nets.highest_set_bit().unwrap_or(0) {
-                if meta_data.mempool_nets.get(subnet).unwrap_or(false) {
-                    long_lived_subnets.push(Subnet::Mempool((subnet as u64).into()));
-                }
-            }
+    // /// Returns an iterator over the long-lived subnets if it has any.
+    // pub fn long_lived_subnets(&self) -> Vec<Subnet> {
+    //     let mut long_lived_subnets = Vec::new();
+    //     // Check the meta_data
+    //     if let Some(meta_data) = self.meta_data.as_ref() {
+    //         for subnet in 0..=meta_data.mempool_nets.highest_set_bit().unwrap_or(0) {
+    //             if meta_data.mempool_nets.get(subnet).unwrap_or(false) {
+    //                 long_lived_subnets.push(Subnet::Mempool((subnet as u64).into()));
+    //             }
+    //         }
 
-            // if let Ok(syncnet) = meta_data.syncnets() {
-            //     for subnet in 0..=syncnet.highest_set_bit().unwrap_or(0) {
-            //         if syncnet.get(subnet).unwrap_or(false) {
-            //             long_lived_subnets.push(Subnet::SyncCommittee((subnet as u64).into()));
-            //         }
-            //     }
-            // }
-        } else if let Some(enr) = self.enr.as_ref() {
-            if let Ok(attnets) = enr.mempools_bitfield::<T>() {
-                for subnet in 0..=attnets.highest_set_bit().unwrap_or(0) {
-                    if attnets.get(subnet).unwrap_or(false) {
-                        long_lived_subnets.push(Subnet::Mempool((subnet as u64).into()));
-                    }
-                }
-            }
+    //         // if let Ok(syncnet) = meta_data.syncnets() {
+    //         //     for subnet in 0..=syncnet.highest_set_bit().unwrap_or(0) {
+    //         //         if syncnet.get(subnet).unwrap_or(false) {
+    //         //             long_lived_subnets.push(Subnet::SyncCommittee((subnet as u64).into()));
+    //         //         }
+    //         //     }
+    //         // }
+    //     } else if let Some(enr) = self.enr.as_ref() {
+    //         if let Ok(attnets) = enr.mempools_bitfield() {
+    //             for subnet in 0..=attnets.highest_set_bit().unwrap_or(0) {
+    //                 if attnets.get(subnet).unwrap_or(false) {
+    //                     long_lived_subnets.push(Subnet::Mempool((subnet as u64).into()));
+    //                 }
+    //             }
+    //         }
 
-            // if let Ok(syncnets) = enr.sync_committee_bitfield::<T>() {
-            //     for subnet in 0..=syncnets.highest_set_bit().unwrap_or(0) {
-            //         if syncnets.get(subnet).unwrap_or(false) {
-            //             long_lived_subnets.push(Subnet::SyncCommittee((subnet as u64).into()));
-            //         }
-            //     }
-            // }
-        }
-        long_lived_subnets
-    }
+    //         // if let Ok(syncnets) = enr.sync_committee_bitfield::<T>() {
+    //         //     for subnet in 0..=syncnets.highest_set_bit().unwrap_or(0) {
+    //         //         if syncnets.get(subnet).unwrap_or(false) {
+    //         //             long_lived_subnets.push(Subnet::SyncCommittee((subnet as u64).into()));
+    //         //         }
+    //         //     }
+    //         // }
+    //     }
+    //     long_lived_subnets
+    // }
 
-    /// Returns if the peer is subscribed to a given `Subnet` from the gossipsub subscriptions.
-    pub fn on_subnet_gossipsub(&self, subnet: &Subnet) -> bool {
-        self.subnets.contains(subnet)
-    }
+    // /// Returns if the peer is subscribed to a given `Subnet` from the gossipsub subscriptions.
+    // pub fn on_subnet_gossipsub(&self, subnet: &Subnet) -> bool {
+    //     self.subnets.contains(subnet)
+    // }
 
-    /// Returns true if the peer is connected to a long-lived subnet.
-    pub fn has_long_lived_subnet(&self) -> bool {
-        // Check the meta_data
-        if let Some(meta_data) = self.meta_data.as_ref() {
-            if !meta_data.mempool_nets.is_zero() && !self.subnets.is_empty() {
-                return true;
-            }
-            // if let Ok(sync) = meta_data.syncnets() {
-            //     if !sync.is_zero() {
-            //         return true;
-            //     }
-            // }
-        }
+    // /// Returns true if the peer is connected to a long-lived subnet.
+    // pub fn has_long_lived_subnet(&self) -> bool {
+    //     // Check the meta_data
+    //     if let Some(meta_data) = self.meta_data.as_ref() {
+    //         if !meta_data.mempool_nets.is_zero() && !self.subnets.is_empty() {
+    //             return true;
+    //         }
+    //         // if let Ok(sync) = meta_data.syncnets() {
+    //         //     if !sync.is_zero() {
+    //         //         return true;
+    //         //     }
+    //         // }
+    //     }
 
-        // We may not have the metadata but may have an ENR. Lets check that
-        if let Some(enr) = self.enr.as_ref() {
-            if let Ok(attnets) = enr.mempools_bitfield::<T>() {
-                if !attnets.is_zero() && !self.subnets.is_empty() {
-                    return true;
-                }
-            }
-        }
-        false
-    }
+    //     // We may not have the metadata but may have an ENR. Lets check that
+    //     if let Some(enr) = self.enr.as_ref() {
+    //         if let Ok(attnets) = enr.mempools_bitfield() {
+    //             if !attnets.is_zero() && !self.subnets.is_empty() {
+    //                 return true;
+    //             }
+    //         }
+    //     }
+    //     false
+    // }
 
     /// Returns the seen addresses of the peer.
     pub fn seen_multiaddrs(&self) -> impl Iterator<Item = &Multiaddr> + '_ {
@@ -344,7 +343,7 @@ impl<T: EthSpec> PeerInfo<T> {
 
     /// Sets an explicit value for the meta data.
     // VISIBILITY: The peer manager is able to adjust the meta_data
-    pub(in crate::peer_manager) fn set_meta_data(&mut self, meta_data: MetaData<T>) {
+    pub(in crate::peer_manager) fn set_meta_data(&mut self, meta_data: MetaData) {
         self.meta_data = Some(meta_data)
     }
 
@@ -363,15 +362,15 @@ impl<T: EthSpec> PeerInfo<T> {
         self.min_ttl = Some(min_ttl)
     }
 
-    /// Adds a known subnet for the peer.
-    pub(super) fn insert_subnet(&mut self, subnet: Subnet) {
-        self.subnets.insert(subnet);
-    }
+    // /// Adds a known subnet for the peer.
+    // pub(super) fn insert_subnet(&mut self, subnet: Subnet) {
+    //     self.subnets.insert(subnet);
+    // }
 
-    /// Removes a subnet from the peer.
-    pub(super) fn remove_subnet(&mut self, subnet: &Subnet) {
-        self.subnets.remove(subnet);
-    }
+    // /// Removes a subnet from the peer.
+    // pub(super) fn remove_subnet(&mut self, subnet: &Subnet) {
+    //     self.subnets.remove(subnet);
+    // }
 
     /// Removes all subnets from the peer.
     pub(super) fn clear_subnets(&mut self) {
