@@ -227,13 +227,13 @@ impl Router {
         // )]
         // struct GossibMessageToSendToMainBundler {
         //     peer_id: String,
-        //     useroperations_with_entrypoint: VerifiedUserOperation,
+        //     verified_useroperation: VerifiedUserOperation,
         // }
         // match gossip_message {
-        //     PubsubMessage::VerifiedUserOperation(useroperations_with_entrypoint) =>{
+        //     PubsubMessage::VerifiedUserOperation(verified_useroperation) =>{
         //         let message_to_send = GossibMessageToSendToMainBundler {
         //             peer_id:peer_id.to_string(), 
-        //             useroperations_with_entrypoint:*useroperations_with_entrypoint
+        //             verified_useroperation:*verified_useroperation
         //         };
         //         let serialized = serde_pickle::to_vec(&message_to_send, Default::default()).unwrap();
         //         let socket = Path::new(SOCKET_PATH);

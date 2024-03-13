@@ -291,7 +291,7 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
                                 match result {
                                     MessageTypeFromBundler::GossibMessageFromBundler(gossib_message) => {
                                         let pubsub_message = PubsubMessage::VerifiedUserOperation(
-                                            Box::new(gossib_message.useroperations_with_entrypoint)
+                                            Box::new(gossib_message.verified_useroperation)
                                         );
                                 
                                         let _ = network_send.send(NetworkMessage::Publish { 
@@ -424,11 +424,11 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
                 topic
             } => {
                 match message.clone() {
-                    PubsubMessage::VerifiedUserOperation(useroperations_with_entrypoint) =>{
+                    PubsubMessage::VerifiedUserOperation(verified_useroperation) =>{
                         let gossib_message = GossibMessageToSendToMainBundler {
                             peer_id:source.to_string(),
                             topic: topic.to_string(),
-                            useroperations_with_entrypoint:*useroperations_with_entrypoint.clone()
+                            verified_useroperation:*verified_useroperation.clone()
                         };
                         let message_to_send = BundlerGossibRequest {
                             request_type:"p2p_received_gossib".to_string(), 

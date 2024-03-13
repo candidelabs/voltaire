@@ -18,7 +18,7 @@ pub static P2P_ENDPOINT_SOCKET_PATH: &'static str = "p2p_endpoint.ipc";
 )]
 pub struct GossibMessageToReceiveFromMainBundler {
     pub topics: Vec<String>,
-    pub useroperations_with_entrypoint: VerifiedUserOperation,
+    pub verified_useroperation: VerifiedUserOperation,
 }
 
 #[derive(
@@ -115,7 +115,7 @@ async fn listen_to_stream(result_length:usize, stream:&UnixStream, log: &slog::L
 pub struct GossibMessageToSendToMainBundler {
     pub peer_id: String,
     pub topic: String,
-    pub useroperations_with_entrypoint: VerifiedUserOperation,
+    pub verified_useroperation: VerifiedUserOperation,
 }
 
 #[derive(
