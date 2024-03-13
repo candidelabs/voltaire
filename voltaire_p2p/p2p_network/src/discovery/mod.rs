@@ -49,8 +49,6 @@ use types::{EnrForkId};
 mod subnet_predicate;
 // pub use subnet_predicate::subnet_predicate;
 
-use self::enr::MEMPOOL_SUBNETS_KEY;
-
 /// Local ENR storage filename.
 pub const ENR_FILENAME: &str = "enr.dat";
 /// Target number of peers to search for given a grouped subnet query.

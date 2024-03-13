@@ -23,7 +23,7 @@ use super::enr_ext::{EnrExt, QUIC6_ENR_KEY, QUIC_ENR_KEY};
 // /// The ENR field specifying the fork id.
 // pub const ETH2_ENR_KEY: &str = "eth2";
 /// The ENR field specifying the attestation subnet bitfield.
-pub const MEMPOOL_SUBNETS_KEY: &str = "mempool_subnets";
+pub const CHAIN_ID: &str = "chain_id";
 // /// The ENR field specifying the sync committee subnet bitfield.
 // pub const SYNC_COMMITTEE_BITFIELD_ENR_KEY: &str = "syncnets";
 
@@ -170,18 +170,8 @@ pub fn build_enr<T: EthSpec>(
 ) -> Result<Enr, String> {
     let mut builder = create_enr_builder_from_config(config, true);
 
-    // // set the `eth2` field on our ENR
-    // builder.add_value(ETH2_ENR_KEY, &enr_fork_id.as_ssz_bytes());
-
-    // set the "attnets" field on our ENR
-    let bitfield = BitVector::<T::MempoolNetsBitfieldLength>::new();
-
-    builder.add_value(MEMPOOL_SUBNETS_KEY, &bitfield.as_ssz_bytes());
-
-    // // set the "syncnets" field on our ENR
-    // let bitfield = BitVector::<T::SyncCommitteeSubnetCount>::new();
-
-    // builder.add_value(SYNC_COMMITTEE_BITFIELD_ENR_KEY, &bitfield.as_ssz_bytes());
+    let chain_id:u64 = 11155111;
+    builder.add_value(CHAIN_ID, &chain_id.as_ssz_bytes());
 
     builder
         .build(enr_key)
@@ -208,7 +198,7 @@ fn compare_enr(local_enr: &Enr, disk_enr: &Enr) -> bool {
         && (local_enr.udp6().is_none() || local_enr.udp6() == disk_enr.udp6())
         // we need the mempools_bitfield_ENR_KEY and SYNC_COMMITTEE_BITFIELD_ENR_KEY key to match,
         // otherwise we use a new ENR. This will likely only be true for non-validating nodes
-        && local_enr.get(MEMPOOL_SUBNETS_KEY) == disk_enr.get(MEMPOOL_SUBNETS_KEY)
+        && local_enr.get(CHAIN_ID) == disk_enr.get(CHAIN_ID)
         // && local_enr.get(SYNC_COMMITTEE_BITFIELD_ENR_KEY) == disk_enr.get(SYNC_COMMITTEE_BITFIELD_ENR_KEY)
 }
 
