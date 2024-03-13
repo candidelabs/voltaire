@@ -491,16 +491,16 @@ class ExecutionEndpoint(Endpoint):
         for local_mempool in self.entrypoints_to_local_mempools.values():
             for mempool_id in local_mempool.supported_mempools_types_to_mempools_ids.values():
                 if mempool_id == mempool:
-                    user_operations_hashs, more_flag = local_mempool.get_user_operations_hashes_with_mempool_id(
+                    user_operations_hashs, next_cursor = local_mempool.get_user_operations_hashes_with_mempool_id(
                         mempool,
                         offset
                     )
                     pooled_user_op_hashes = {
-                        "more_flag" : more_flag, 
+                        "next_cursor" : next_cursor, 
                         "hashes" : user_operations_hashs,
                     }
                     return pooled_user_op_hashes
-        return {"more_flag" : 0, "hashes" : []}
+        return {"next_cursor" : 0, "hashes" : []}
 
     async def _event_p2p_received_pooled_user_op_hashes_response(
         self, req_arguments: dict
@@ -509,7 +509,7 @@ class ExecutionEndpoint(Endpoint):
         pooled_user_op_hashes = req_arguments["pooled_user_op_hashes"]
 
         hashes = pooled_user_op_hashes["hashes"]
-        more_flag = pooled_user_op_hashes["more_flag"]
+        next_cursor = pooled_user_op_hashes["next_cursor"]
 
         if peer_id not in self.peer_ids_to_offset:
             self.peer_ids_to_offset[peer_id] = 0
@@ -517,7 +517,7 @@ class ExecutionEndpoint(Endpoint):
         if peer_id not in self.peer_ids_to_user_ops_hashes_queue:
             self.peer_ids_to_user_ops_hashes_queue[peer_id] = []
 
-        if more_flag > 0:
+        if next_cursor > 0:
             await self.send_pooled_user_op_hashes_request(
                 peer_id,
                 self.peer_ids_to_offset[peer_id] + 1
@@ -545,7 +545,7 @@ class ExecutionEndpoint(Endpoint):
     async def _event_p2p_received_pooled_user_ops_by_hash_response(
         self, req_arguments: dict
     ) -> None:
-        useroperations = req_arguments["list"]
+        verified_useroperation = req_arguments["list"]
 
         return "Ok"
     

@@ -294,13 +294,13 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
         if user_operations_hashs_len == 0 or start >= user_operations_hashs_len:
             return [], 0
 
-        more_flag = 0
+        next_cursor = 0
         if end > user_operations_hashs_len:
             end = user_operations_hashs_len
         else:
-            more_flag = math.floor((user_operations_hashs_len - end) / MAX_OPS_PER_REQUEST)
+            next_cursor = math.floor((user_operations_hashs_len - end) / MAX_OPS_PER_REQUEST)
 
-        return user_operations_hashs[start:end], more_flag
+        return user_operations_hashs[start:end], next_cursor
 
     def get_user_operations_by_hashes(
             self, 
@@ -361,11 +361,7 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
             verified_useroperation["user_operations"] = [user_operation for user_operation in user_operations_list]
             gossib_to_broadcast["topics"] = list(self.supported_mempools_types_to_mempools_ids.values())
             gossib_to_broadcast["verified_useroperation"] = verified_useroperation
-            # requestEvent = {
-            #     "request_type" : 'send_gossib_verified_useroperation', 
-            #     "request_arguments" : gossib_to_broadcast,
-            # }
-            # requestEvents.append(requestEvent)
+
             requestEvents.append(gossib_to_broadcast)
         self.verified_block_to_useroperations_standard_mempool_gossip_queue.clear()
         return requestEvents
