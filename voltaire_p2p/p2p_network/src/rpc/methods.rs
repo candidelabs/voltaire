@@ -212,8 +212,8 @@ impl ssz::Decode for GoodbyeReason {
 /// The STATUS request/response handshake message.
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PooledUserOpHashes {
-    /// A sequential counter indicating when data gets modified.
-    pub more_flag: u64,
+    /// next_cursor is an opaque value chosen by the recipient to enable pagination in the request context.
+    pub next_cursor: FixedVector<u8, U32>,
 
     /// The fork version of the chain we are broadcasting.
     pub hashes: VariableList<FixedVector<u8, U32>, MaxOpsPerRequest>,
@@ -420,7 +420,7 @@ impl std::fmt::Display for RPCResponse {
         match self {
             RPCResponse::Status(status) => write!(f, "{}", status),
             RPCResponse::PooledUserOpHashes(pooled_user_ops_hashes) => {
-                write!(f, "PooledUserOpHashes: More Flag: {}, Hashes: {:?}", pooled_user_ops_hashes.more_flag, pooled_user_ops_hashes.hashes)
+                write!(f, "PooledUserOpHashes: next_cursor: {}, Hashes: {:?}", std::str::from_utf8(&pooled_user_ops_hashes.next_cursor.to_vec()).unwrap(), pooled_user_ops_hashes.hashes)
             }
             RPCResponse::PooledUserOpsByHash(pooled_user_ops_by_hash) => {
                 write!(f, "PooledUserOpsByHash: List: {:?}", pooled_user_ops_by_hash.list)
