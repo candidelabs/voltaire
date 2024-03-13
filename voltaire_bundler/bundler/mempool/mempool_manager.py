@@ -358,7 +358,6 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
             verified_useroperation = dict()
             verified_useroperation["entry_point"] = encode_address(self.entrypoint)
             verified_useroperation["verified_at_block_hash"] = encode_uint256(int(verified_at_block_hash,16))
-            verified_useroperation["chain_id"] = encode_uint256(self.chain_id)
             verified_useroperation["user_operations"] = [user_operation for user_operation in user_operations_list]
             gossib_to_broadcast["topics"] = list(self.supported_mempools_types_to_mempools_ids.values())
             gossib_to_broadcast["verified_useroperation"] = verified_useroperation
