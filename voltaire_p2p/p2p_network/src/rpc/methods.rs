@@ -2,6 +2,7 @@
 
 use crate::types::{Hash256, MempoolNetsBitfield, UserOperation};
 
+use ethereum_types::H256;
 use regex::bytes::Regex;
 use serde::{Serialize, Deserialize};
 use ssz_derive::{Decode, Encode};
@@ -66,7 +67,7 @@ impl ToString for ErrorType {
 #[derive(Encode, Decode, Clone, Debug, PartialEq)]
 pub struct StatusMessage {
     pub chain_id: u64,
-    pub block_hash: FixedVector<u8, U32>,
+    pub block_hash: H256,
     pub block_number: u64
 }
 

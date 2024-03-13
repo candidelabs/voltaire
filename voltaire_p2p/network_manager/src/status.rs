@@ -1,3 +1,4 @@
+use ethereum_types::H256;
 use p2p_voltaire_network::rpc::{StatusMessage, methods::MaxOpsPerRequest};
 use ssz_types::{typenum::U32, FixedVector, VariableList};
 
@@ -10,7 +11,7 @@ pub trait ToStatusMessage {
 }
 
 /// Build a `StatusMessage` representing the state of the given `beacon_chain`.
-pub(crate) fn status_message(chain_id: u64, block_hash: FixedVector<u8, U32>,
+pub(crate) fn status_message(chain_id: u64, block_hash: H256,
     block_number: u64) -> StatusMessage {   
     StatusMessage { 
         chain_id,

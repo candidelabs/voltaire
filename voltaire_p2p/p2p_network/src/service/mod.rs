@@ -22,6 +22,7 @@ use crate::EnrExt;
 // use crate::Eth2Enr;
 use crate::{error, metrics, Enr, NetworkGlobals, PubsubMessage, TopicHash};
 use api_types::{PeerRequestId, Request, RequestId, Response};
+use ethereum_types::H256;
 use futures::io::empty;
 use futures::stream::StreamExt;
 use gossipsub_scoring_parameters::{voltaire_gossip_thresholds, PeerScoreSettings};
@@ -1399,7 +1400,7 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
                 let response = Response::Status(
                     StatusMessage { 
                         chain_id: 0,
-                        block_hash: FixedVector::<u8, U32>::default(),
+                        block_hash: H256::default(),
                         block_number: 0,
                     }
                 );//TODO

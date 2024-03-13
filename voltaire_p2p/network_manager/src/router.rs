@@ -8,6 +8,7 @@
 use crate::error;
 use crate::service::{NetworkMessage, RequestId};
 use crate::status::status_message;
+use ethereum_types::H256;
 use futures::prelude::*;
 use p2p_voltaire_network::rpc::*;
 use p2p_voltaire_network::rpc::methods::{PooledUserOpHashes, PooledUserOpHashesRequest, PooledUserOpsByHash, PooledUserOpsByHashRequest};
@@ -253,7 +254,7 @@ impl Router {
 
     fn send_status(&mut self, peer_id: PeerId) {
         // let topics = self.network_globals.local_metadata.read().clone();
-        let status_message = status_message(0, FixedVector::<u8, U32>::default(),0);
+        let status_message = status_message(0, H256::default(),0);
 
         // let supported_mempools_string:Vec<String> = status_message.supported_mempools.to_vec().iter().map(
         //     |mempool| std::str::from_utf8(&mempool.to_vec()).unwrap().to_string()
@@ -287,7 +288,7 @@ impl Router {
         // Say status back.
         self.network.send_response(
             peer_id,
-            Response::Status(status_message(0, FixedVector::<u8, U32>::default(),0)),
+            Response::Status(status_message(0, H256::default(),0)),
             request_id,
         );
     }
