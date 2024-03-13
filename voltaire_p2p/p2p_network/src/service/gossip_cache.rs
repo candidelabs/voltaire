@@ -59,7 +59,7 @@ impl GossipCache {
         //     // GossipKind::BeaconAggregateAndProof => self.aggregates,
         //     // GossipKind::Attestation(_) => self.attestation,
         //     // GossipKind::VoluntaryExit => self.voluntary_exit,
-        //     GossipKind::UserOperationsWithEntryPoint => self.proposer_slashing,
+        //     GossipKind::VerifiedUserOperation => self.proposer_slashing,
         //     // GossipKind::AttesterSlashing => self.attester_slashing,
         //     // GossipKind::SignedContributionAndProof => self.signed_contribution_and_proof,
         //     // GossipKind::SyncCommitteeMessage(_) => self.sync_committee_message,

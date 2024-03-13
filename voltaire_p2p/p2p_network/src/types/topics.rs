@@ -14,7 +14,7 @@ pub const SSZ_SNAPPY_ENCODING_POSTFIX: &str = "ssz_snappy";
 pub const USER_OPS_WITH_ENTRY_POINT: &str = "user_ops_with_entry_point";
 
 pub const BASE_CORE_TOPICS: [GossipKind; 1] = [
-    GossipKind::UserOperationsWithEntryPoint,
+    GossipKind::VerifiedUserOperation,
 ];
 
 /// A gossipsub topic which encapsulates the type of messages that should be sent and received over
@@ -35,7 +35,7 @@ pub struct GossipTopic {
 #[strum(serialize_all = "snake_case")]
 pub enum GossipKind {
     /// Topic for publishing UserOperations.
-    UserOperationsWithEntryPoint,
+    VerifiedUserOperation,
 }
 
 impl std::fmt::Display for GossipKind {
@@ -88,7 +88,7 @@ impl GossipTopic {
                 _ => return Err(format!("Unknown encoding: {}", topic)),
             };
             let kind = match topic_parts[3] {
-                USER_OPS_WITH_ENTRY_POINT => GossipKind::UserOperationsWithEntryPoint,
+                USER_OPS_WITH_ENTRY_POINT => GossipKind::VerifiedUserOperation,
                 &_ => todo!()
             };
 
@@ -104,7 +104,7 @@ impl GossipTopic {
 
     pub fn subnet_id(&self) -> Option<Subnet> {
         match self.kind() {
-            GossipKind::UserOperationsWithEntryPoint => Some(Subnet::Mempool(self.mempool_id.clone())),
+            GossipKind::VerifiedUserOperation => Some(Subnet::Mempool(self.mempool_id.clone())),
             _ => None,
         }
     }
@@ -130,7 +130,7 @@ impl std::fmt::Display for GossipTopic {
         };
 
         let kind = match self.kind {
-            GossipKind::UserOperationsWithEntryPoint => USER_OPS_WITH_ENTRY_POINT,//.into(),
+            GossipKind::VerifiedUserOperation => USER_OPS_WITH_ENTRY_POINT,//.into(),
         };
         write!(
             f,
@@ -146,7 +146,7 @@ impl std::fmt::Display for GossipTopic {
 impl From<Subnet> for GossipKind {
     fn from(subnet_id: Subnet) -> Self {
         match subnet_id {
-            Subnet::Mempool(s) => GossipKind::UserOperationsWithEntryPoint,
+            Subnet::Mempool(s) => GossipKind::VerifiedUserOperation,
         }
     }
 }

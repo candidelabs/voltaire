@@ -250,7 +250,7 @@ pub(crate) fn create_whitelist_filter(
             possible_hashes.insert(topic.hash());
         };
 
-        add(GossipKind::UserOperationsWithEntryPoint);
+        add(GossipKind::VerifiedUserOperation);
        
     }
     gossipsub::WhitelistSubscriptionFilter(possible_hashes)

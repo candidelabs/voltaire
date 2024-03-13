@@ -290,7 +290,7 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
                             Ok(result)=>{
                                 match result {
                                     MessageTypeFromBundler::GossibMessageFromBundler(gossib_message) => {
-                                        let pubsub_message = PubsubMessage::UserOperationsWithEntryPoint(
+                                        let pubsub_message = PubsubMessage::VerifiedUserOperation(
                                             Box::new(gossib_message.useroperations_with_entrypoint)
                                         );
                                 
@@ -424,7 +424,7 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
                 topic
             } => {
                 match message.clone() {
-                    PubsubMessage::UserOperationsWithEntryPoint(useroperations_with_entrypoint) =>{
+                    PubsubMessage::VerifiedUserOperation(useroperations_with_entrypoint) =>{
                         let gossib_message = GossibMessageToSendToMainBundler {
                             peer_id:source.to_string(),
                             topic: topic.to_string(),
@@ -570,7 +570,7 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
                 // }
 
                 // let mut subscribed_topics: Vec<GossipTopic> = vec![];
-                // let topic = GossipTopic::new(GossipKind::UserOperationsWithEntryPoint, GossipEncoding::default(), "Qmf7P3CuhzSbpJa8LqXPwRzfPqsvoQ6RG7aXvthYTzGxb2".to_string());
+                // let topic = GossipTopic::new(GossipKind::VerifiedUserOperation, GossipEncoding::default(), "Qmf7P3CuhzSbpJa8LqXPwRzfPqsvoQ6RG7aXvthYTzGxb2".to_string());
                 // if self.libp2p.subscribe(topic.clone()) {
                 //     subscribed_topics.push(topic);
                 // } else {

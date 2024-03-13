@@ -1,6 +1,6 @@
 //! Available RPC methods types and ids.
 
-use crate::types::{Hash256, MempoolNetsBitfield, UserOperation};
+use crate::types::{UserOperation};
 
 use ethereum_types::H256;
 use regex::bytes::Regex;
@@ -410,7 +410,7 @@ impl std::fmt::Display for StatusMessage {
         write!(
             f, "Status Message: chain_id: {} {} {}", 
             self.chain_id, 
-            std::str::from_utf8(&self.block_hash.to_vec()).unwrap(), 
+            self.block_hash,
             self.block_number
         )
     }

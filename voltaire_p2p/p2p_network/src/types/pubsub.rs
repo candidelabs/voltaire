@@ -9,12 +9,12 @@ use std::boxed::Box;
 use std::io::{Error, ErrorKind};
 use std::sync::Arc;
 
-use super::user_ops_with_entry_point::UserOperationsWithEntryPoint;
+use super::user_ops_with_entry_point::VerifiedUserOperation;
 
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PubsubMessage {
-    UserOperationsWithEntryPoint(Box<UserOperationsWithEntryPoint>),
+    VerifiedUserOperation(Box<VerifiedUserOperation>),
 }
 
 // Implements the `DataTransform` trait of gossipsub to employ snappy compression
@@ -89,7 +89,7 @@ impl PubsubMessage {
     /// Returns the kind of gossipsub topic associated with the message.
     pub fn kind(&self) -> GossipKind {
         match self {
-            PubsubMessage::UserOperationsWithEntryPoint(_) => GossipKind::UserOperationsWithEntryPoint,
+            PubsubMessage::VerifiedUserOperation(_) => GossipKind::VerifiedUserOperation,
         }
     }
 
@@ -112,10 +112,10 @@ impl PubsubMessage {
 
                 // the ssz decoders
                 match gossip_topic.kind() {
-                    GossipKind::UserOperationsWithEntryPoint => {
-                        let proposer_slashing = UserOperationsWithEntryPoint::from_ssz_bytes(data)
+                    GossipKind::VerifiedUserOperation => {
+                        let proposer_slashing = VerifiedUserOperation::from_ssz_bytes(data)
                             .map_err(|e| format!("{:?}", e))?;
-                        Ok(PubsubMessage::UserOperationsWithEntryPoint(Box::new(proposer_slashing)))
+                        Ok(PubsubMessage::VerifiedUserOperation(Box::new(proposer_slashing)))
                     }
                 }
             }
@@ -130,7 +130,7 @@ impl PubsubMessage {
         // Also note, that the compression is handled by the `SnappyTransform` struct. Gossipsub will compress the
         // messages for us.
         match &self {
-            PubsubMessage::UserOperationsWithEntryPoint(data) => data.as_ssz_bytes(),
+            PubsubMessage::VerifiedUserOperation(data) => data.as_ssz_bytes(),
         }
     }
 }
@@ -138,7 +138,7 @@ impl PubsubMessage {
 impl std::fmt::Display for PubsubMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PubsubMessage::UserOperationsWithEntryPoint(_data) => write!(f, "UserOperations With EntryPoint"),
+            PubsubMessage::VerifiedUserOperation(_data) => write!(f, "UserOperations With EntryPoint"),
         }
     }
 }

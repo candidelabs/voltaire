@@ -528,8 +528,8 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
         let mut subscribed_topics: Vec<GossipKind> = vec![];
 
         for topic_kind in &config.topics {
-            if self.subscribe_kind(GossipKind::UserOperationsWithEntryPoint, topic_kind.to_string()) {
-                subscribed_topics.push(GossipKind::UserOperationsWithEntryPoint);
+            if self.subscribe_kind(GossipKind::VerifiedUserOperation, topic_kind.to_string()) {
+                subscribed_topics.push(GossipKind::VerifiedUserOperation);
             } else {
                 warn!(self.log, "Could not subscribe to topic"; "topic" => %topic_kind);
             }

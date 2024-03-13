@@ -338,7 +338,7 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
         if paymaster_address is not None:
             self.reputation_manager.update_seen_status(paymaster_address)
         
-    def queue_useroperations_with_entrypoint_to_gossip_publish(
+    def queue_verified_useroperation_to_gossip_publish(
             self,
             user_operation_json,
             verified_at_block_hash:int,
@@ -355,15 +355,15 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
         requestEvents = list()
         for verified_at_block_hash, user_operations_list in self.verified_block_to_useroperations_standard_mempool_gossip_queue.items():
             gossib_to_broadcast = dict()
-            useroperations_with_entrypoint = dict()
-            useroperations_with_entrypoint["entry_point_contract"] = encode_address(self.entrypoint)
-            useroperations_with_entrypoint["verified_at_block_hash"] = encode_uint256(int(verified_at_block_hash,16))
-            useroperations_with_entrypoint["chain_id"] = encode_uint256(self.chain_id)
-            useroperations_with_entrypoint["user_operations"] = [user_operation for user_operation in user_operations_list]
+            verified_useroperation = dict()
+            verified_useroperation["entry_point"] = encode_address(self.entrypoint)
+            verified_useroperation["verified_at_block_hash"] = encode_uint256(int(verified_at_block_hash,16))
+            verified_useroperation["chain_id"] = encode_uint256(self.chain_id)
+            verified_useroperation["user_operations"] = [user_operation for user_operation in user_operations_list]
             gossib_to_broadcast["topics"] = list(self.supported_mempools_types_to_mempools_ids.values())
-            gossib_to_broadcast["useroperations_with_entrypoint"] = useroperations_with_entrypoint
+            gossib_to_broadcast["verified_useroperation"] = verified_useroperation
             # requestEvent = {
-            #     "request_type" : 'send_gossib_useroperations_with_entrypoint', 
+            #     "request_type" : 'send_gossib_verified_useroperation', 
             #     "request_arguments" : gossib_to_broadcast,
             # }
             # requestEvents.append(requestEvent)

@@ -68,13 +68,11 @@ pub struct UserOperation {
     Decode,
     TreeHash,
 )]
-pub struct UserOperationsWithEntryPoint {
+pub struct VerifiedUserOperation {
     /// The entrypoint contract address.
-    pub entry_point_contract: Address,
+    pub entry_point: Address,
     //// The block where the useroperations are verified.
     pub verified_at_block_hash: U256,
-    /// The chain id.
-    pub chain_id: U256,
     /// The user operations.
     pub user_operations: VariableList<UserOperation, MaxOpsPerRequest>,
 }

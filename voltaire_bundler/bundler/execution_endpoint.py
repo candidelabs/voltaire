@@ -335,7 +335,7 @@ class ExecutionEndpoint(Endpoint):
             user_operation
         )
         if not self.disable_p2p:
-            self.entrypoints_to_local_mempools[entrypoint_address].queue_useroperations_with_entrypoint_to_gossip_publish(
+            self.entrypoints_to_local_mempools[entrypoint_address].queue_verified_useroperation_to_gossip_publish(
                 user_operation.get_user_operation_json(),
                 verified_at_block_hash, 
                 valid_mempools
@@ -454,16 +454,15 @@ class ExecutionEndpoint(Endpoint):
     ) -> None:
         peer_id = req_arguments["peer_id"]
         topic = req_arguments["topic"]
-        useroperations_with_entrypoint = req_arguments["useroperations_with_entrypoint"]
-        entry_point_contract = useroperations_with_entrypoint["entry_point_contract"]
-        verified_at_block_hash = useroperations_with_entrypoint["verified_at_block_hash"]
-        chain_id = useroperations_with_entrypoint["chain_id"]
+        verified_useroperation = req_arguments["verified_useroperation"]
+        entry_point = verified_useroperation["entry_point"]
+        verified_at_block_hash = verified_useroperation["verified_at_block_hash"]
 
-        if entry_point_contract in self.entrypoints_lowercase_to_checksummed:
-            entry_point_contract = self.entrypoints_lowercase_to_checksummed[entry_point_contract]
+        if entry_point in self.entrypoints_lowercase_to_checksummed:
+            entry_point = self.entrypoints_lowercase_to_checksummed[entry_point]
         else:
             logging.debug(
-                f"Dropping gossib from unsupported entrypoint : {entry_point_contract}"
+                f"Dropping gossib from unsupported entrypoint : {entry_point}"
             )
 
         if self.reputation_manager.get_status(peer_id) == ReputationStatus.BANNED:
@@ -471,16 +470,11 @@ class ExecutionEndpoint(Endpoint):
                 f"Dropping gossib from banned peer : {peer_id}"
             )
 
-        if chain_id != hex(self.chain_id):
-            logging.debug(
-                f"Dropping gossib from unsupported chain id : {chain_id}"
-            )
-        is_ok = True
-        for user_operation in useroperations_with_entrypoint["user_operations"]:
+        for user_operation in verified_useroperation["user_operations"]:
             try:
                 user_operation_obj = UserOperation(user_operation)
            
-                ret = await self.entrypoints_to_local_mempools[entry_point_contract].add_user_operation_p2p(
+                ret = await self.entrypoints_to_local_mempools[entry_point].add_user_operation_p2p(
                             user_operation_obj, peer_id, verified_at_block_hash
                 )
 

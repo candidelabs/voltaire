@@ -182,7 +182,7 @@ impl Router {
             Response::Status(status_message) => {
                 debug!(self.log, "Received Status Response"; "peer_id" => %peer_id, 
                     "chain_id" => status_message.chain_id,
-                    "block_hash" => std::str::from_utf8(&status_message.block_hash.to_vec()).unwrap(),
+                    "block_hash" => status_message.block_hash.to_string(),
                     "block_number" => status_message.block_number,
                 );
             }
@@ -227,10 +227,10 @@ impl Router {
         // )]
         // struct GossibMessageToSendToMainBundler {
         //     peer_id: String,
-        //     useroperations_with_entrypoint: UserOperationsWithEntryPoint,
+        //     useroperations_with_entrypoint: VerifiedUserOperation,
         // }
         // match gossip_message {
-        //     PubsubMessage::UserOperationsWithEntryPoint(useroperations_with_entrypoint) =>{
+        //     PubsubMessage::VerifiedUserOperation(useroperations_with_entrypoint) =>{
         //         let message_to_send = GossibMessageToSendToMainBundler {
         //             peer_id:peer_id.to_string(), 
         //             useroperations_with_entrypoint:*useroperations_with_entrypoint
