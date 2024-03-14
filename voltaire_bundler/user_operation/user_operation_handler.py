@@ -67,19 +67,19 @@ class UserOperationHandler:
     ) -> dict | None:
         user_operation_by_hash = await self.get_user_operation_by_hash(user_operation_hash, entrypoint)
         if user_operation_by_hash == None:
-            user_operation_hashs_to_user_operation = reduce(
+            user_operation_hashs_to_verified_user_operation = reduce(
                 lambda a, b: a|b,
                 (
                     map(
-                        lambda sender_mempool: sender_mempool.user_operation_hashs_to_user_operation,
+                        lambda sender_mempool: sender_mempool.user_operation_hashs_to_verified_user_operation,
                         senders_mempools
                     )
                 ),
                 []
             )
-            if user_operation_hash in user_operation_hashs_to_user_operation:
+            if user_operation_hash in user_operation_hashs_to_verified_user_operation:
                 user_operation_by_hash_json = {
-                    "userOperation": user_operation_hashs_to_user_operation[user_operation_hash],
+                    "userOperation": user_operation_hashs_to_verified_user_operation[user_operation_hash].user_operation,
                     "entryPoint": entrypoint,
                     "blockNumber": None,
                     "blockHash": None,

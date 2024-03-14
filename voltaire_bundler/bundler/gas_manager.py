@@ -68,7 +68,7 @@ class GasManager:
         state_override_set_dict:dict[str, Any]
     ) -> [str, str, str]:
         
-        latest_block_number, latest_block_basefee, _, _ = await get_latest_block_info(self.ethereum_node_url)
+        latest_block_number, latest_block_basefee, _, _,_ = await get_latest_block_info(self.ethereum_node_url)
         latest_block_basefee_hex = hex(latest_block_basefee)
 
         # calculate preverification_gas

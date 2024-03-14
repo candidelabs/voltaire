@@ -24,7 +24,7 @@ async def send_rpc_request_to_eth_client(
             resp = await response.read()
             return json.loads(resp)
 
-async def get_latest_block_info(ethereum_node_url) -> [str,int,str,int]:
+async def get_latest_block_info(ethereum_node_url) -> [str,int,str,int,str]:
     raw_res = await send_rpc_request_to_eth_client(
         ethereum_node_url, "eth_getBlockByNumber", ["latest", False]
     )
@@ -39,8 +39,9 @@ async def get_latest_block_info(ethereum_node_url) -> [str,int,str,int]:
     
     latest_block_gas_limit_hex = latest_block["gasLimit"]
     latest_block_timestamp = int(latest_block["timestamp"], 16)
+    latest_block_hash = latest_block["hash"]
 
-    return latest_block_number, latest_block_basefee, latest_block_gas_limit_hex, latest_block_timestamp
+    return latest_block_number, latest_block_basefee, latest_block_gas_limit_hex, latest_block_timestamp, latest_block_hash
 
 @dataclass
 class DebugEntityData:

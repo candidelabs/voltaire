@@ -532,13 +532,13 @@ class ExecutionEndpoint(Endpoint):
         user_operations_to_return = []
         for local_mempool in self.entrypoints_to_local_mempools.values():
             (
-                user_operations,
+                verified_user_operations_json,
                 remaining_user_operation_hashes
             ) = local_mempool.get_user_operations_by_hashes(
                 user_operations_hashes
             )
             user_operations_hashes = remaining_user_operation_hashes
-            user_operations_to_return += user_operations
+            user_operations_to_return += verified_user_operations_json
 
         return {"list" : user_operations_to_return}
     

@@ -87,7 +87,7 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
             user_operation: UserOperation,
             ) -> (str, str, List[MempoolId]):
         
-        latest_block_number, latest_block_basefee, _, latest_block_timestamp = await get_latest_block_info(self.ethereum_node_url)
+        latest_block_number, latest_block_basefee, _, latest_block_timestamp, latest_block_hash = await get_latest_block_info(self.ethereum_node_url)
         self._verify_entities_reputation(
             user_operation.sender_address,
             user_operation.factory_address_lowercase,
@@ -127,6 +127,7 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
             user_operation,
             user_operation_hash,
             is_sender_staked,
+            latest_block_hash,
         )
 
         self.update_all_seen_status(
@@ -157,7 +158,7 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
             peer_id: str, 
             verified_at_block_hash: str
             ) -> None:
-        latest_block_number, latest_block_basefee, _, latest_block_timestamp = await get_latest_block_info(self.ethereum_node_url)
+        latest_block_number, latest_block_basefee, _, latest_block_timestamp, latest_block_hash = await get_latest_block_info(self.ethereum_node_url)
 
         try:
             self._verify_entities_reputation(
@@ -222,6 +223,7 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
             user_operation,
             user_operation_hash,
             is_sender_staked,
+            latest_block_hash
         )
 
         self.update_all_seen_status(
@@ -254,10 +256,10 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
         bundle = []
         for sender_address in list(self.senders_to_senders_mempools):
             sender = self.senders_to_senders_mempools[sender_address]
-            if len(sender.user_operation_hashs_to_user_operation) > 0:
-                user_operation = sender.user_operation_hashs_to_user_operation.pop(
-                    next(iter(sender.user_operation_hashs_to_user_operation))
-                )
+            if len(sender.user_operation_hashs_to_verified_user_operation) > 0:
+                user_operation = sender.user_operation_hashs_to_verified_user_operation.pop(
+                    next(iter(sender.user_operation_hashs_to_verified_user_operation))
+                ).user_operation
 
                 if not self.is_unsafe:
                     new_code_hash = (
@@ -269,7 +271,7 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
                         continue
 
                 bundle.append(user_operation)
-                if len(sender.user_operation_hashs_to_user_operation) == 0:
+                if len(sender.user_operation_hashs_to_verified_user_operation) == 0:
                     del self.senders_to_senders_mempools[sender.address]
 
         return bundle
@@ -282,9 +284,9 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
         user_operations_hashs = []
         for sender_address in list(self.senders_to_senders_mempools):
             sender = self.senders_to_senders_mempools[sender_address]
-            if len(sender.user_operation_hashs_to_user_operation) > 0:
-                for user_operation_hash, user_operation in sender.user_operation_hashs_to_user_operation.items():
-                    if mempool_id in user_operation.valid_mempools_ids:
+            if len(sender.user_operation_hashs_to_verified_user_operation) > 0:
+                for user_operation_hash, verified_user_operation in sender.user_operation_hashs_to_verified_user_operation.items():
+                    if mempool_id in verified_user_operation.user_operation.valid_mempools_ids:
                         user_operations_hashs.append(list(bytes.fromhex(user_operation_hash[2:])))
 
         start = offset * MAX_OPS_PER_REQUEST
@@ -306,24 +308,30 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
             self, 
             user_operations_hashs:List[str]
     ) -> (List[UserOperation], List[str]):
-        user_operations = []
+        verified_user_operations_json = []
         found_user_operations_hashs = []
         for sender_address in list(self.senders_to_senders_mempools):
             sender = self.senders_to_senders_mempools[sender_address]
-            if len(sender.user_operation_hashs_to_user_operation) > 0:
-                for user_operation_hash, user_operation in sender.user_operation_hashs_to_user_operation.items():
+            if len(sender.user_operation_hashs_to_verified_user_operation) > 0:
+                for user_operation_hash, verified_user_operation in sender.user_operation_hashs_to_verified_user_operation.items():
                     if user_operation_hash in user_operations_hashs:
-                        user_operations.append(user_operation.get_user_operation_json())
+                        verified_user_operations_json.append(
+                            {
+                                "user_operation":verified_user_operation.user_operation.get_user_operation_json(),
+                                "verified_at_block_hash":verified_user_operation.verified_at_block_hash,
+                                "entry_point": self.entrypoint
+                            }
+                        )
                         found_user_operations_hashs.append(user_operation_hash)
         
         remaining_user_operation_hashes = set(user_operations_hashs) - set(found_user_operations_hashs)
-        return user_operations, list(remaining_user_operation_hashes)
+        return verified_user_operations_json, list(remaining_user_operation_hashes)
 
     def get_all_user_operations(self) -> list[UserOperation]:
         user_operations = [
-            user_operation
+            verified_user_operation.user_operation
             for sender in self.senders_to_senders_mempools.values()
-            for user_operation in sender.user_operation_hashs_to_user_operation.values()
+            for verified_user_operation in sender.user_operation_hashs_to_verified_user_operation.values()
         ]
         return user_operations
 
@@ -372,7 +380,7 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
         sender_no_of_ops = 0
         if sender_address in self.senders_to_senders_mempools:
             sender_no_of_ops = len(
-                self.senders_to_senders_mempools[sender_address].user_operation_hashs_to_user_operation
+                self.senders_to_senders_mempools[sender_address].user_operation_hashs_to_verified_user_operation
             )
         self._verify_entity_reputation(
             sender_address, "sender", sender_no_of_ops
