@@ -284,13 +284,11 @@ impl Router {
         status: StatusMessage,
     ) {
         debug!(self.log, "Received Status Request"; "peer_id" => %peer_id, &status);
-        // let topics = self.network_globals.gossipsub_subscriptions.read().clone().iter().map(|topic| topic.clone().mempool_id).collect::<Vec<_>>();
-        // Say status back.
-        self.network.send_response(
+
+        self.network.inform_network(NetworkMessage::Status {
             peer_id,
-            Response::Status(status_message(0, H256::default(),0)),
             request_id,
-        );
+        });
     }
 
     pub fn on_pooled_user_op_hashes_request(

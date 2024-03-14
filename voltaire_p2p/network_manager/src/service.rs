@@ -1,5 +1,6 @@
 use crate::main_bundler::{listen_to_main_bundler,GossibMessageToSendToMainBundler, BundlerGossibRequest, MessageTypeToBundler, MessageTypeFromBundler, broadcast_and_listen_for_response_from_main_bundler, broadcast_to_main_bundler, PooledUserOpHashesAndPeerId};
 use p2p_voltaire_network::rpc::methods::{PooledUserOpHashesRequest, PooledUserOpsByHashRequest, PooledUserOpHashes, PooledUserOpsByHash};
+use p2p_voltaire_network::rpc::StatusMessage;
 use p2p_voltaire_network::{PeerId, NetworkGlobals, MessageId, NetworkEvent, GossipTopic, Topic};
 use types::eth_spec::EthSpec;
 use crate::nat::EstablishedUPnPMappings;
@@ -127,6 +128,10 @@ pub enum NetworkMessage  {
         peer_id: PeerId,
         request_id: RequestId,
         pooled_user_ops_by_hash: PooledUserOpsByHash,
+    },
+    Status{
+        peer_id: PeerId,
+        request_id: PeerRequestId,
     },
 }
 
@@ -656,6 +661,22 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
                 };
         
                 broadcast_to_main_bundler(message_to_send, &self.log).await;
+            },
+            NetworkMessage::Status{
+                peer_id,
+                request_id} => {
+
+                let message_to_send = BundlerGossibRequest {
+                    request_type:"p2p_status_received".to_string(), 
+                    request_arguments:MessageTypeToBundler::Status()
+                };
+                
+                let response = broadcast_and_listen_for_response_from_main_bundler(message_to_send, &self.log).await;
+
+                let deserialized_result:Result<StatusMessage,serde_pickle::Error> = serde_pickle::from_slice(&response.unwrap(), Default::default());
+              
+                debug!(self.log, "Sending Status Response"; "peer" => %peer_id);
+                self.libp2p.send_response(peer_id, request_id,  Response::Status(deserialized_result.unwrap()));
             },
         }
     }

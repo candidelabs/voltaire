@@ -15,6 +15,7 @@ from voltaire_bundler.user_operation.user_operation import (
     UserOperation,
     is_user_operation_hash,
 )
+from voltaire_bundler.utils.eth_client_utils import get_latest_block_info
 
 from .mempool.mempool_manager import LocalMempoolManager, LocalMempoolManagerVersion0Point6
 from voltaire_bundler.user_operation.user_operation_handler import (
@@ -548,6 +549,16 @@ class ExecutionEndpoint(Endpoint):
         verified_useroperation = req_arguments["list"]
 
         return "Ok"
+    
+    async def _event_p2p_status_received(
+        self,
+    ) -> None:
+        latest_block_number, _, _, _, latest_block_hash = await get_latest_block_info(self.ethereum_node_url)
+        return {
+            "chain_id" : self.chain_id,
+            "block_hash" : bytes.fromhex(latest_block_hash[2:]),
+            "block_number" : int(latest_block_number, 16),
+        }
     
     async def send_pooled_user_op_hashes_request(self, peer_id, offset):
         for mempools_types_to_mempools_ids in self.entrypoints_to_mempools_types_to_mempools_ids.values():

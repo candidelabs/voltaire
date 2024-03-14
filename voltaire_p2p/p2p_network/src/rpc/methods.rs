@@ -64,7 +64,7 @@ impl ToString for ErrorType {
 /* Requests */
 
 /// The STATUS request/response handshake message.
-#[derive(Encode, Decode, Clone, Debug, PartialEq)]
+#[derive(Encode, Decode, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StatusMessage {
     pub chain_id: u64,
     pub block_hash: H256,

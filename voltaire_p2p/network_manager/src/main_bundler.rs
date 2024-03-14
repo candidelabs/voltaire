@@ -142,7 +142,8 @@ pub enum MessageTypeToBundler  {
     PooledUserOpHashesRequestToBundler(PooledUserOpHashesRequest),
     PooledUserOpsByHashRequestToBundler(PooledUserOpsByHashRequest),
     PooledUserOpHashesResponseToBundler(PooledUserOpHashesAndPeerId),
-    PooledUserOpsByHashResponseToBundler(PooledUserOpsByHash)
+    PooledUserOpsByHashResponseToBundler(PooledUserOpsByHash),
+    Status()
 }
 
 
