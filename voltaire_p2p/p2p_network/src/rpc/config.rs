@@ -149,7 +149,7 @@ impl FromStr for RateLimiterConfig {
         let mut meta_data_quota = None;
         let mut status_quota = None;
         let mut goodbye_quota = None;
-        let mut pooled_user_ops_hashes = None;
+        let mut pooled_user_op_hashes = None;
         let mut pooled_user_ops_by_hash = None;
 
         for proto_def in s.split(';') {
@@ -158,7 +158,7 @@ impl FromStr for RateLimiterConfig {
             match protocol {
                 Protocol::Status => status_quota = status_quota.or(quota),
                 Protocol::Goodbye => goodbye_quota = goodbye_quota.or(quota),
-                Protocol::PooledUserOpHashes => pooled_user_ops_hashes = pooled_user_ops_hashes.or(quota),
+                Protocol::PooledUserOpHashes => pooled_user_op_hashes = pooled_user_op_hashes.or(quota),
                 Protocol::PooledUserOpsByHash => pooled_user_ops_by_hash = pooled_user_ops_by_hash.or(quota),
                 Protocol::Ping => ping_quota = ping_quota.or(quota),
                 Protocol::MetaData => meta_data_quota = meta_data_quota.or(quota),
@@ -169,7 +169,7 @@ impl FromStr for RateLimiterConfig {
             meta_data_quota: meta_data_quota.unwrap_or(Self::DEFAULT_META_DATA_QUOTA),
             status_quota: status_quota.unwrap_or(Self::DEFAULT_STATUS_QUOTA),
             goodbye_quota: goodbye_quota.unwrap_or(Self::DEFAULT_GOODBYE_QUOTA),
-            pooled_user_op_hashes_quota: pooled_user_ops_hashes
+            pooled_user_op_hashes_quota: pooled_user_op_hashes
                 .unwrap_or(Self::DEFAULT_POOLED_USER_OP_HASHES_QUOTA),
             pooled_user_ops_by_hash_quota: pooled_user_ops_by_hash
                 .unwrap_or(Self::DEFAULT_POOLED_USER_OPS_BY_HASH_QUOTA),

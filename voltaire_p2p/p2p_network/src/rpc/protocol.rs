@@ -51,7 +51,7 @@ pub enum Protocol {
     MetaData,
 
     /// The `PooledUserOpHashes` protocol name.
-    #[strum(serialize = "pooled_user_ops_hashes")]
+    #[strum(serialize = "pooled_user_op_hashes")]
     PooledUserOpHashes,
 
     /// The `PooledUserOpsByHash` protocol name.

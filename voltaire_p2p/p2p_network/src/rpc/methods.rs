@@ -420,8 +420,8 @@ impl std::fmt::Display for RPCResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RPCResponse::Status(status) => write!(f, "{}", status),
-            RPCResponse::PooledUserOpHashes(pooled_user_ops_hashes) => {
-                write!(f, "PooledUserOpHashes: next_cursor: {}, Hashes: {:?}", std::str::from_utf8(&pooled_user_ops_hashes.next_cursor.to_vec()).unwrap(), pooled_user_ops_hashes.hashes)
+            RPCResponse::PooledUserOpHashes(pooled_user_op_hashes) => {
+                write!(f, "PooledUserOpHashes: next_cursor: {}, Hashes: {:?}", std::str::from_utf8(&pooled_user_op_hashes.next_cursor.to_vec()).unwrap(), pooled_user_op_hashes.hashes)
             }
             RPCResponse::PooledUserOpsByHash(pooled_user_ops_by_hash) => {
                 write!(f, "PooledUserOpsByHash: List: {:?}", pooled_user_ops_by_hash.list)

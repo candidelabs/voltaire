@@ -91,8 +91,8 @@ pub struct RPCRateLimiter {
     metadata_rl: Limiter<PeerId>,
     /// Status rate limiter.
     status_rl: Limiter<PeerId>,
-    /// pooled_user_ops_hashes rate limiter.
-    pooled_user_ops_hashes_rl: Limiter<PeerId>,
+    /// pooled_user_op_hashes rate limiter.
+    pooled_user_op_hashes_rl: Limiter<PeerId>,
     /// pooled_user_ops_by_hash rate limiter.
     pooled_user_ops_by_hash_rl: Limiter<PeerId>,
 }
@@ -118,7 +118,7 @@ pub struct RPCRateLimiterBuilder {
     /// Quota for the Status protocol.
     status_quota: Option<Quota>,
     /// Quota for the BlocksByRange protocol.
-    pooled_user_ops_hashes_quota: Option<Quota>,
+    pooled_user_op_hashes_quota: Option<Quota>,
     /// Quota for the BlocksByRoot protocol.
     pooled_user_ops_by_hash_quota: Option<Quota>,
 }
@@ -132,7 +132,7 @@ impl RPCRateLimiterBuilder {
             Protocol::Status => self.status_quota = q,
             Protocol::MetaData => self.metadata_quota = q,
             Protocol::Goodbye => self.goodbye_quota = q,
-            Protocol::PooledUserOpHashes => self.pooled_user_ops_hashes_quota = q,
+            Protocol::PooledUserOpHashes => self.pooled_user_op_hashes_quota = q,
             Protocol::PooledUserOpsByHash => self.pooled_user_ops_by_hash_quota = q,
         }
         self
@@ -144,9 +144,9 @@ impl RPCRateLimiterBuilder {
         let metadata_quota = self.metadata_quota.ok_or("MetaData quota not specified")?;
         let status_quota = self.status_quota.ok_or("Status quota not specified")?;
         let goodbye_quota = self.goodbye_quota.ok_or("Goodbye quota not specified")?;
-        let pooled_user_ops_hashes_quota = self
-            .pooled_user_ops_hashes_quota
-            .ok_or("pooled_user_ops_hashes_quota quota not specified")?;
+        let pooled_user_op_hashes_quota = self
+            .pooled_user_op_hashes_quota
+            .ok_or("pooled_user_op_hashes_quota quota not specified")?;
         let pooled_user_ops_by_hash_quota = self
             .pooled_user_ops_by_hash_quota
             .ok_or("pooled_user_ops_by_hash_quota quota not specified")?;
@@ -156,7 +156,7 @@ impl RPCRateLimiterBuilder {
         let metadata_rl = Limiter::from_quota(metadata_quota)?;
         let status_rl = Limiter::from_quota(status_quota)?;
         let goodbye_rl = Limiter::from_quota(goodbye_quota)?;
-        let pooled_user_ops_hashes_rl = Limiter::from_quota(pooled_user_ops_hashes_quota)?;
+        let pooled_user_op_hashes_rl = Limiter::from_quota(pooled_user_op_hashes_quota)?;
         let pooled_user_ops_by_hash_rl = Limiter::from_quota(pooled_user_ops_by_hash_quota)?;
         // let lcbootstrap_rl = Limiter::from_quota(lcbootstrap_quote)?;
 
@@ -170,7 +170,7 @@ impl RPCRateLimiterBuilder {
             metadata_rl,
             status_rl,
             goodbye_rl,
-            pooled_user_ops_hashes_rl,
+            pooled_user_op_hashes_rl,
             pooled_user_ops_by_hash_rl,
             // lcbootstrap_rl,
             init_time: Instant::now(),
@@ -244,7 +244,7 @@ impl RPCRateLimiter {
             Protocol::Status => &mut self.status_rl,
             Protocol::MetaData => &mut self.metadata_rl,
             Protocol::Goodbye => &mut self.goodbye_rl,
-            Protocol::PooledUserOpHashes => &mut self.pooled_user_ops_hashes_rl,
+            Protocol::PooledUserOpHashes => &mut self.pooled_user_op_hashes_rl,
             Protocol::PooledUserOpsByHash => &mut self.pooled_user_ops_by_hash_rl,
         };
         check(limiter)
@@ -256,7 +256,7 @@ impl RPCRateLimiter {
         self.status_rl.prune(time_since_start);
         self.metadata_rl.prune(time_since_start);
         self.goodbye_rl.prune(time_since_start);
-        self.pooled_user_ops_hashes_rl.prune(time_since_start);
+        self.pooled_user_op_hashes_rl.prune(time_since_start);
         self.pooled_user_ops_by_hash_rl.prune(time_since_start);
     }
 }
