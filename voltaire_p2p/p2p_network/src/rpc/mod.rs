@@ -309,7 +309,6 @@ where
         conn_id: ConnectionId,
         event: <Self::ConnectionHandler as ConnectionHandler>::ToBehaviour,
     ) {
-        // println!("EEEEEEEEEEEEEEEEEEE {:?}",event);
         if let Ok(RPCReceived::Request(ref id, ref req)) = event {
             if let Some(limiter) = self.limiter.as_mut() {
                 // check if the request is conformant to the quota
