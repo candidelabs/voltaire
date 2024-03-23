@@ -86,7 +86,7 @@ def unsigned_int(value):
         raise argparse.ArgumentTypeError("%s is an invalid unsigned int value" % value)
     return ivalue
 
-def url(ep: str):
+def url_no_port(ep: str):
     address_pattern = "^(((https|http)://)?((?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}|(?:\d{1,3}\.){3}\d{1,3}))$"
     if not isinstance(ep, str) or re.match(address_pattern, ep) is None:
         raise argparse.ArgumentTypeError(f"Wrong url format : {ep}")
@@ -141,7 +141,7 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--rpc_url",
-        type=url,
+        type=url_no_port,
         help="RPC serve url - defaults to localhost",
         nargs="?",
         const="127.0.0.1",
@@ -202,7 +202,7 @@ def initialize_argument_parser() -> ArgumentParser:
 
     group2.add_argument(
         "--ethereum_node_debug_trace_call_url",
-        type=url,
+        type=str,
         help="An Eth Client JSON-RPC Url for debug_traceCall only - defaults to ethereum_node_url value",
         nargs="?",
         const=None,
@@ -482,6 +482,11 @@ async def get_init_data(args:Namespace)-> InitData:
 
     if args.ethereum_node_debug_trace_call_url == None:
         args.ethereum_node_debug_trace_call_url = args.ethereum_node_url
+    else:
+        ethereum_node_debug_chain_id_hex = await check_valid_ethereum_rpc_and_get_chain_id(args.ethereum_node_debug_trace_call_url)
+        if(ethereum_node_chain_id_hex != ethereum_node_debug_chain_id_hex):
+            logging.error(f'Eth node chain id {ethereum_node_chain_id_hex} not eqaul Eth node debug chain id {ethereum_node_debug_chain_id_hex}')
+            sys.exit(1)
 
     init_entrypoint_and_mempool_data(args)
 
