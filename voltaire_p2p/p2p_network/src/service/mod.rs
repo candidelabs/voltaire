@@ -231,7 +231,6 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
 
             // Set up a scoring update interval
             let update_gossipsub_scores = tokio::time::interval(/*params.decay_interval*/Duration::new(1, 0));
-            // println!("Hello");
             // let possible_fork_digests = ctx.fork_context.all_fork_digests();
             let filter: gossipsub::MaxCountSubscriptionFilter<gossipsub::WhitelistSubscriptionFilter> = gossipsub::MaxCountSubscriptionFilter {
                 filter: utils::create_whitelist_filter(
@@ -839,11 +838,11 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
     }
 
     /// Send a request to all peers over RPC.
-    pub fn send_outbound_pooled_user_op_hashes_request_to_all_peers(&mut self, mempool: FixedVector<u8, U46>) {
+    pub fn send_outbound_pooled_user_op_hashes_request_to_all_peers(&mut self) {
        let peers_on_subnet = self.get_all_peers();
 
        let request = OutboundRequest::PooledUserOpHashes(
-        PooledUserOpHashesRequest {mempool, offset: 0 }
+        PooledUserOpHashesRequest {cursor: FixedVector::<u8, U32>::default() }
         );
 
         for peer_id in peers_on_subnet {

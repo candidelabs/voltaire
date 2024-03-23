@@ -111,7 +111,7 @@ impl Router {
             // we have initiated a connection to a peer or the peer manager has requested a
             // re-status
             RouterMessage::StatusPeer(peer_id) => {
-                self.send_status(peer_id);
+                // self.send_status(peer_id);
             }
             // A peer has disconnected
             RouterMessage::PeerDisconnected(peer_id) => {

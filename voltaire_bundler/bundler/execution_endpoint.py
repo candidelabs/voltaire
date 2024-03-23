@@ -56,7 +56,7 @@ class ExecutionEndpoint(Endpoint):
     entrypoints_to_mempools_types_to_mempools_ids: dict[Address,dict[MempoolType,MempoolId]]
     entrypoints_lowercase_to_checksummed: dict[Address,Address]
     p2pClient: Client
-    peer_ids_to_offset: dict[str,int]
+    peer_ids_to_cursor: dict[str,int]
     peer_ids_to_user_ops_hashes_queue: dict[str,List[str]]
     disable_p2p:bool
 
@@ -199,7 +199,7 @@ class ExecutionEndpoint(Endpoint):
             max_fee_per_gas_percentage_multiplier,
             max_priority_fee_per_gas_percentage_multiplier,
         )
-        self.peer_ids_to_offset = dict()
+        self.peer_ids_to_cursor = dict()
         self.peer_ids_to_user_ops_hashes_queue = dict()
         self.disable_p2p = disable_p2p
 
@@ -240,14 +240,15 @@ class ExecutionEndpoint(Endpoint):
                 await asyncio.sleep(heartbeat_interval)
 
     async def send_pooled_user_op_hashes_to_all_peers(self):
-        await self.send_pooled_user_op_hashes_request("", 0)
+        pass
+        #await self.send_pooled_user_op_hashes_request("", 0)
     
     async def update_p2p_gossip(self) -> None:
         for mempool in self.entrypoints_to_local_mempools.values():
             requestEvents = mempool.create_p2p_gossip_requests()
             for requestEvent in requestEvents:
                 await self.p2pClient.broadcast_only(requestEvent)
-            mempool.verified_block_to_useroperations_standard_mempool_gossip_queue.clear()
+            mempool.verified_useroperations_standard_mempool_gossip_queue.clear()
 
     async def update_p2p_peer_ids_to_user_ops_hashes_queue(self) -> None:
         for peer_id, user_ops_hashes in self.peer_ids_to_user_ops_hashes_queue.items():
@@ -484,21 +485,19 @@ class ExecutionEndpoint(Endpoint):
     async def _event_p2p_pooled_user_op_hashes_received(
         self, req_arguments: dict
     ) -> None:
-        mempool = bytes(req_arguments["mempool"]).decode("ascii")
-        offset = req_arguments["offset"]
+        cursor = req_arguments["cursor"]
         
         for local_mempool in self.entrypoints_to_local_mempools.values():
             for mempool_id in local_mempool.supported_mempools_types_to_mempools_ids.values():
-                if mempool_id == mempool:
-                    user_operations_hashs, next_cursor = local_mempool.get_user_operations_hashes_with_mempool_id(
-                        mempool,
-                        offset
-                    )
-                    pooled_user_op_hashes = {
-                        "next_cursor" : next_cursor, 
-                        "hashes" : user_operations_hashs,
-                    }
-                    return pooled_user_op_hashes
+                user_operations_hashs, next_cursor = local_mempool.get_user_operations_hashes_with_mempool_id(
+                    mempool_id,
+                    cursor
+                )#TODO: collect from multiple mempools
+                pooled_user_op_hashes = {
+                    "next_cursor" : next_cursor, 
+                    "hashes" : user_operations_hashs,
+                }
+                return pooled_user_op_hashes
         return {"next_cursor" : 0, "hashes" : []}
 
     async def _event_p2p_received_pooled_user_op_hashes_response(
@@ -510,8 +509,8 @@ class ExecutionEndpoint(Endpoint):
         hashes = pooled_user_op_hashes["hashes"]
         next_cursor = pooled_user_op_hashes["next_cursor"]
 
-        if peer_id not in self.peer_ids_to_offset:
-            self.peer_ids_to_offset[peer_id] = 0
+        if peer_id not in self.peer_ids_to_cursor:
+            self.peer_ids_to_cursor[peer_id] = 0
 
         if peer_id not in self.peer_ids_to_user_ops_hashes_queue:
             self.peer_ids_to_user_ops_hashes_queue[peer_id] = []
@@ -519,7 +518,7 @@ class ExecutionEndpoint(Endpoint):
         if next_cursor > 0:
             await self.send_pooled_user_op_hashes_request(
                 peer_id,
-                self.peer_ids_to_offset[peer_id] + 1
+                self.peer_ids_to_cursor[peer_id] + 1
                 )
 
         self.peer_ids_to_user_ops_hashes_queue[peer_id] += hashes
@@ -558,18 +557,17 @@ class ExecutionEndpoint(Endpoint):
             "block_number" : int(latest_block_number, 16),
         }
     
-    async def send_pooled_user_op_hashes_request(self, peer_id, offset):
+    async def send_pooled_user_op_hashes_request(self, peer_id, cursor):
         for mempools_types_to_mempools_ids in self.entrypoints_to_mempools_types_to_mempools_ids.values():
             for mempools_id in mempools_types_to_mempools_ids.values():
                 pooled_user_op_hashes_message = dict()
                 pooled_user_op_hashes_request = dict()
-                pooled_user_op_hashes_request["mempool"] = list(bytes(mempools_id, 'ascii'))
-                pooled_user_op_hashes_request["offset"] = offset
+                pooled_user_op_hashes_request = {"cursor" : cursor}
                 pooled_user_op_hashes_message["id"] = "0"
                 pooled_user_op_hashes_message["peer_id"] = peer_id
                 pooled_user_op_hashes_message["pooled_user_op_hashes_request"] = pooled_user_op_hashes_request
 
-                await self.p2pClient.broadcast_only(pooled_user_op_hashes_message)
+                # await self.p2pClient.broadcast_only(pooled_user_op_hashes_message)
 
 async def exception_handler_decorator(
     response_function, rpc_call_request: dict

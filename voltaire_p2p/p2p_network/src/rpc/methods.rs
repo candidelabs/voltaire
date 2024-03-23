@@ -223,19 +223,14 @@ pub struct PooledUserOpHashes {
 /// Request a number of beacon block roots from a peer.
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PooledUserOpHashesRequest {
-    /// The starting slot to request blocks.
-    pub mempool: FixedVector<u8, U46>,
-    // pub mempool: Hash256,
-
     /// A sequential counter indicating when data gets modified.
-    pub offset: u64,
+    pub cursor: FixedVector<u8, U32>,
 }
 
 impl PooledUserOpHashesRequest {
-    pub fn new(mempool: FixedVector<u8, U46>, offset: u64) -> Self {
+    pub fn new(cursor: FixedVector<u8, U32>) -> Self {
         Self{
-            mempool,
-            offset,
+            cursor,
         }
     }
 }
@@ -462,9 +457,8 @@ impl std::fmt::Display for PooledUserOpHashesRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Mempool: {:?}, Offset: {}",
-            self.mempool,
-            self.offset
+            "Cursor: {:?}",
+            self.cursor,
         )
     }
 }

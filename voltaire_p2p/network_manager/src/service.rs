@@ -306,13 +306,10 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
                                     },
                                     MessageTypeFromBundler::PooledUserOpHashesRequestFromBundler(pooled_user_op_hashes_request_message)=>{
 
-                                        let mempool_string = std::str::from_utf8(&pooled_user_op_hashes_request_message.pooled_user_op_hashes_request.mempool.to_vec()).unwrap().to_string();
-
                                         if pooled_user_op_hashes_request_message.peer_id == "" {
                                             debug!(
                                                 self.log,
                                                 "Sending PooledUserOpHashes Request to all peers";
-                                                "mempool" => mempool_string
                                             );
 
                                             let _ = network_send.send(NetworkMessage::PooledUserOpHashesRequestMessageToAllPeers{ 
@@ -321,7 +318,6 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
                                         }else{
                                             debug!(self.log, "Sending PooledUserOpHashes Request"; 
                                                 "peer" => %pooled_user_op_hashes_request_message.peer_id,
-                                                "mempool" => ?mempool_string
                                             );
 
                                             let _ = network_send.send(NetworkMessage::PooledUserOpHashesRequestMessage{
@@ -591,7 +587,7 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
                 // }
             }
             NetworkMessage::PooledUserOpHashesRequestMessageToAllPeers { pooled_user_op_hashes_request } => {
-                self.libp2p.send_outbound_pooled_user_op_hashes_request_to_all_peers(pooled_user_op_hashes_request.mempool)
+                self.libp2p.send_outbound_pooled_user_op_hashes_request_to_all_peers()
             },
             NetworkMessage::PooledUserOpHashesRequestMessage { id, peer_id, pooled_user_op_hashes_request } => {
                 self.send_to_router(RouterMessage::PooledUserOpHashesRequest (
