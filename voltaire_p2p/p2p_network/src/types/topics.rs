@@ -11,7 +11,7 @@ use crate::Subnet;
 // For example /eth2/beacon_block/ssz
 pub const TOPIC_PREFIX: &str = "account_abstraction";
 pub const SSZ_SNAPPY_ENCODING_POSTFIX: &str = "ssz_snappy";
-pub const USER_OPS_WITH_ENTRY_POINT: &str = "user_ops_with_entry_point";
+pub const USER_OPS_WITH_ENTRY_POINT: &str = "user_operations";
 
 pub const BASE_CORE_TOPICS: [GossipKind; 1] = [
     GossipKind::VerifiedUserOperation,
