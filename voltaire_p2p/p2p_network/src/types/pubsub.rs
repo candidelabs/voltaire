@@ -9,7 +9,7 @@ use std::boxed::Box;
 use std::io::{Error, ErrorKind};
 use std::sync::Arc;
 
-use super::user_ops_with_entry_point::VerifiedUserOperation;
+use super::verified_useroperation::VerifiedUserOperation;
 
 
 #[derive(Debug, Clone, PartialEq)]

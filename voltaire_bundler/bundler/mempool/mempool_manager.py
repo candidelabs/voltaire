@@ -43,7 +43,7 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
     is_unsafe: bool
     enforce_gas_price_tolerance: int
     entity_to_no_of_ops_in_mempool: dict[Address, int]  # factory and paymaster
-    verified_block_to_useroperations_standard_mempool_gossip_queue: dict[str,List[UserOperation]]
+    verified_useroperations_standard_mempool_gossip_queue: List[Any]
 
     def __init__(
         self,
@@ -73,7 +73,7 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
         self.enforce_gas_price_tolerance = enforce_gas_price_tolerance
         self.senders_to_senders_mempools = {}
         self.entity_to_no_of_ops_in_mempool = {}
-        self.verified_block_to_useroperations_standard_mempool_gossip_queue = dict()
+        self.verified_useroperations_standard_mempool_gossip_queue = []
         self.supported_mempools_types_to_mempools_ids = supported_mempools_types_to_mempools_ids
         self.seen_user_operation_hashs = set()
         # self.supported_mempools_types = [MempoolType.default]
@@ -352,26 +352,26 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
             verified_at_block_hash:int,
             valid_mempools: List[str]
         )->None:
-        if verified_at_block_hash not in self.verified_block_to_useroperations_standard_mempool_gossip_queue:
-            self.verified_block_to_useroperations_standard_mempool_gossip_queue[verified_at_block_hash] = list()
 
-        self.verified_block_to_useroperations_standard_mempool_gossip_queue[verified_at_block_hash].append(
-            user_operation_json
-            )
+        verified_useroperation = dict()
+        verified_useroperation["entry_point_contract"] = encode_address(self.entrypoint)
+        verified_useroperation["verified_at_block_hash"] = encode_uint256(int(verified_at_block_hash,16))
+        verified_useroperation["user_operation"] = user_operation_json
+
+        self.verified_useroperations_standard_mempool_gossip_queue.append(
+            verified_useroperation
+        )
             
     def create_p2p_gossip_requests(self)->List[RequestEvent]:
         requestEvents = list()
-        for verified_at_block_hash, user_operations_list in self.verified_block_to_useroperations_standard_mempool_gossip_queue.items():
+        for verified_useroperation in self.verified_useroperations_standard_mempool_gossip_queue:
+            # requestEvents.append(verified_useroperation)
             gossib_to_broadcast = dict()
-            verified_useroperation = dict()
-            verified_useroperation["entry_point"] = encode_address(self.entrypoint)
-            verified_useroperation["verified_at_block_hash"] = encode_uint256(int(verified_at_block_hash,16))
-            verified_useroperation["user_operations"] = [user_operation for user_operation in user_operations_list]
             gossib_to_broadcast["topics"] = list(self.supported_mempools_types_to_mempools_ids.values())
             gossib_to_broadcast["verified_useroperation"] = verified_useroperation
 
             requestEvents.append(gossib_to_broadcast)
-        self.verified_block_to_useroperations_standard_mempool_gossip_queue.clear()
+        self.verified_useroperations_standard_mempool_gossip_queue.clear()
         return requestEvents
 
     def _verify_entities_reputation(

@@ -456,7 +456,7 @@ class ExecutionEndpoint(Endpoint):
         peer_id = req_arguments["peer_id"]
         topic = req_arguments["topic"]
         verified_useroperation = req_arguments["verified_useroperation"]
-        entry_point = verified_useroperation["entry_point"]
+        entry_point = verified_useroperation["entry_point_contract"]
         verified_at_block_hash = verified_useroperation["verified_at_block_hash"]
 
         if entry_point in self.entrypoints_lowercase_to_checksummed:
@@ -471,17 +471,15 @@ class ExecutionEndpoint(Endpoint):
                 f"Dropping gossib from banned peer : {peer_id}"
             )
 
-        for user_operation in verified_useroperation["user_operations"]:
-            try:
-                user_operation_obj = UserOperation(user_operation)
-           
-                ret = await self.entrypoints_to_local_mempools[entry_point].add_user_operation_p2p(
-                            user_operation_obj, peer_id, verified_at_block_hash
-                )
+        try:
+            user_operation_obj = UserOperation(verified_useroperation["user_operation"])
+        
+            ret = await self.entrypoints_to_local_mempools[entry_point].add_user_operation_p2p(
+                        user_operation_obj, peer_id, verified_at_block_hash
+            )
 
-            except ValidationException as excp:
-                self.reputation_manager.ban_entity(peer_id)
-                break
+        except ValidationException as excp:
+            self.reputation_manager.ban_entity(peer_id)
     
     async def _event_p2p_pooled_user_op_hashes_received(
         self, req_arguments: dict

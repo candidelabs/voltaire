@@ -69,10 +69,10 @@ pub struct UserOperation {
     TreeHash,
 )]
 pub struct VerifiedUserOperation {
-    /// The entrypoint contract address.
-    pub entry_point: Address,
-    //// The block where the useroperations are verified.
-    pub verified_at_block_hash: U256,
     /// The user operations.
-    pub user_operations: VariableList<UserOperation, MaxOpsPerRequest>,
+    pub user_operation: UserOperation,
+    /// The entrypoint contract address.
+    pub entry_point_contract: Address,
+    //// The block where the useroperations are verified.
+    pub verified_at_block_hash: U256
 }

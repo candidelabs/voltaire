@@ -3,7 +3,7 @@ mod globals;
 mod pubsub;
 mod subnet;
 mod topics;
-mod user_ops_with_entry_point;
+mod verified_useroperation;
 
 
 #[macro_use]
@@ -30,7 +30,7 @@ pub use topics::{
     GossipTopic, 
     //LIGHT_CLIENT_GOSSIP_TOPICS,
 };
-pub use user_ops_with_entry_point::*;
+pub use verified_useroperation::*;
 
 use ethereum_types::{H160, H256};
 use types::eth_spec::EthSpec;
