@@ -34,9 +34,7 @@ from voltaire_bundler.utils.encode import (
 )
 
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
-MAX_VERIFICATION_GAS_LIMIT = 10_000_000
 MIN_CALL_GAS_LIMIT = 21_000
-MAX_CALL_GAS_LIMIT = 30_000_000
 
 class GasManager:
     ethereum_node_url: str
@@ -45,6 +43,8 @@ class GasManager:
     max_fee_per_gas_percentage_multiplier: int
     max_priority_fee_per_gas_percentage_multiplier: int
     estimate_gas_with_override_enabled: bool
+    max_verification_gas: int
+    max_call_data_gas: int
 
     def __init__(
         self, 
@@ -53,6 +53,8 @@ class GasManager:
         is_legacy_mode,
         max_fee_per_gas_percentage_multiplier: int,
         max_priority_fee_per_gas_percentage_multiplier: int,
+        max_verification_gas,
+        max_call_data_gas,
     ):
         self.ethereum_node_url = ethereum_node_url
         self.chain_id = chain_id
@@ -60,6 +62,8 @@ class GasManager:
         self.max_fee_per_gas_percentage_multiplier = max_fee_per_gas_percentage_multiplier
         self.max_priority_fee_per_gas_percentage_multiplier = max_priority_fee_per_gas_percentage_multiplier
         self.estimate_gas_with_override_enabled = True
+        self.max_verification_gas = max_verification_gas
+        self.max_call_data_gas = max_call_data_gas
 
     async def estimate_callgaslimit_and_preverificationgas_and_verificationgas(
         self, 
@@ -78,8 +82,8 @@ class GasManager:
         preverification_gas_hex = hex(preverification_gas)
         user_operation.pre_verification_gas = preverification_gas
 
-        # set verification_gas_limit to MAX_VERIFICATION_GAS_LIMIT to prevent out of gas revert
-        user_operation.verification_gas_limit = MAX_VERIFICATION_GAS_LIMIT
+        # set verification_gas_limit to self.max_verification_gas to prevent out of gas revert
+        user_operation.verification_gas_limit = self.max_verification_gas
 
         call_gas_limit_hex= await self.estimate_call_gas_limit(
             entrypoint,
@@ -111,7 +115,7 @@ class GasManager:
         latest_block_basefee_hex: str,
         state_override_set_dict:dict[str, Any]
     ) -> str:
-        user_operation.call_gas_limit = MAX_CALL_GAS_LIMIT
+        user_operation.call_gas_limit = self.max_call_data_gas
         (
             preOpGas,
             _,
@@ -194,7 +198,7 @@ class GasManager:
         index = 1
         min_gas = gas_used
         max_gas = 2 * gas_used
-        while(max_gas < MAX_CALL_GAS_LIMIT):
+        while(max_gas < self.max_call_data_gas):
             success, gas_used, data = await self.get_call_data_gas_used(
                 entrypoint,
                 sender_address,
@@ -212,8 +216,8 @@ class GasManager:
                 min_gas = max_gas
                 max_gas = math.ceil(2**index * gas_used)
 
-                if max_gas > MAX_CALL_GAS_LIMIT:
-                    max_gas = MAX_CALL_GAS_LIMIT
+                if max_gas > self.max_call_data_gas:
+                    max_gas = self.max_call_data_gas
 
         return max_gas, min_gas
 
@@ -258,12 +262,12 @@ class GasManager:
             sender_address,
             init_code,
             call_data,
-            MAX_CALL_GAS_LIMIT,
+            self.max_call_data_gas,
             block_number_hex,
             latest_block_basefee_hex,
             state_override_set_dict
         )
-        #if not successful with MAX_CALL_GAS_LIMIT, then return EXECUTION_REVERTED
+        #if not successful with self.max_call_data_gas, then return EXECUTION_REVERTED
         if not success:
             raise ExecutionException(
                 ExecutionExceptionCode.EXECUTION_REVERTED,
@@ -611,10 +615,10 @@ class GasManager:
                 f"Preverification gas is too low. it should be minimum : {hex(expected_preverification_gas)}",
             )
 
-        if user_operation.verification_gas_limit > MAX_VERIFICATION_GAS_LIMIT:
+        if user_operation.verification_gas_limit > self.max_verification_gas:
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
-                f"Verification gas is too high. it should be maximum : {hex(MAX_VERIFICATION_GAS_LIMIT)}",
+                f"Verification gas is too high. it should be maximum : {hex(self.max_verification_gas)}",
             )
 
     async def calc_l1_gas_estimate_optimism(

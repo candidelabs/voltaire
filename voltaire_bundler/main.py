@@ -67,6 +67,8 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             init_data.p2p_mempools_types,
             init_data.p2p_mempools_ids,
             init_data.disable_p2p,
+            init_data.max_verification_gas,
+            init_data.max_call_data_gas,
         )
         task_group.create_task(execution_endpoint.start_execution_endpoint())
 

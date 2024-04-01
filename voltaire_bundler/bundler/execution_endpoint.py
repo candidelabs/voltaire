@@ -58,7 +58,9 @@ class ExecutionEndpoint(Endpoint):
     p2pClient: Client
     peer_ids_to_cursor: dict[str,int]
     peer_ids_to_user_ops_hashes_queue: dict[str,List[str]]
-    disable_p2p:bool
+    disabe_p2p:bool
+    max_verification_gas: int
+    max_call_data_gas: int
 
     def __init__(
         self,
@@ -80,7 +82,9 @@ class ExecutionEndpoint(Endpoint):
         entrypoints_versions: List[str],
         p2p_mempools_types_per_entrypoint: List[List[str]],
         p2p_mempools_ids_per_entrypoint: List[List[str]],
-        disable_p2p:bool
+        disable_p2p:bool,
+        max_verification_gas: int,
+        max_call_data_gas: int,
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_url = ethereum_node_url
@@ -108,6 +112,8 @@ class ExecutionEndpoint(Endpoint):
             is_legacy_mode,
             max_fee_per_gas_percentage_multiplier,
             max_priority_fee_per_gas_percentage_multiplier,
+            max_verification_gas,
+            max_call_data_gas,
         )
 
         self.user_operation_handler = UserOperationHandler(

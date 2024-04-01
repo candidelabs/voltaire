@@ -73,6 +73,8 @@ class InitData:
     p2p_metrics_enabled: bool
     client_version: str
     disable_p2p: bool
+    max_verification_gas: int
+    max_call_data_gas: int
 
 def address(ep: str):
     address_pattern = "^0x[0-9,a-f,A-F]{40}$"
@@ -370,6 +372,24 @@ def initialize_argument_parser() -> ArgumentParser:
         default=False,
     )
 
+    parser.add_argument(
+        "--max_verification_gas",
+        type=int,
+        help="Maximimum allowed verification gas",
+        nargs="?",
+        const=10_000_000,
+        default=10_000_000,
+    )
+
+    parser.add_argument(
+        "--max_call_data_gas",
+        type=int,
+        help="Maximimum allowed calldata gas",
+        nargs="?",
+        const=30_000_000,
+        default=30_000_000,
+    )
+
     return parser
 
 def init_logging(args:Namespace):
@@ -523,6 +543,8 @@ async def get_init_data(args:Namespace)-> InitData:
         args.p2p_metrics_enabled,
         __version__,
         args.disable_p2p,
+        args.max_verification_gas,
+        args.max_call_data_gas,
     )
 
     if args.verbose:
