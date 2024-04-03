@@ -554,7 +554,7 @@ class ExecutionEndpoint(Endpoint):
         return "Ok"
     
     async def _event_p2p_status_received(
-        self,
+        self, _req_arguments: dict
     ) -> None:
         latest_block_number, _, _, _, latest_block_hash = await get_latest_block_info(self.ethereum_node_url)
         return {
