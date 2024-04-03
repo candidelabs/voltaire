@@ -91,6 +91,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "amcl"
+version = "0.3.0"
+source = "git+https://github.com/sigp/milagro_bls#aa3ae28a7b526cafe0330fbad83773a3d0dcfd5e"
+
+[[package]]
 name = "android-tzdata"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -347,6 +352,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71"
 dependencies = [
  "generic-array",
+]
+
+[[package]]
+name = "bs58"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "771fe0050b883fcc3ea2359b1a96bcfbc090b7116eae7c3c512c7a083fdf23d3"
+dependencies = [
+ "sha2 0.9.9",
 ]
 
 [[package]]
@@ -1892,7 +1906,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f37304f29c82ede408db06aaba60cd2f783a111f46414d3fc4beedac19e0c67b"
 dependencies = [
  "asn1_der",
- "bs58",
+ "bs58 0.5.0",
  "ed25519-dalek",
  "hkdf",
  "libsecp256k1",
@@ -2170,68 +2184,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lighthouse_network"
-version = "0.2.0"
-dependencies = [
- "delay_map",
- "dirs",
- "discv5",
- "error-chain",
- "ethereum-types",
- "ethereum_ssz",
- "ethereum_ssz_derive",
- "exit-future",
- "fnv",
- "futures",
- "hex",
- "lazy_static",
- "libp2p",
- "libp2p-mplex",
- "libp2p-quic",
- "lighthouse_metrics",
- "lighthouse_version",
- "lru 0.7.8",
- "lru_cache",
- "parking_lot 0.12.1",
- "prometheus-client",
- "quickcheck",
- "quickcheck_macros",
- "rand 0.8.5",
- "regex",
- "serde",
- "serde_derive",
- "sha2 0.10.8",
- "slog",
- "slog-async",
- "slog-term",
- "smallvec",
- "snap",
- "ssz_types",
- "strum",
- "superstruct",
- "task_executor",
- "tempfile",
- "tiny-keccak",
- "tokio",
- "tokio-io-timeout",
- "tokio-util 0.6.10",
- "tree_hash",
- "tree_hash_derive",
- "types",
- "unsigned-varint 0.6.0",
- "unused_port",
- "void",
-]
-
-[[package]]
-name = "lighthouse_version"
-version = "0.1.0"
-dependencies = [
- "git-version",
- "target_info",
-]
-
-[[package]]
 name = "linked-hash-map"
 version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2333,6 +2285,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a634b1c61a95585bd15607c6ab0c4e5b226e695ff2800ba0cdccddf208c406c"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "milagro_bls"
+version = "1.5.1"
+source = "git+https://github.com/sigp/milagro_bls#aa3ae28a7b526cafe0330fbad83773a3d0dcfd5e"
+dependencies = [
+ "amcl",
+ "hex",
+ "lazy_static",
+ "rand 0.8.5",
+ "zeroize",
 ]
 
 [[package]]
@@ -2619,6 +2583,65 @@ dependencies = [
  "elliptic-curve",
  "primeorder",
  "sha2 0.10.8",
+]
+
+[[package]]
+name = "p2p_voltaire_network"
+version = "0.2.0"
+dependencies = [
+ "arbitrary",
+ "bs58 0.4.0",
+ "delay_map",
+ "dirs",
+ "discv5",
+ "error-chain",
+ "ethereum-types",
+ "ethereum_serde_utils",
+ "ethereum_ssz",
+ "ethereum_ssz_derive",
+ "exit-future",
+ "fixed-hash",
+ "fnv",
+ "futures",
+ "hex",
+ "lazy_static",
+ "libp2p",
+ "libp2p-mplex",
+ "libp2p-quic",
+ "lighthouse_metrics",
+ "lru 0.7.8",
+ "lru_cache",
+ "milagro_bls",
+ "parking_lot 0.12.1",
+ "prometheus-client",
+ "quickcheck",
+ "quickcheck_macros",
+ "rand 0.8.5",
+ "regex",
+ "serde",
+ "serde_derive",
+ "sha2 0.10.8",
+ "slog",
+ "slog-async",
+ "slog-term",
+ "smallvec",
+ "snap",
+ "ssz_types",
+ "strum",
+ "superstruct",
+ "task_executor",
+ "tempfile",
+ "tiny-keccak",
+ "tokio",
+ "tokio-io-timeout",
+ "tokio-util 0.6.10",
+ "tree_hash",
+ "tree_hash_derive",
+ "types",
+ "unsigned-varint 0.6.0",
+ "unused_port",
+ "void",
+ "voltaire_version",
 ]
 
 [[package]]
@@ -4303,6 +4326,14 @@ name = "void"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
+
+[[package]]
+name = "voltaire_version"
+version = "0.1.0"
+dependencies = [
+ "git-version",
+ "target_info",
+]
 
 [[package]]
 name = "waker-fn"
