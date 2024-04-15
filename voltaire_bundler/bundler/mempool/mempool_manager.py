@@ -85,9 +85,9 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
     async def add_user_operation(
             self, 
             user_operation: UserOperation,
-            ) -> (str, str, List[MempoolId]):
+    ) -> (str, str, List[MempoolId]):
         
-        latest_block_number, latest_block_basefee, _, latest_block_timestamp, latest_block_hash = await get_latest_block_info(self.ethereum_node_url)
+        latest_block_number, _, _, latest_block_timestamp, latest_block_hash = await get_latest_block_info(self.ethereum_node_url)
         self._verify_entities_reputation(
             user_operation.sender_address,
             user_operation.factory_address_lowercase,
@@ -95,7 +95,7 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
         )
 
         await self.gas_manager.verify_preverification_gas_and_verification_gas_limit(
-            user_operation, self.entrypoint, latest_block_number, latest_block_basefee
+            user_operation, self.entrypoint,
         )
         gas_price_hex = await self.gas_manager.verify_gas_fees_and_get_price(
             user_operation, self.enforce_gas_price_tolerance
@@ -158,7 +158,7 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
             peer_id: str, 
             verified_at_block_hash: str
             ) -> None:
-        latest_block_number, latest_block_basefee, _, latest_block_timestamp, latest_block_hash = await get_latest_block_info(self.ethereum_node_url)
+        latest_block_number, _, _, latest_block_timestamp, latest_block_hash = await get_latest_block_info(self.ethereum_node_url)
 
         try:
             self._verify_entities_reputation(
@@ -167,7 +167,7 @@ class LocalMempoolManagerVersion0Point6(LocalMempoolManager):
                 user_operation.paymaster_address_lowercase,
             ) 
             await self.gas_manager.verify_preverification_gas_and_verification_gas_limit(
-                user_operation, self.entrypoint, latest_block_number, latest_block_basefee
+                user_operation, self.entrypoint,
             )
             gas_price_hex = await self.gas_manager.verify_gas_fees_and_get_price(
                 user_operation, self.enforce_gas_price_tolerance

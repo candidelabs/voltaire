@@ -95,17 +95,13 @@ class BundlerManager:
             entrypoint:str
             ) -> list[UserOperation]:
         user_operations_list = []
+        gas_estimation = 0
         for user_operation in user_operations:
             user_operations_list.append(user_operation.to_list())
+            gas_estimation += user_operation.call_gas_limit + user_operation.verification_gas_limit * 3
 
         call_data = encode_handleops_calldata(
             user_operations_list, self.bundler_address
-        )
-
-        gas_estimation_op = self.gas_manager.estimate_call_gas_limit_using_eth_estimate(
-            bytes.fromhex(call_data[2:]),
-            _from=self.bundler_address,
-            to=entrypoint,
         )
 
         block_max_fee_per_gas_op = send_rpc_request_to_eth_client(
@@ -119,7 +115,6 @@ class BundlerManager:
         )
 
         tasks_arr = [
-            gas_estimation_op,
             block_max_fee_per_gas_op,
             nonce_op,
         ]
@@ -135,9 +130,8 @@ class BundlerManager:
         except ExecutionException:
             return []
 
-        gas_estimation = tasks[0]
-        block_max_fee_per_gas = tasks[1]["result"]
-        nonce = tasks[2]["result"]
+        block_max_fee_per_gas = tasks[0]["result"]
+        nonce = tasks[1]["result"]
 
         block_max_fee_per_gas_dec = int(block_max_fee_per_gas, 16)
         block_max_fee_per_gas_dec_mod = math.ceil(block_max_fee_per_gas_dec * (self.max_fee_per_gas_percentage_multiplier/100) * (self.gas_price_percentage_multiplier/100))
@@ -145,7 +139,7 @@ class BundlerManager:
 
         block_max_priority_fee_per_gas = 0
         if not self.is_legacy_mode:
-            block_max_priority_fee_per_gas = tasks[3]["result"]
+            block_max_priority_fee_per_gas = tasks[2]["result"]
             block_max_priority_fee_per_gas_dec = int(block_max_priority_fee_per_gas, 16)
             block_max_priority_fee_per_gas_dec_mod = math.ceil(block_max_priority_fee_per_gas_dec * (self.max_priority_fee_per_gas_percentage_multiplier/100) * (self.gas_price_percentage_multiplier/100))
             block_max_priority_fee_per_gas = hex(block_max_priority_fee_per_gas_dec_mod)
@@ -155,7 +149,7 @@ class BundlerManager:
             "from": self.bundler_address,
             "to": entrypoint,
             "nonce": nonce,
-            "gas": int(gas_estimation, 16),
+            "gas": gas_estimation,
             "data": call_data,
         }
 
