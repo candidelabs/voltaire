@@ -108,13 +108,6 @@ class ValidationManager:
         gas_price_hex:str,
         latest_block_timestamp: int
     ) -> bool:
-        # await self.gas_manager.verify_preverification_gas_and_verification_gas_limit(
-        #     user_operation, entrypoint, latest_block_number, latest_block_basefee
-        # )
-        # gas_price_hex = await self.gas_manager.verify_gas_fees_and_get_price(
-        #     user_operation, self.enforce_gas_price_tolerance
-        # )
-
         if self.is_unsafe:
             (
                 selector,
@@ -136,7 +129,7 @@ class ValidationManager:
             )
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
-                "revert reason : " + reason + " " + bytes.fromhex(validation_result[-64:]).decode("ascii"),
+                "revert reason : " + reason,
             )
 
         (
