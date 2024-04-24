@@ -435,6 +435,7 @@ class GasManager:
         )
         l1_gas = 0
 
+        """
         if self.chain_id == 10 or self.chain_id == 420:  # optimism and optimism goerli
             block_number_hex,latest_block_base_fee, _, _,_ = await get_latest_block_info(
                     self.ethereum_node_url)
@@ -443,6 +444,7 @@ class GasManager:
             )
         elif self.chain_id == 42161:  # arbitrum One
             l1_gas = await self.calc_l1_gas_estimate_arbitrum(user_operation, entrypoint)
+        """
 
         calculated_preverification_gas = base_preverification_gas + l1_gas
 
