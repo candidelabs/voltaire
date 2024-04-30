@@ -1,6 +1,7 @@
 from eth_abi import decode
 from functools import cache
 
+
 @cache
 @staticmethod
 def decode_FailedOp_event(solidity_error_params: str) -> tuple[str, str]:

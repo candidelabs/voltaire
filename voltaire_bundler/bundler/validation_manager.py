@@ -43,7 +43,7 @@ class ValidationManager:
     is_legacy_mode: bool
     whitelist_entity_storage_access: list()
     enforce_gas_price_tolerance: int
-    ethereum_node_debug_trace_call_url:str
+    ethereum_node_debug_trace_call_url: str
 
     def __init__(
         self,
@@ -103,30 +103,27 @@ class ValidationManager:
     async def validate_user_operation(
         self,
         user_operation: UserOperation,
-        entrypoint:str,
-        block_number:str,
-        gas_price_hex:str,
-        latest_block_timestamp: int
+        entrypoint: str,
+        block_number: str,
+        gas_price_hex: str,
+        latest_block_timestamp: int,
     ) -> bool:
         if self.is_unsafe:
             (
                 selector,
                 validation_result,
-            ) = await self.simulate_validation_without_tracing(user_operation, entrypoint)
+            ) = await self.simulate_validation_without_tracing(
+                user_operation, entrypoint
+            )
         else:
             debug_data: str = await self.simulate_validation_with_tracing(
-                user_operation,
-                entrypoint,
-                gas_price_hex,
-                block_number
+                user_operation, entrypoint, gas_price_hex, block_number
             )
             selector = debug_data["debug"][-2]["REVERT"][:10]
             validation_result = debug_data["debug"][-2]["REVERT"][10:]
 
         if ValidationManager.check_if_failed_op_error(selector):
-            _, reason = ValidationManager.decode_FailedOp_event(
-                validation_result
-            )
+            _, reason = ValidationManager.decode_FailedOp_event(validation_result)
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
                 "revert reason : " + reason,
@@ -147,8 +144,8 @@ class ValidationManager:
                 user_operation.to_list(), entrypoint, self.chain_id
             )
         else:
-            debug_data_formated = (
-                ValidationManager.format_debug_traceCall_data(debug_data)
+            debug_data_formated = ValidationManager.format_debug_traceCall_data(
+                debug_data
             )
             await self.validate_trace_results(
                 user_operation,
@@ -159,15 +156,13 @@ class ValidationManager:
                 debug_data_formated,
             )
             user_operation_hash = (
-                ValidationManager.get_user_operation_hash_from_debug_data(
-                    debug_data
-                )
+                ValidationManager.get_user_operation_hash_from_debug_data(debug_data)
             )
 
         return is_sender_staked, user_operation_hash
 
     async def simulate_validation_without_tracing(
-        self, user_operation: UserOperation, entrypoint:str
+        self, user_operation: UserOperation, entrypoint: str
     ) -> tuple[str, str]:
         call_data = encode_simulate_validation_calldata(user_operation)
 
@@ -189,9 +184,7 @@ class ValidationManager:
         ):
             raise ValueError("simulateValidation didn't revert!")
 
-        elif (
-            "data" not in result["error"] or len(result["error"]["data"]) < 10
-        ):
+        elif "data" not in result["error"] or len(result["error"]["data"]) < 10:
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
                 result["error"]["message"],
@@ -204,7 +197,11 @@ class ValidationManager:
         return solidity_error_selector, solidity_error_params
 
     async def simulate_validation_with_tracing(
-        self, user_operation: UserOperation, entrypoint:str, gas_price_hex: int, block_number:str
+        self,
+        user_operation: UserOperation,
+        entrypoint: str,
+        gas_price_hex: int,
+        block_number: str,
     ) -> str:
         call_data = encode_simulate_validation_calldata(user_operation)
 
@@ -258,9 +255,7 @@ class ValidationManager:
 
         sender_address_lowercase = user_operation.sender_address.lower()
         factory_address_lowercase = user_operation.factory_address_lowercase
-        paymaster_address_lowercase = (
-            user_operation.paymaster_address_lowercase
-        )
+        paymaster_address_lowercase = user_operation.paymaster_address_lowercase
 
         is_init_code = len(user_operation.init_code) > 2
 
@@ -302,9 +297,8 @@ class ValidationManager:
                 debug_data.factory_data.access,
                 is_init_code,
             )
-            associated_addresses_lowercase = (
-                associated_addresses_lowercase
-                + list(debug_data.factory_data.contract_size.keys())
+            associated_addresses_lowercase = associated_addresses_lowercase + list(
+                debug_data.factory_data.contract_size.keys()
             )
 
         _, paymaster_call = ValidationManager.parse_call_stack(
@@ -322,13 +316,10 @@ class ValidationManager:
                 debug_data.paymaster_data.access,
                 is_init_code,
             )
-            associated_addresses_lowercase = (
-                associated_addresses_lowercase
-                + list(debug_data.paymaster_data.contract_size.keys())
+            associated_addresses_lowercase = associated_addresses_lowercase + list(
+                debug_data.paymaster_data.contract_size.keys()
             )
-            is_paymaster_staked = ValidationManager.is_staked(
-                paymaster_stake_info
-            )
+            is_paymaster_staked = ValidationManager.is_staked(paymaster_stake_info)
             if len(paymaster_call._data) > 194 and not is_paymaster_staked:
                 raise ValidationException(
                     ValidationExceptionCode.OpcodeValidation,
@@ -489,9 +480,7 @@ class ValidationManager:
             )
 
         if "CREATE2" in opcodes:
-            if (opcodes["CREATE2"] > 1) or (
-                opcodes["CREATE2"] == 1 and not is_factory
-            ):
+            if (opcodes["CREATE2"] > 1) or (opcodes["CREATE2"] == 1 and not is_factory):
                 raise ValidationException(
                     ValidationExceptionCode.OpcodeValidation,
                     opcode_source + " uses banned opcode: " + "CREATE2",
@@ -515,9 +504,7 @@ class ValidationManager:
         return result["error"]["data"]
 
     def verify_sig_and_timestamp(
-        self, 
-        return_info: ReturnInfo,
-        latest_block_timestamp: int
+        self, return_info: ReturnInfo, latest_block_timestamp: int
     ) -> None:
         sigFailed = return_info.sigFailed
         validUntil = return_info.validUntil
@@ -538,7 +525,7 @@ class ValidationManager:
     def is_slot_associated_with_address(
         slot, address: str, associated_slots: list[str]
     ) -> bool:
-        address_lowercase = address[2:]#.lower()
+        address_lowercase = address[2:]  # .lower()
         address_padded = "0x000000000000000000000000" + address_lowercase
         address_lowercase = "0x" + address_lowercase
 
@@ -549,10 +536,7 @@ class ValidationManager:
 
         for associated_slot in associated_slots:
             associated_slot_int = int(associated_slot, 16)
-            if (
-                slot_int >= associated_slot_int
-                and slot_int < associated_slot_int + 18
-            ):
+            if slot_int >= associated_slot_int and slot_int < associated_slot_int + 18:
                 return True
 
         return False
@@ -626,13 +610,17 @@ class ValidationManager:
     def parse_entity_slots(entities: list[str], keccak_list_unique: list[str]):
         entity_slots = dict()
         entities_addresses_padded_pair_list = map(
-            lambda address: (address, "0x000000000000000000000000" + address[2:]), 
-            entities
-            )
+            lambda address: (address, "0x000000000000000000000000" + address[2:]),
+            entities,
+        )
 
-        [update_current_entity_slot(slot_keccak, address, address_padded, entity_slots) 
-         for address, address_padded in entities_addresses_padded_pair_list
-         for slot_keccak in keccak_list_unique]
+        [
+            update_current_entity_slot(
+                slot_keccak, address, address_padded, entity_slots
+            )
+            for address, address_padded in entities_addresses_padded_pair_list
+            for slot_keccak in keccak_list_unique
+        ]
         return entity_slots
 
     @staticmethod
@@ -675,8 +663,7 @@ class ValidationManager:
                 if (
                     paymaster_address is not None
                     and paymaster_address == result._to
-                    and VALIDATE_PAYMASTER_USER_OP_METHOD_SELECTOR
-                    == result._method
+                    and VALIDATE_PAYMASTER_USER_OP_METHOD_SELECTOR == result._method
                 ):
                     paymaster_call = result
 
@@ -715,19 +702,20 @@ class ValidationManager:
         user_operation_hash = "0x" + decoded_result[1].hex()
         return user_operation_hash
 
-def update_current_entity_slot(slot_keccak, address, address_padded, entity_slots):
-        # address_lowercase = address[2:]#.lower()
-        # address_padded = (
-        #     "0x000000000000000000000000" + address[2:]
-        # )
-        # address_lowercase = "0x" + address_lowercase
-        if address not in entity_slots:
-            entity_slots[address] = []
 
-        current_entity_slot = entity_slots[address]
-        if address_padded in slot_keccak:
-            # keccak_hash = keccak(bytes.fromhex(slot_keccak[2:]))
-            # slot = keccak_hash.hex()
-            slot = keccak(bytes.fromhex(slot_keccak[2:])).hex()
-            if slot not in current_entity_slot:
-                current_entity_slot.append(slot)
+def update_current_entity_slot(slot_keccak, address, address_padded, entity_slots):
+    # address_lowercase = address[2:]#.lower()
+    # address_padded = (
+    #     "0x000000000000000000000000" + address[2:]
+    # )
+    # address_lowercase = "0x" + address_lowercase
+    if address not in entity_slots:
+        entity_slots[address] = []
+
+    current_entity_slot = entity_slots[address]
+    if address_padded in slot_keccak:
+        # keccak_hash = keccak(bytes.fromhex(slot_keccak[2:]))
+        # slot = keccak_hash.hex()
+        slot = keccak(bytes.fromhex(slot_keccak[2:])).hex()
+        if slot not in current_entity_slot:
+            current_entity_slot.append(slot)

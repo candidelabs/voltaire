@@ -44,7 +44,7 @@ class UserOperationHandler:
         self.is_legacy_mode = is_legacy_mode
 
     async def get_user_operation_by_hash(
-        self, user_operation_hash: str, entrypoint:str
+        self, user_operation_hash: str, entrypoint: str
     ) -> tuple | None:
         event_log_info = await self.get_user_operation_event_log_info(
             user_operation_hash, entrypoint
@@ -63,23 +63,30 @@ class UserOperationHandler:
         return user_operation, block_number, block_hash, transaction_hash
 
     async def get_user_operation_by_hash_rpc(
-        self, user_operation_hash: str, entrypoint:str, senders_mempools,
+        self,
+        user_operation_hash: str,
+        entrypoint: str,
+        senders_mempools,
     ) -> dict | None:
-        user_operation_by_hash = await self.get_user_operation_by_hash(user_operation_hash, entrypoint)
+        user_operation_by_hash = await self.get_user_operation_by_hash(
+            user_operation_hash, entrypoint
+        )
         if user_operation_by_hash == None:
             user_operation_hashs_to_verified_user_operation = reduce(
-                lambda a, b: a|b,
+                lambda a, b: a | b,
                 (
                     map(
                         lambda sender_mempool: sender_mempool.user_operation_hashs_to_verified_user_operation,
-                        senders_mempools
+                        senders_mempools,
                     )
                 ),
-                []
+                [],
             )
             if user_operation_hash in user_operation_hashs_to_verified_user_operation:
                 user_operation_by_hash_json = {
-                    "userOperation": user_operation_hashs_to_verified_user_operation[user_operation_hash].user_operation,
+                    "userOperation": user_operation_hashs_to_verified_user_operation[
+                        user_operation_hash
+                    ].user_operation,
                     "entryPoint": entrypoint,
                     "blockNumber": None,
                     "blockHash": None,
@@ -95,9 +102,7 @@ class UserOperationHandler:
             transaction_hash,
         ) = user_operation_by_hash
 
-        user_operation = UserOperationHandler.decode_handle_op_input(
-            handle_op_input
-        )
+        user_operation = UserOperationHandler.decode_handle_op_input(handle_op_input)
 
         user_operation_json = {
             "sender": to_checksum_address(user_operation[0]),
@@ -122,7 +127,7 @@ class UserOperationHandler:
         return user_operation_by_hash_json
 
     async def get_user_operation_receipt(
-        self, user_operation_hash: str, entrypoint:str
+        self, user_operation_hash: str, entrypoint: str
     ) -> tuple[ReceiptInfo, UserOperationReceiptInfo] | None:
         event_log_info = await self.get_user_operation_event_log_info(
             user_operation_hash, entrypoint
@@ -141,9 +146,7 @@ class UserOperationHandler:
             logs,
         ) = event_log_info
 
-        transaction = await self.get_transaction_receipt(
-            log_object.transactionHash
-        )
+        transaction = await self.get_transaction_receipt(log_object.transactionHash)
 
         receiptInfo = ReceiptInfo(
             transactionHash=transaction["transactionHash"],
@@ -179,9 +182,11 @@ class UserOperationHandler:
         return receiptInfo, userOperationReceiptInfo
 
     async def get_user_operation_receipt_rpc(
-        self, user_operation_hash: str, entrypoint:str
+        self, user_operation_hash: str, entrypoint: str
     ) -> dict | None:
-        user_operation_receipt = await self.get_user_operation_receipt(user_operation_hash, entrypoint)
+        user_operation_receipt = await self.get_user_operation_receipt(
+            user_operation_hash, entrypoint
+        )
 
         if user_operation_receipt == None:
             return None
@@ -222,7 +227,7 @@ class UserOperationHandler:
         return user_operation_receipt_rpc_json
 
     async def get_user_operation_event_log_info(
-        self, user_operation_hash: str, entrypoint:str
+        self, user_operation_hash: str, entrypoint: str
     ) -> tuple | None:
         res = await self.get_user_operation_logs(user_operation_hash, entrypoint)
 
@@ -276,8 +281,10 @@ class UserOperationHandler:
         )
         return res["result"]
 
-    async def get_user_operation_logs(self, user_operation_hash: str, entrypoint:str):
-        USER_OPERATIOM_EVENT_DISCRIPTOR = "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
+    async def get_user_operation_logs(self, user_operation_hash: str, entrypoint: str):
+        USER_OPERATIOM_EVENT_DISCRIPTOR = (
+            "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
+        )
 
         params = [
             {

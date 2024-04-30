@@ -41,18 +41,14 @@ class UserOperation:
         self.nonce = verify_and_get_uint(jsonRequestDict["nonce"])
         self.init_code = verify_and_get_bytes(jsonRequestDict["initCode"])
         self.call_data = verify_and_get_bytes(jsonRequestDict["callData"])
-        self.call_gas_limit = verify_and_get_uint(
-            jsonRequestDict["callGasLimit"]
-        )
+        self.call_gas_limit = verify_and_get_uint(jsonRequestDict["callGasLimit"])
         self.verification_gas_limit = verify_and_get_uint(
             jsonRequestDict["verificationGasLimit"]
         )
         self.pre_verification_gas = verify_and_get_uint(
             jsonRequestDict["preVerificationGas"]
         )
-        self.max_fee_per_gas = verify_and_get_uint(
-            jsonRequestDict["maxFeePerGas"]
-        )
+        self.max_fee_per_gas = verify_and_get_uint(jsonRequestDict["maxFeePerGas"])
         self.max_priority_fee_per_gas = verify_and_get_uint(
             jsonRequestDict["maxPriorityFeePerGas"]
         )
@@ -146,9 +142,7 @@ class UserOperation:
             self.factory_address_lowercase = None
 
         if len(self.paymaster_and_data) > 20:
-            self.paymaster_address_lowercase = (
-                "0x" + self.paymaster_and_data[:20].hex()
-            )
+            self.paymaster_address_lowercase = "0x" + self.paymaster_and_data[:20].hex()
         else:
             self.paymaster_address_lowercase = None
 

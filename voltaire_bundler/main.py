@@ -5,12 +5,10 @@ from functools import partial
 from signal import SIGINT, SIGTERM
 from argparse import ArgumentParser
 import sys
-import subprocess
-import functools
 
 from voltaire_bundler.p2p_boot import p2p_boot
 
-from .cli_manager import initialize_argument_parser, InitData, get_init_data
+from .cli_manager import initialize_argument_parser, get_init_data
 from .rpc.rpc_http_server import run_rpc_http_server
 from voltaire_bundler.bundler.execution_endpoint import ExecutionEndpoint
 from voltaire_bundler.utils.SignalHaltError import immediate_exit
@@ -21,7 +19,7 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
     argument_parser: ArgumentParser = initialize_argument_parser()
     parsed_args = argument_parser.parse_args(cmd_args)
     init_data = await get_init_data(parsed_args)
-    if loop == None:
+    if loop is None:
         loop = asyncio.get_running_loop()
     if os.path.exists("p2p_endpoint.ipc"):
         os.remove("p2p_endpoint.ipc")
@@ -35,13 +33,15 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             init_data.p2p_mempools_ids,
             init_data.p2p_boot_nodes_enr,
             init_data.p2p_upnp_enabled,
-            init_data.p2p_metrics_enabled
+            init_data.p2p_metrics_enabled,
         )
     else:
         p2p_process = None
 
     for signal_enum in [SIGINT, SIGTERM]:
-        exit_func = partial(immediate_exit, signal_enum=signal_enum, loop=loop, p2p=p2p_process)
+        exit_func = partial(
+            immediate_exit, signal_enum=signal_enum, loop=loop, p2p=p2p_process
+        )
         loop.add_signal_handler(signal_enum, exit_func)
 
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())

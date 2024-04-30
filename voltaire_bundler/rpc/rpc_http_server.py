@@ -13,7 +13,11 @@ from jsonrpcserver import (
 from typing import Any
 from importlib.metadata import version
 
-from voltaire_bundler.event_bus_manager.endpoint import Client, RequestEvent, ResponseEvent
+from voltaire_bundler.event_bus_manager.endpoint import (
+    Client,
+    RequestEvent,
+    ResponseEvent,
+)
 from voltaire_bundler.bundler.exceptions import (
     ValidationException,
     ExecutionException,
@@ -47,13 +51,14 @@ REQUEST_TIME_chainId_eth_getUserOperationByHash = Summary(
 )
 rpcClient: Client = Client("bundler_endpoint")
 
+
 async def _handle_rpc_request(
     endpoint_id: str, request_type: str, request_arguments: Any = ""
 ) -> Any:
     # rpcClient: Client = Client(endpoint_id)
-    requestEvent:RequestEvent = {
-        "request_type" : request_type, 
-        "request_arguments" : request_arguments,
+    requestEvent: RequestEvent = {
+        "request_type": request_type,
+        "request_arguments": request_arguments,
     }
     resp = await rpcClient.request(requestEvent)
 
@@ -92,14 +97,14 @@ async def eth_supportedEntryPoints() -> Result:
 @REQUEST_TIME_eth_estimateUserOperationGas.time()
 @method
 async def eth_estimateUserOperationGas(
-        userOperationJson: dict[str, Any], 
-        entrypoint: str,
-        state_override_set:dict[str, Any]={},
-        ) -> Result:
+    userOperationJson: dict[str, Any],
+    entrypoint: str,
+    state_override_set: dict[str, Any] = {},
+) -> Result:
     result = await _handle_rpc_request(
         endpoint_id="bundler_endpoint",
         request_type="rpc_estimateUserOperationGas",
-        request_arguments=[userOperationJson, entrypoint,state_override_set],
+        request_arguments=[userOperationJson, entrypoint, state_override_set],
     )
     return result
 
@@ -107,8 +112,8 @@ async def eth_estimateUserOperationGas(
 @REQUEST_TIME_chainId_eth_sendUserOperation.time()
 @method
 async def eth_sendUserOperation(
-        userOperationJson: dict[str, Any], entrypoint: str
-        ) -> Result:
+    userOperationJson: dict[str, Any], entrypoint: str
+) -> Result:
     result = await _handle_rpc_request(
         endpoint_id="bundler_endpoint",
         request_type="rpc_sendUserOperation",
@@ -119,9 +124,7 @@ async def eth_sendUserOperation(
 
 @REQUEST_TIME_chainId_eth_getUserOperationReceipt.time()
 @method
-async def eth_getUserOperationReceipt(
-        userOperationHash: str
-        ) -> Result:
+async def eth_getUserOperationReceipt(userOperationHash: str) -> Result:
     result = await _handle_rpc_request(
         endpoint_id="bundler_endpoint",
         request_type="rpc_getUserOperationReceipt",
@@ -132,9 +135,7 @@ async def eth_getUserOperationReceipt(
 
 @REQUEST_TIME_chainId_eth_getUserOperationByHash.time()
 @method
-async def eth_getUserOperationByHash(
-        userOperationHash: str
-        ) -> Result:
+async def eth_getUserOperationByHash(userOperationHash: str) -> Result:
     result = await _handle_rpc_request(
         endpoint_id="bundler_endpoint",
         request_type="rpc_getUserOperationByHash",
@@ -191,12 +192,15 @@ async def debug_bundler_dumpReputation(entrypoint: str) -> Result:
         request_arguments=[entrypoint],
     )
     return result
+
+
 #
 @method
 async def web3_bundlerVersion() -> Result:
     return Success(version("voltaire_bundler"))
 
-async def handle(is_debug: bool, request:web.Request)->web.Response:
+
+async def handle(is_debug: bool, request: web.Request) -> web.Response:
     res = await request.text()
     methods = {
         "eth_chainId": eth_chainId,
@@ -223,12 +227,17 @@ async def handle(is_debug: bool, request:web.Request)->web.Response:
         content_type="application/json",
     )
 
-async def health(_:web.Request)->web.Response:
+
+async def health(_: web.Request) -> web.Response:
     return web.Response(text="OK")
 
+
 async def run_rpc_http_server(
-        host:str="localhost", rpc_cors_domain:str="*", port:int=3000, is_debug:bool=False
-        )->None:
+    host: str = "localhost",
+    rpc_cors_domain: str = "*",
+    port: int = 3000,
+    is_debug: bool = False,
+) -> None:
     logging.info(f"Starting HTTP RPC Server at: {host}:{port}/rpc")
     app = web.Application()
     handle_func = partial(handle, is_debug)
@@ -236,13 +245,14 @@ async def run_rpc_http_server(
 
     app.router.add_post("/health", health)
 
-    cors = aiohttp_cors.setup(app, defaults={
-        rpc_cors_domain: aiohttp_cors.ResourceOptions(
-                allow_credentials=True,
-                expose_headers="*",
-                allow_headers="*"
+    cors = aiohttp_cors.setup(
+        app,
+        defaults={
+            rpc_cors_domain: aiohttp_cors.ResourceOptions(
+                allow_credentials=True, expose_headers="*", allow_headers="*"
             )
-        })
+        },
+    )
     for route in list(app.router.routes()):
         cors.add(route)
 

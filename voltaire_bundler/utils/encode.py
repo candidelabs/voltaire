@@ -3,9 +3,7 @@ from voltaire_bundler.user_operation.user_operation import UserOperation
 
 
 @staticmethod
-def encode_handleops_calldata(
-    user_operations_list: [], bundler_address: str
-) -> str:
+def encode_handleops_calldata(user_operations_list: [], bundler_address: str) -> str:
     function_selector = "0x1fad948c"  # handleOps
     params = encode(
         [

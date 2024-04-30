@@ -25,6 +25,7 @@ ResponseEvent = Dict[str, Any]
 ResponseFunction = Callable[[Any], Awaitable[ResponseEvent]]
 PartialResponseFunction = partial[Awaitable[ResponseEvent]]
 
+
 class Endpoint:
     """This is a class representation of an Endpoint that can receive request from
     clients.
@@ -38,25 +39,23 @@ class Endpoint:
     """
 
     event_names: list[str] = field(default_factory=list[str])
-    response_functions_list: list[
-        PartialResponseFunction | ResponseFunction
-    ] = field(default_factory=list)
+    response_functions_list: list[PartialResponseFunction | ResponseFunction] = field(
+        default_factory=list
+    )
 
     def __init__(self, id: str) -> None:
         self.id = id
         self.event_names = []
         self.response_functions_list = []
 
-    async def start_server(self, filepath:str) -> None:
+    async def start_server(self, filepath: str) -> None:
         """
         Starts the Enpoint server to listen to requests on an IPC socket
         It creates the .ipc file if it doesn't exist
         """
         logging.info("Starting " + self.id)
         # filepath = self.id + ".ipc"
-        server = await asyncio.start_unix_server(
-            self._handle_request_cb, filepath
-        )
+        server = await asyncio.start_unix_server(self._handle_request_cb, filepath)
         async with server:
             await server.serve_forever()
 
@@ -81,7 +80,7 @@ class Endpoint:
     ) -> None:
         """
         When a class inherets the Enpoint class, this functions can add all functions
-        in the class that has a specific prefix to the event_names and the 
+        in the class that has a specific prefix to the event_names and the
         reponse_functions_list based on the function name.
         This way a function only needs to include a certain prefix in it's name to
         be included automatically.
@@ -102,18 +101,16 @@ class Endpoint:
                 else:
                     response_function = method_obj
 
-                self.add_event_and_response_function(
-                    event_name, response_function
-                )
+                self.add_event_and_response_function(event_name, response_function)
 
     async def _handle_request_cb(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         """
-        This callback function is passed to start_unix_server and is called whenever 
+        This callback function is passed to start_unix_server and is called whenever
         a new client connection is established.
-        This function waits for a RequestEvent from a client, routes the RequestEvent to 
-        its target response_function and then broadcast the ResponseEvent back to the 
+        This function waits for a RequestEvent from a client, routes the RequestEvent to
+        its target response_function and then broadcast the ResponseEvent back to the
         Client.
         """
         try:
@@ -123,16 +120,14 @@ class Endpoint:
             # )
             index = self.event_names.index(request_event["request_type"])
             response_function = self.response_functions_list[index]
-            response_event =  await response_function(request_event["request_arguments"])
+            response_event = await response_function(request_event["request_arguments"])
             if "p2p_received" not in request_event["request_type"]:
                 await _broadcast(response_event, writer)
         finally:
             writer.close()
-            await writer.wait_closed() # waits for the stream to close in case of unexpected interruption
+            await writer.wait_closed()  # waits for the stream to close in case of unexpected interruption
 
-    async def _get_response(
-        self, request_event: RequestEvent
-    ) -> ResponseEvent:
+    async def _get_response(self, request_event: RequestEvent) -> ResponseEvent:
         index = self.event_names.index(request_event["request_type"])
         response_function = self.response_functions_list[index]
         return await response_function(request_event["request_arguments"])
@@ -143,6 +138,7 @@ class Client:
     This Class represent a client that can send RequestEvent to an Endpoint(server) and
     receives a ResponseEvent
     """
+
     server_id: str
 
     def __init__(self, id: str) -> None:
@@ -160,7 +156,7 @@ class Client:
         response_event: ResponseEvent = await _listen(reader)
 
         return response_event
-    
+
     async def broadcast_only(self, request_event: RequestEvent) -> None:
         """
         This function establish a Unix socket connection to an Endpoint and sends a
@@ -172,8 +168,9 @@ class Client:
             _, writer = await asyncio.open_unix_connection(filepath)
         except ConnectionRefusedError:
             return
-        
+
         await _broadcast(request_event, writer)
+
 
 async def _listen(
     reader: asyncio.StreamReader,

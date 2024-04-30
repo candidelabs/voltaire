@@ -33,11 +33,14 @@ VOLTAIRE_HEADER = "\n".join(
 )
 __version__ = version("voltaire_bundler")
 
+
 class EntrypointType(Enum):
     v_0_6 = "0.6"
 
+
 class MempoolType(Enum):
     default = "default"
+
 
 @dataclass()
 class InitData:
@@ -60,13 +63,13 @@ class InitData:
     max_priority_fee_per_gas_percentage_multiplier: int
     is_metrics: bool
     rpc_cors_domain: str
-    enforce_gas_price_tolerance:int
+    enforce_gas_price_tolerance: int
     ethereum_node_debug_trace_call_url: str
     p2p_enr_address: str
     p2p_enr_tcp_port: int
     p2p_enr_udp_port: int
-    p2p_mempools_types:list[list[MempoolType]]
-    p2p_mempools_ids:list[list[MempoolId]]
+    p2p_mempools_types: list[list[MempoolType]]
+    p2p_mempools_ids: list[list[MempoolId]]
     p2p_target_peers_number: int
     p2p_boot_nodes_enr: str
     p2p_upnp_enabled: bool
@@ -76,23 +79,28 @@ class InitData:
     max_verification_gas: int
     max_call_data_gas: int
 
+
 def address(ep: str):
     address_pattern = "^0x[0-9,a-f,A-F]{40}$"
     if not isinstance(ep, str) or re.match(address_pattern, ep) is None:
         raise argparse.ArgumentTypeError(f"Wrong address format : {ep}")
     return ep
 
+
 def unsigned_int(value):
     ivalue = int(value)
     if ivalue < 0:
-        raise argparse.ArgumentTypeError("%s is an invalid unsigned int value" % value)
+        raise argparse.ArgumentTypeError(
+                "%s is an invalid unsigned int value" % value)
     return ivalue
+
 
 def url_no_port(ep: str):
     address_pattern = "^(((https|http)://)?((?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}|(?:\d{1,3}\.){3}\d{1,3}))$"
     if not isinstance(ep, str) or re.match(address_pattern, ep) is None:
         raise argparse.ArgumentTypeError(f"Wrong url format : {ep}")
     return ep
+
 
 def initialize_argument_parser() -> ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -318,7 +326,7 @@ def initialize_argument_parser() -> ArgumentParser:
         "--p2p_mempools_types",
         type=MempoolType,
         nargs="+",
-        action='append',
+        action="append",
         default=[[MempoolType.default]],
         help="P2P - List of mempool types per entrypoint.",
     )
@@ -327,7 +335,7 @@ def initialize_argument_parser() -> ArgumentParser:
         "--p2p_mempools_ids",
         type=MempoolId,
         nargs="+",
-        action='append',
+        action="append",
         default=[[None]],
         help="P2P - List of supported mempools ids per mempool type.",
     )
@@ -392,7 +400,8 @@ def initialize_argument_parser() -> ArgumentParser:
 
     return parser
 
-def init_logging(args:Namespace):
+
+def init_logging(args: Namespace):
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING,
         format="%(asctime)s %(levelname)s %(message)s",
@@ -401,7 +410,8 @@ def init_logging(args:Namespace):
 
     logging.getLogger("Voltaire")
 
-def init_bundler_address_and_secret(args:Namespace):
+
+def init_bundler_address_and_secret(args: Namespace):
     bundler_address = ""
     bundler_pk = ""
 
@@ -414,11 +424,11 @@ def init_bundler_address_and_secret(args:Namespace):
         bundler_address = public_address_from_private_key(bundler_pk)
     return bundler_address, bundler_pk
 
+
 def init_bundler_helper():
     package_directory = os.path.dirname(os.path.abspath(__file__))
     BundlerHelper_file = os.path.join(
-        package_directory, "utils", "BundlerHelper.json"
-    )
+            package_directory, "utils", "BundlerHelper.json")
 
     bundler_helper_byte_code_file = open(BundlerHelper_file)
     data = json.load(bundler_helper_byte_code_file)
@@ -426,86 +436,112 @@ def init_bundler_helper():
 
     return bundler_helper_byte_code
 
-def init_entrypoint_and_mempool_data(args:Namespace):
+
+def init_entrypoint_and_mempool_data(args: Namespace):
     for (
-            entrypoint,
-            entrypoint_mempools_types,
-            entrypoint_mempool_ids,
-        ) in zip(
-            args.entrypoints,
-            args.p2p_mempools_types,
-            args.p2p_mempools_ids,
-        ):
+        entrypoint,
+        entrypoint_mempools_types,
+        entrypoint_mempool_ids,
+    ) in zip(
+        args.entrypoints,
+        args.p2p_mempools_types,
+        args.p2p_mempools_ids,
+    ):
         index = 0
-        for mempool_type, mempool_id in zip(entrypoint_mempools_types, entrypoint_mempool_ids):
+        for mempool_type, mempool_id in zip(
+            entrypoint_mempools_types, entrypoint_mempool_ids
+        ):
             if mempool_id is None and mempool_type == MempoolType.default:
                 if entrypoint in DEFAULT_MEMPOOL_INFO:
                     if args.chain_id in DEFAULT_MEMPOOL_INFO[entrypoint]:
-                        entrypoint_mempool_ids[index] = DEFAULT_MEMPOOL_INFO[entrypoint][args.chain_id]
+                        entrypoint_mempool_ids[index] = DEFAULT_MEMPOOL_INFO[
+                            entrypoint
+                        ][args.chain_id]
                     elif args.disable_p2p:
-                        entrypoint_mempool_ids[index] = "" #set mempool id to empty string if disable_p2p
+                        entrypoint_mempool_ids[index] = (
+                            ""  # set mempool id to empty string if disable_p2p
+                        )
                     else:
-                        logging.error(f"Chain without default mempool ids : {entrypoint}, please specify the mempool id")
+                        logging.error(
+                            f"Chain without default mempool ids : {entrypoint}, please specify the mempool id"
+                        )
                         sys.exit(1)
                 else:
-                    logging.error(f"Entrypoint without default mempool ids : {entrypoint}, please specify the mempool id")
-                    sys.exit(1)  
+                    logging.error(
+                        f"Entrypoint without default mempool ids : {entrypoint}, please specify the mempool id"
+                    )
+                    sys.exit(1)
                 index = index + 1
 
-def check_if_valid_rpc_url_and_port(rpc_url, rpc_port)->bool:
+
+def check_if_valid_rpc_url_and_port(rpc_url, rpc_port) -> bool:
     try:
         socket.getaddrinfo(rpc_url, rpc_port)
     except socket.gaierror:
         logging.error(f"Invalid RPC url {rpc_url} and port {rpc_port}")
-        sys.exit(1)  
-    
+        sys.exit(1)
+
     soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         soc.bind((rpc_url, rpc_port))
     except socket.error as message:
-        logging.error(f'Bind failed. {str(message)} for RPC url {rpc_url} and port {rpc_port}')
+        logging.error(
+            f"Bind failed. {str(message)} for RPC url {rpc_url} and port {rpc_port}"
+        )
         sys.exit(1)
 
-async def check_valid_ethereum_rpc_and_get_chain_id(ethereum_node_url)->str:
-    try :
+
+async def check_valid_ethereum_rpc_and_get_chain_id(ethereum_node_url) -> str:
+    try:
         chain_id_hex = await send_rpc_request_to_eth_client(
             ethereum_node_url,
             "eth_chainId",
             [],
         )
         if "result" not in chain_id_hex:
-            logging.error(f'Invalide Eth node {ethereum_node_url}')
+            logging.error(f"Invalide Eth node {ethereum_node_url}")
             sys.exit(1)
         else:
             return chain_id_hex["result"]
     except aiohttp.client_exceptions.ClientConnectorError:
-        logging.error(f'Connection refused for Eth node {ethereum_node_url}')
+        logging.error(f"Connection refused for Eth node {ethereum_node_url}")
         sys.exit(1)
     except:
-        logging.error(f'Error when connecting to Eth node {ethereum_node_url}')
+        logging.error(f"Error when connecting to Eth node {ethereum_node_url}")
         sys.exit(1)
 
-async def get_init_data(args:Namespace)-> InitData:
+
+async def get_init_data(args: Namespace) -> InitData:
     init_logging(args)
 
     check_if_valid_rpc_url_and_port(args.rpc_url, args.rpc_port)
 
-    ethereum_node_chain_id_hex = await check_valid_ethereum_rpc_and_get_chain_id(args.ethereum_node_url)
+    ethereum_node_chain_id_hex = await check_valid_ethereum_rpc_and_get_chain_id(
+        args.ethereum_node_url
+    )
 
     if hex(args.chain_id) != ethereum_node_chain_id_hex.lower():
-        logging.error(f'Invalide chain id {args.chain_id} with Eth node {args.ethereum_node_url}')
+        logging.error(
+            f"Invalide chain id {args.chain_id} with Eth node {args.ethereum_node_url}"
+        )
         sys.exit(1)
 
     bundler_address, bundler_pk = init_bundler_address_and_secret(args)
 
     bundler_helper_byte_code = init_bundler_helper()
 
-    if args.ethereum_node_debug_trace_call_url == None:
+    if args.ethereum_node_debug_trace_call_url is None:
         args.ethereum_node_debug_trace_call_url = args.ethereum_node_url
     else:
-        ethereum_node_debug_chain_id_hex = await check_valid_ethereum_rpc_and_get_chain_id(args.ethereum_node_debug_trace_call_url)
-        if(ethereum_node_chain_id_hex != ethereum_node_debug_chain_id_hex):
-            logging.error(f'Eth node chain id {ethereum_node_chain_id_hex} not eqaul Eth node debug chain id {ethereum_node_debug_chain_id_hex}')
+        ethereum_node_debug_chain_id_hex = (
+            await check_valid_ethereum_rpc_and_get_chain_id(
+                args.ethereum_node_debug_trace_call_url
+            )
+        )
+        if ethereum_node_chain_id_hex != ethereum_node_debug_chain_id_hex:
+            logging.error(
+                f"Eth node chain id {ethereum_node_chain_id_hex} not eqaul Eth node debug chain id {ethereum_node_debug_chain_id_hex}"
+            )
             sys.exit(1)
 
     init_entrypoint_and_mempool_data(args)

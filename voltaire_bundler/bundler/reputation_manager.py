@@ -107,14 +107,9 @@ class ReputationManager:
         min_expected_included = (
             reputation_entry.ops_seen // MIN_INCLUSION_RATE_DENOMINATOR
         )
-        if (
-            min_expected_included
-            <= reputation_entry.ops_included + THROTTLING_SLACK
-        ):
+        if min_expected_included <= reputation_entry.ops_included + THROTTLING_SLACK:
             return ReputationStatus.OK
-        elif (
-            min_expected_included <= reputation_entry.ops_included + BAN_SLACK
-        ):
+        elif min_expected_included <= reputation_entry.ops_included + BAN_SLACK:
             return ReputationStatus.THROTTLED
         else:
             return ReputationStatus.BANNED
@@ -128,9 +123,7 @@ class ReputationManager:
     def get_entities_reputation_json(self):
         entities_reputation_json = {}
         for entity_address in self.entities_reputation.keys():
-            entities_reputation_json[
-                entity_address
-            ] = self.entities_reputation[
+            entities_reputation_json[entity_address] = self.entities_reputation[
                 entity_address
             ].get_reputation_entry_json()
 

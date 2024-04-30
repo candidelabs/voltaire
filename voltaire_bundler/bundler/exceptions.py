@@ -20,6 +20,7 @@ class ValidationException(Exception):
     exception_code: ValidationExceptionCode
     message: str
 
+
 class ExecutionExceptionCode(Enum):
     EXECUTION_REVERTED = -32521
 
@@ -28,6 +29,7 @@ class ExecutionExceptionCode(Enum):
 class ExecutionException(Exception):
     exception_code: ExecutionExceptionCode
     message: str
+
 
 @dataclass
 class MethodNotFoundException(Exception):
