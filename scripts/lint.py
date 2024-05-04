@@ -1,10 +1,11 @@
-import subprocess                                                               
+import subprocess
+
 
 def start():
-    cmd =';'.join(
+    cmd = ';'.join(
         [
             "echo Flake8:",
-            'flake8 --extend-select',
+            'flake8',
             "echo Mypy:",
             'mypy voltaire_bundler'
         ])

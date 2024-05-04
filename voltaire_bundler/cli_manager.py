@@ -1,26 +1,24 @@
-from enum import Enum
-import os
-import logging
-import argparse
-import re
+
 import json
-from dataclasses import dataclass
-from importlib.metadata import version
-from argparse import ArgumentParser, Namespace
+import logging
+import os
+import re
 import socket
 import sys
+from argparse import ArgumentParser, Namespace, ArgumentTypeError
+from dataclasses import dataclass
+from enum import Enum
+from importlib.metadata import version
 
 import aiohttp
 
-from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
+from voltaire_bundler.bundler.mempool.mempool_info import DEFAULT_MEMPOOL_INFO
+from voltaire_bundler.utils.eth_client_utils import \
+    send_rpc_request_to_eth_client
 
 from .typing import Address, MempoolId
-from .utils.import_key import (
-    import_bundler_account,
-    public_address_from_private_key,
-)
-from voltaire_bundler.bundler.mempool.mempool_info import DEFAULT_MEMPOOL_INFO
-
+from .utils.import_key import (import_bundler_account,
+                               public_address_from_private_key)
 
 VOLTAIRE_HEADER = "\n".join(
     (
@@ -83,27 +81,27 @@ class InitData:
 def address(ep: str):
     address_pattern = "^0x[0-9,a-f,A-F]{40}$"
     if not isinstance(ep, str) or re.match(address_pattern, ep) is None:
-        raise argparse.ArgumentTypeError(f"Wrong address format : {ep}")
+        raise ArgumentTypeError(f"Wrong address format : {ep}")
     return ep
 
 
 def unsigned_int(value):
     ivalue = int(value)
     if ivalue < 0:
-        raise argparse.ArgumentTypeError(
+        raise ArgumentTypeError(
                 "%s is an invalid unsigned int value" % value)
     return ivalue
 
 
 def url_no_port(ep: str):
-    address_pattern = "^(((https|http)://)?((?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}|(?:\d{1,3}\.){3}\d{1,3}))$"
+    address_pattern = "^(((https|http)://)?((?:[a-zA-Z0-9-]+\\.)+[a-zA-Z]{2,}|(?:\\d{1,3}\\.){3}\\d{1,3}))$"
     if not isinstance(ep, str) or re.match(address_pattern, ep) is None:
-        raise argparse.ArgumentTypeError(f"Wrong url format : {ep}")
+        raise ArgumentTypeError(f"Wrong url format : {ep}")
     return ep
 
 
 def initialize_argument_parser() -> ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = ArgumentParser(
         prog="Voltaire",
         description="EIP-4337 python Bundler",
         epilog="Candide Labs : https://candide.dev/ - Github : https://github.com/candidelabs",
@@ -474,7 +472,7 @@ def init_entrypoint_and_mempool_data(args: Namespace):
                 index = index + 1
 
 
-def check_if_valid_rpc_url_and_port(rpc_url, rpc_port) -> bool:
+def check_if_valid_rpc_url_and_port(rpc_url, rpc_port) -> None:
     try:
         socket.getaddrinfo(rpc_url, rpc_port)
     except socket.gaierror:
@@ -506,7 +504,7 @@ async def check_valid_ethereum_rpc_and_get_chain_id(ethereum_node_url) -> str:
     except aiohttp.client_exceptions.ClientConnectorError:
         logging.error(f"Connection refused for Eth node {ethereum_node_url}")
         sys.exit(1)
-    except:
+    except Exception:
         logging.error(f"Error when connecting to Eth node {ethereum_node_url}")
         sys.exit(1)
 

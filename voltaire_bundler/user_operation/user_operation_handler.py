@@ -1,28 +1,15 @@
-import asyncio
 from functools import reduce
-import math
+from typing import Any
 
-from eth_utils import to_checksum_address, keccak
-from eth_abi import encode, decode
+from eth_abi import decode, encode
+from eth_utils import keccak, to_checksum_address
 
-from .user_operation import UserOperation
-from voltaire_bundler.bundler.exceptions import (
-    ValidationException,
-    ValidationExceptionCode,
-)
-from voltaire_bundler.bundler.exceptions import (
-    ExecutionException,
-    ExecutionExceptionCode,
-)
-from voltaire_bundler.utils.eth_client_utils import (
-    send_rpc_request_to_eth_client,
-)
-
-from voltaire_bundler.user_operation.models import (
-    Log,
-    ReceiptInfo,
-    UserOperationReceiptInfo,
-)
+from voltaire_bundler.bundler.mempool.sender_mempool import \
+    VerifiedUserOperation
+from voltaire_bundler.user_operation.models import (Log, ReceiptInfo,
+                                                    UserOperationReceiptInfo)
+from voltaire_bundler.utils.eth_client_utils import \
+    send_rpc_request_to_eth_client
 
 
 class UserOperationHandler:
@@ -49,7 +36,7 @@ class UserOperationHandler:
         event_log_info = await self.get_user_operation_event_log_info(
             user_operation_hash, entrypoint
         )
-        if event_log_info == None:
+        if event_log_info is None:
             return None
         log_object = event_log_info[0]
         transaction_hash = log_object.transactionHash
@@ -71,8 +58,8 @@ class UserOperationHandler:
         user_operation_by_hash = await self.get_user_operation_by_hash(
             user_operation_hash, entrypoint
         )
-        if user_operation_by_hash == None:
-            user_operation_hashs_to_verified_user_operation = reduce(
+        if user_operation_by_hash is None:
+            user_operation_hashs_to_verified_user_operation: dict[str, VerifiedUserOperation] = reduce(
                 lambda a, b: a | b,
                 (
                     map(
@@ -80,7 +67,7 @@ class UserOperationHandler:
                         senders_mempools,
                     )
                 ),
-                [],
+                dict(),
             )
             if user_operation_hash in user_operation_hashs_to_verified_user_operation:
                 user_operation_by_hash_json = {
@@ -132,7 +119,7 @@ class UserOperationHandler:
         event_log_info = await self.get_user_operation_event_log_info(
             user_operation_hash, entrypoint
         )
-        if event_log_info == None:
+        if event_log_info is None:
             return None
         (
             log_object,
@@ -146,7 +133,8 @@ class UserOperationHandler:
             logs,
         ) = event_log_info
 
-        transaction = await self.get_transaction_receipt(log_object.transactionHash)
+        transaction = await self.get_transaction_receipt(
+                log_object.transactionHash)
 
         receiptInfo = ReceiptInfo(
             transactionHash=transaction["transactionHash"],
@@ -188,7 +176,7 @@ class UserOperationHandler:
             user_operation_hash, entrypoint
         )
 
-        if user_operation_receipt == None:
+        if user_operation_receipt is None:
             return None
         (
             receipt_info,
@@ -229,7 +217,8 @@ class UserOperationHandler:
     async def get_user_operation_event_log_info(
         self, user_operation_hash: str, entrypoint: str
     ) -> tuple | None:
-        res = await self.get_user_operation_logs(user_operation_hash, entrypoint)
+        res: Any = await self.get_user_operation_logs(
+                user_operation_hash, entrypoint)
 
         if "result" not in res or len(res["result"]) < 1:
             return None
@@ -276,12 +265,13 @@ class UserOperationHandler:
 
     async def get_transaction_receipt(self, transaction_hash: str) -> dict:
         params = [transaction_hash]
-        res = await send_rpc_request_to_eth_client(
+        res: Any = await send_rpc_request_to_eth_client(
             self.ethereum_node_url, "eth_getTransactionReceipt", params
         )
         return res["result"]
 
-    async def get_user_operation_logs(self, user_operation_hash: str, entrypoint: str):
+    async def get_user_operation_logs(
+            self, user_operation_hash: str, entrypoint: str):
         USER_OPERATIOM_EVENT_DISCRIPTOR = (
             "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
         )
@@ -304,14 +294,14 @@ class UserOperationHandler:
 
     async def get_transaction_by_hash(self, transaction_hash) -> dict:
         params = [transaction_hash]
-        res = await send_rpc_request_to_eth_client(
+        res: Any = await send_rpc_request_to_eth_client(
             self.ethereum_node_url, "eth_getTransactionByHash", params
         )
         return res["result"]
 
     @staticmethod
     def get_user_operation_hash(
-        user_operation_list: list(), entrypoint_addr: str, chain_id: int
+        user_operation_list: list, entrypoint_addr: str, chain_id: int
     ):
         packed_user_operation = keccak(
             UserOperationHandler.pack_user_operation(user_operation_list)
@@ -326,7 +316,7 @@ class UserOperationHandler:
 
     @staticmethod
     def pack_user_operation(
-        user_operation_list: list(), for_signature: bool = True
+        user_operation_list: list, for_signature: bool = True
     ) -> bytes:
         if for_signature:
             user_operation_list[2] = keccak(user_operation_list[2])

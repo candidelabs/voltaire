@@ -1,37 +1,38 @@
-from dataclasses import field, dataclass
+from dataclasses import dataclass
 
 
 @dataclass
 class ReturnInfo:
     # SELECTOR = "0xf04297e9"
-    preOpGas: int | str
-    prefund: int | str
+    preOpGas: int
+    prefund: int
     sigFailed: bool
-    validAfter: int | str
-    validUntil: int | str
+    validAfter: int
+    validUntil: int
+    paymasterContext: bytes
 
 
 @dataclass
 class StakeInfo:
-    stake: int | str
-    unstakeDelaySec: int | str
+    stake: int
+    unstakeDelaySec: int
 
 
 @dataclass
 class FailedOpRevertData:
     SELECTOR = "0x00fa072b"
-    opIndex: int | str
+    opIndex: int
     paymaster: str
     reason: str
 
 
 @dataclass
 class DepositInfo:
-    deposit: int | str
+    deposit: int
     staked: bool
-    stake: int | str
-    unstake_delay_sec: int | str
-    withdraw_time: int | str
+    stake: int
+    unstake_delay_sec: int
+    withdraw_time: int
 
 
 @dataclass
@@ -62,7 +63,7 @@ class ReceiptInfo:
     # root:str
     status: str
     effectiveGasPrice: str
-    logs: list = field(default_factory=list)
+    logs: list[str]
 
 
 @dataclass

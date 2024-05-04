@@ -1,18 +1,19 @@
 import asyncio
 import os
-import uvloop
+import sys
+from argparse import ArgumentParser
 from functools import partial
 from signal import SIGINT, SIGTERM
-from argparse import ArgumentParser
-import sys
 
-from voltaire_bundler.p2p_boot import p2p_boot
+import uvloop
 
-from .cli_manager import initialize_argument_parser, get_init_data
-from .rpc.rpc_http_server import run_rpc_http_server
 from voltaire_bundler.bundler.execution_endpoint import ExecutionEndpoint
-from voltaire_bundler.utils.SignalHaltError import immediate_exit
 from voltaire_bundler.metrics.metrics import run_metrics_server
+from voltaire_bundler.p2p_boot import p2p_boot
+from voltaire_bundler.utils.SignalHaltError import immediate_exit
+
+from .cli_manager import get_init_data, initialize_argument_parser
+from .rpc.rpc_http_server import run_rpc_http_server
 
 
 async def main(cmd_args=sys.argv[1:], loop=None) -> None:

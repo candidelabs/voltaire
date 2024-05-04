@@ -1,38 +1,28 @@
 import asyncio
 import logging
+import math
 import os
 from typing import Any, List
-import math
+
+from voltaire_bundler.bundler.exceptions import (ExecutionException,
+                                                 ValidationException,
+                                                 ValidationExceptionCode)
+from voltaire_bundler.bundler.gas_manager import GasManager
 from voltaire_bundler.bundler.mempool.mempool_info import DEFAULT_MEMPOOL_INFO
-
-from voltaire_bundler.event_bus_manager.endpoint import (
-    Client, Endpoint
-)
-
+from voltaire_bundler.cli_manager import EntrypointType, MempoolType
+from voltaire_bundler.event_bus_manager.endpoint import Client, Endpoint
+from voltaire_bundler.typing import Address, MempoolId
 from voltaire_bundler.user_operation.user_operation import (
-    UserOperation,
-    is_user_operation_hash,
-)
+    UserOperation, is_user_operation_hash)
+from voltaire_bundler.user_operation.user_operation_handler import \
+    UserOperationHandler
 from voltaire_bundler.utils.eth_client_utils import get_latest_block_info
 
-from .mempool.mempool_manager import (
-    LocalMempoolManager,
-    LocalMempoolManagerVersion0Point6,
-)
-from voltaire_bundler.user_operation.user_operation_handler import (
-    UserOperationHandler,
-)
-from voltaire_bundler.bundler.exceptions import (
-    ValidationException,
-    ValidationExceptionCode,
-    ExecutionException,
-)
 from .bundle.bundle_manager import BundlerManager
-from .validation_manager import ValidationManager
+from .mempool.mempool_manager import (LocalMempoolManager,
+                                      LocalMempoolManagerVersion0Point6)
 from .reputation_manager import ReputationManager, ReputationStatus
-from voltaire_bundler.bundler.gas_manager import GasManager
-from voltaire_bundler.cli_manager import EntrypointType, MempoolType
-from voltaire_bundler.typing import Address, MempoolId
+from .validation_manager import ValidationManager
 
 
 class ExecutionEndpoint(Endpoint):
@@ -70,22 +60,22 @@ class ExecutionEndpoint(Endpoint):
         self,
         ethereum_node_url: str,
         bundler_private_key: str,
-        bundler_address: str,
-        entrypoints: str,
+        bundler_address: Address,
+        entrypoints: list[Address],
         bundler_helper_byte_code: str,
-        chain_id: str,
+        chain_id: int,
         is_unsafe: bool,
         is_legacy_mode: bool,
         is_send_raw_transaction_conditional: bool,
         bundle_interval: int,
-        whitelist_entity_storage_access: list(),
+        whitelist_entity_storage_access: list,
         max_fee_per_gas_percentage_multiplier: int,
         max_priority_fee_per_gas_percentage_multiplier: int,
         enforce_gas_price_tolerance: int,
         ethereum_node_debug_trace_call_url: str,
-        entrypoints_versions: List[str],
-        p2p_mempools_types_per_entrypoint: List[List[str]],
-        p2p_mempools_ids_per_entrypoint: List[List[str]],
+        entrypoints_versions: List[EntrypointType],
+        p2p_mempools_types_per_entrypoint: List[List[MempoolType]],
+        p2p_mempools_ids_per_entrypoint: List[List[MempoolId]],
         disable_p2p: bool,
         max_verification_gas: int,
         max_call_data_gas: int,
@@ -201,7 +191,8 @@ class ExecutionEndpoint(Endpoint):
                 raise ValueError
 
             self.entrypoints_to_local_mempools[entrypoint] = local_mempool_manager
-            self.entrypoints_lowercase_to_checksummed[entrypoint.lower()] = entrypoint
+            self.entrypoints_lowercase_to_checksummed[
+                    Address(entrypoint.lower())] = entrypoint
 
         self.p2pClient: Client = Client("p2p_endpoint")
 
@@ -275,7 +266,9 @@ class ExecutionEndpoint(Endpoint):
             mempool.verified_useroperations_standard_mempool_gossip_queue.clear()
 
     async def update_p2p_peer_ids_to_user_ops_hashes_queue(self) -> None:
-        for peer_id, user_ops_hashes in self.peer_ids_to_user_ops_hashes_queue.items():
+        for (
+            peer_id, user_ops_hashes
+        ) in self.peer_ids_to_user_ops_hashes_queue.items():
             if len(user_ops_hashes) > 0:
                 pooled_user_ops_by_hash_request = dict()
                 pooled_user_ops_by_hash_request = {"hashes": user_ops_hashes}
@@ -299,16 +292,20 @@ class ExecutionEndpoint(Endpoint):
         async with asyncio.TaskGroup() as task_group:
             task_group.create_task(self.start_server("bundler_endpoint.ipc"))
 
-    async def _event_rpc_chainId(self, req_arguments: []) -> str:
+    async def _event_rpc_chainId(self, req_arguments: list) -> str:
         return hex(self.chain_id)
 
-    async def _event_rpc_supportedEntryPoints(self, req_arguments: []) -> str:
+    async def _event_rpc_supportedEntryPoints(
+            self, req_arguments: list) -> list:
         return list(self.entrypoints_to_local_mempools.keys())
 
-    async def _event_rpc_estimateUserOperationGas(self, req_arguments: []) -> dict:
+    async def _event_rpc_estimateUserOperationGas(
+            self, req_arguments: list) -> dict[str, str]:
         user_operation: UserOperation = UserOperation(req_arguments[0])
         entrypoint_address: str = req_arguments[1]
-        state_override_set_dict: dict[str, Any] = req_arguments[2]
+        state_override_set_dict: dict[str, Any] = {}
+        if req_arguments[2] is not None:
+            state_override_set_dict: dict[str, Any] = req_arguments[2]
 
         if entrypoint_address not in self.entrypoints_to_local_mempools:
             raise ValidationException(
@@ -342,7 +339,7 @@ class ExecutionEndpoint(Endpoint):
 
         return estimated_gas_json
 
-    async def _event_rpc_sendUserOperation(self, req_arguments: []) -> str:
+    async def _event_rpc_sendUserOperation(self, req_arguments: list) -> str:
         user_operation: UserOperation = UserOperation(req_arguments[0])
         entrypoint_address = req_arguments[1]
         if entrypoint_address not in self.entrypoints_to_local_mempools:
@@ -367,7 +364,8 @@ class ExecutionEndpoint(Endpoint):
 
         return user_operation_hash
 
-    async def _event_rpc_getUserOperationByHash(self, req_arguments: []) -> dict:
+    async def _event_rpc_getUserOperationByHash(
+            self, req_arguments: list) -> dict | None:
         user_operation_hash = req_arguments[0]
 
         if not is_user_operation_hash(user_operation_hash):
@@ -375,6 +373,8 @@ class ExecutionEndpoint(Endpoint):
                 ValidationExceptionCode.INVALID_USEROPHASH,
                 "Missing/invalid userOpHash",
             )
+
+        user_operation_by_hash_json = dict()
         for entrypoint in self.entrypoints_to_local_mempools:
             entrypoint_senders_mempools = self.entrypoints_to_local_mempools[
                 entrypoint
@@ -388,7 +388,8 @@ class ExecutionEndpoint(Endpoint):
             )
         return user_operation_by_hash_json
 
-    async def _event_rpc_getUserOperationReceipt(self, req_arguments: []) -> dict:
+    async def _event_rpc_getUserOperationReceipt(
+            self, req_arguments: list) -> dict | None:
         user_operation_hash = req_arguments[0]
 
         if not is_user_operation_hash(user_operation_hash):
@@ -397,6 +398,7 @@ class ExecutionEndpoint(Endpoint):
                 "Missing/invalid userOpHash",
             )
 
+        user_operation_receipt_info_json = dict()
         for entrypoint in self.entrypoints_to_local_mempools:
             user_operation_receipt_info_json = (
                 await self.user_operation_handler.get_user_operation_receipt_rpc(
@@ -406,19 +408,21 @@ class ExecutionEndpoint(Endpoint):
 
         return user_operation_receipt_info_json
 
-    async def _event_debug_bundler_sendBundleNow(self, req_arguments: []) -> None:
+    async def _event_debug_bundler_sendBundleNow(self, _) -> str:
         await self.bundle_manager.update_send_queue()
         await self.bundle_manager.send_next_bundle()
 
         return "ok"
 
-    async def _event_debug_bundler_clearState(self, req_arguments: []) -> str:
+    async def _event_debug_bundler_clearState(
+            self, req_arguments: list) -> str:
         for mempool_manager in self.entrypoints_to_local_mempools.values():
             mempool_manager.clear_user_operations()
 
         return "ok"
 
-    async def _event_debug_bundler_dumpMempool(self, req_arguments: []) -> str:
+    async def _event_debug_bundler_dumpMempool(
+            self, req_arguments: list) -> list[dict[str, str]]:
         entrypoint_address = req_arguments[0]
         if entrypoint_address not in self.entrypoints_to_local_mempools:
             raise ValidationException(
@@ -435,17 +439,20 @@ class ExecutionEndpoint(Endpoint):
         ]
         return user_operations_json
 
-    async def _event_debug_bundler_setReputation(self, req_arguments: []) -> str:
+    async def _event_debug_bundler_setReputation(
+            self, req_arguments: list) -> str:
         entitiy = req_arguments[0]
         ops_seen = req_arguments[1]
         ops_included = req_arguments[2]
         status = req_arguments[3]
 
-        self.reputation_manager.set_reputation(entitiy, ops_seen, ops_included, status)
+        self.reputation_manager.set_reputation(
+                entitiy, ops_seen, ops_included, status)
 
         return "ok"
 
-    async def _event_debug_bundler_dumpReputation(self, req_arguments: []) -> dict:
+    async def _event_debug_bundler_dumpReputation(
+            self, req_arguments: list) -> dict:
         entrypoint_address = req_arguments[0]
         if entrypoint_address not in self.entrypoints_to_local_mempools:
             raise ValidationException(
@@ -476,20 +483,21 @@ class ExecutionEndpoint(Endpoint):
             logging.debug(f"Dropping gossib from banned peer : {peer_id}")
 
         try:
-            user_operation_obj = UserOperation(verified_useroperation["user_operation"])
+            user_operation_obj = UserOperation(
+                    verified_useroperation["user_operation"])
 
-            ret = await self.entrypoints_to_local_mempools[
+            await self.entrypoints_to_local_mempools[
                 entry_point
             ].add_user_operation_p2p(
                 user_operation_obj, peer_id, verified_at_block_hash
             )
 
-        except ValidationException as excp:
+        except ValidationException:
             self.reputation_manager.ban_entity(peer_id)
 
     async def _event_p2p_pooled_user_op_hashes_received(
         self, req_arguments: dict
-    ) -> None:
+    ) -> dict:
         cursor = req_arguments["cursor"]
 
         for local_mempool in self.entrypoints_to_local_mempools.values():
@@ -532,13 +540,15 @@ class ExecutionEndpoint(Endpoint):
 
     async def _event_p2p_pooled_user_ops_by_hash_received(
         self, req_arguments: dict
-    ) -> None:
+    ) -> dict:
         user_operations_hashes = list(
             map(lambda hash: "0x" + bytes(hash).hex(), req_arguments["hashes"])
         )
         user_operations_to_return = []
         for local_mempool in self.entrypoints_to_local_mempools.values():
-            (verified_user_operations_json, remaining_user_operation_hashes) = (
+            (
+                verified_user_operations_json, remaining_user_operation_hashes
+            ) = (
                 local_mempool.get_user_operations_by_hashes(user_operations_hashes)
             )
             user_operations_hashes = remaining_user_operation_hashes
@@ -548,13 +558,16 @@ class ExecutionEndpoint(Endpoint):
 
     async def _event_p2p_received_pooled_user_ops_by_hash_response(
         self, req_arguments: dict
-    ) -> None:
+    ) -> str:
         verified_useroperation = req_arguments["list"]
-
+        # TODO
         return "Ok"
 
-    async def _event_p2p_status_received(self, _req_arguments: dict) -> None:
-        latest_block_number, _, _, _, latest_block_hash = await get_latest_block_info(
+    async def _event_p2p_status_received(
+            self, _req_arguments: dict) -> dict[str, int | bytes]:
+        (
+            latest_block_number, _, _, _, latest_block_hash
+        ) = await get_latest_block_info(
             self.ethereum_node_url
         )
         return {
@@ -563,7 +576,8 @@ class ExecutionEndpoint(Endpoint):
             "block_number": int(latest_block_number, 16),
         }
 
-    async def send_pooled_user_op_hashes_request(self, peer_id, cursor):
+    async def send_pooled_user_op_hashes_request(
+            self, peer_id, cursor) -> None:
         for (
             mempools_types_to_mempools_ids
         ) in self.entrypoints_to_mempools_types_to_mempools_ids.values():

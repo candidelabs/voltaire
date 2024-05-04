@@ -1,11 +1,13 @@
-from aiohttp import ClientSession
 import json
 from dataclasses import dataclass
+from typing import Any
+
+from aiohttp import ClientSession
 
 
 async def send_rpc_request_to_eth_client(
     ethereum_node_url, method, params=None
-) -> None:
+) -> Any:
     json_request = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -25,8 +27,9 @@ async def send_rpc_request_to_eth_client(
             return json.loads(resp)
 
 
-async def get_latest_block_info(ethereum_node_url) -> [str, int, str, int, str]:
-    raw_res = await send_rpc_request_to_eth_client(
+async def get_latest_block_info(
+        ethereum_node_url) -> tuple[str, int, str, int, str]:
+    raw_res: Any = await send_rpc_request_to_eth_client(
         ethereum_node_url, "eth_getBlockByNumber", ["latest", False]
     )
     latest_block = raw_res["result"]
@@ -53,9 +56,9 @@ async def get_latest_block_info(ethereum_node_url) -> [str, int, str, int, str]:
 
 @dataclass
 class DebugEntityData:
-    access: list()
-    opcodes: list()
-    contract_size: list()
+    access: dict[str, dict[str, list[str]]]
+    opcodes: dict[str, int]
+    contract_size: dict[str, int]
 
 
 @dataclass
@@ -63,10 +66,10 @@ class DebugTraceCallData:
     factory_data: DebugEntityData
     account_data: DebugEntityData
     paymaster_data: DebugEntityData
-    keccak: list()
-    logs: list()
-    calls: list()
-    debug: list()
+    keccak: list[str]
+    logs: list
+    calls: list
+    debug: list
 
 
 @dataclass

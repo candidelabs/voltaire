@@ -1,7 +1,7 @@
 from asyncio.events import AbstractEventLoop
 from signal import Signals
-from sys import stderr
 from subprocess import Popen
+from sys import stderr
 
 # credits : https://stackoverflow.com/a/68732870
 

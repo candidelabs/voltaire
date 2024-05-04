@@ -1,24 +1,25 @@
 """
-This module is a simple event bus implementation for message based interprocess 
+This module is a simple event bus implementation for message based interprocess
 communiction.
-It is uses unix IPC sockets to send messages between python threads, also between python
-threads and the Rust p2p thread.
-Note: Voltaire p2p implementation is written in rust, as the python libp2p 
+It is uses unix IPC sockets to send messages between python threads,
+also between python threads and the Rust p2p thread.
+Note: Voltaire p2p implementation is written in rust, as the python libp2p
 implementation is not maintained.
-The main architecture consist of Endpoints(server) and Clients. Each Endpoint can 
-receive requests from Clients.
-Each Endpoint has its own IPC file which it listens to for messages from clients.
+The main architecture consist of Endpoints(server) and Clients.
+Each Endpoint can receive requests from Clients.
+Each Endpoint has its own IPC file which it listens to for messages
+from clients.
 
 based on :https://github.com/ethereum/trinity/issues/507
 """
 
 import asyncio
-import pickle
 import inspect
 import logging
-from functools import partial
+import pickle
 from dataclasses import field
-from typing import Dict, Any, Callable, Awaitable, Optional
+from functools import partial
+from typing import Any, Awaitable, Callable, Dict, Optional
 
 RequestEvent = Dict[str, Any]
 ResponseEvent = Dict[str, Any]
@@ -27,15 +28,17 @@ PartialResponseFunction = partial[Awaitable[ResponseEvent]]
 
 
 class Endpoint:
-    """This is a class representation of an Endpoint that can receive request from
-    clients.
-    each event name in the event_names list correspond to an function object in the
-    response_functions_list that can process a RequestEvent and return a ResponseEvent.
+    """This is a class representation of an Endpoint that can receive request
+    from clients.
+    each event name in the event_names list correspond to an function object in
+    the response_functions_list that can process a RequestEvent and return
+    a ResponseEvent.
 
     :param event_names: A list of event names
     :type event_names: list[str]
-    :param response_functions_list: A list of function objects that can process requests
-    :type response-function_list: List[PartialResponseFunction | ResponseFunction]
+    :param response_functions_list: A list of function objects that can process
+    requests
+    :type response-function_list:List[PartialResponseFunction|ResponseFunction]
     """
 
     event_names: list[str] = field(default_factory=list[str])
@@ -55,7 +58,8 @@ class Endpoint:
         """
         logging.info("Starting " + self.id)
         # filepath = self.id + ".ipc"
-        server = await asyncio.start_unix_server(self._handle_request_cb, filepath)
+        server = await asyncio.start_unix_server(
+                self._handle_request_cb, filepath)
         async with server:
             await server.serve_forever()
 
@@ -79,11 +83,11 @@ class Endpoint:
         decorator_func: Optional[Callable[[Any], Awaitable[ResponseEvent]]] = None,
     ) -> None:
         """
-        When a class inherets the Enpoint class, this functions can add all functions
-        in the class that has a specific prefix to the event_names and the
-        reponse_functions_list based on the function name.
-        This way a function only needs to include a certain prefix in it's name to
-        be included automatically.
+        When a class inherets the Enpoint class, this functions can add all
+        functions in the class that has a specific prefix to the event_names
+        and the reponse_functions_list based on the function name.
+        This way a function only needs to include a certain prefix in it's
+        name to be included automatically.
         """
         method_list: list[tuple[str, ResponseFunction]] = inspect.getmembers(
             self, predicate=inspect.ismethod
@@ -101,7 +105,8 @@ class Endpoint:
                 else:
                     response_function = method_obj
 
-                self.add_event_and_response_function(event_name, response_function)
+                self.add_event_and_response_function(
+                        event_name, response_function)
 
     async def _handle_request_cb(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -120,14 +125,17 @@ class Endpoint:
             # )
             index = self.event_names.index(request_event["request_type"])
             response_function = self.response_functions_list[index]
-            response_event = await response_function(request_event["request_arguments"])
+            response_event = await response_function(
+                    request_event["request_arguments"])
             if "p2p_received" not in request_event["request_type"]:
                 await _broadcast(response_event, writer)
         finally:
             writer.close()
-            await writer.wait_closed()  # waits for the stream to close in case of unexpected interruption
+            # waits for the stream to close in case of unexpected interruption
+            await writer.wait_closed()
 
-    async def _get_response(self, request_event: RequestEvent) -> ResponseEvent:
+    async def _get_response(
+            self, request_event: RequestEvent) -> ResponseEvent:
         index = self.event_names.index(request_event["request_type"])
         response_function = self.response_functions_list[index]
         return await response_function(request_event["request_arguments"])
@@ -135,8 +143,8 @@ class Endpoint:
 
 class Client:
     """
-    This Class represent a client that can send RequestEvent to an Endpoint(server) and
-    receives a ResponseEvent
+    This Class represent a client that can send RequestEvent to an
+    Endpoint(server) and receives a ResponseEvent
     """
 
     server_id: str
@@ -146,8 +154,8 @@ class Client:
 
     async def request(self, request_event: RequestEvent) -> ResponseEvent:
         """
-        This function establish a Unix socket connection to an Endpoint and sends a
-        RequestEvents and waits for a ResponseEvent.
+        This function establish a Unix socket connection to an Endpoint
+        and sends a RequestEvents and waits for a ResponseEvent.
         """
         filepath = self.server_id + ".ipc"
         reader, writer = await asyncio.open_unix_connection(filepath)
@@ -159,8 +167,8 @@ class Client:
 
     async def broadcast_only(self, request_event: RequestEvent) -> None:
         """
-        This function establish a Unix socket connection to an Endpoint and sends a
-        RequestEvents and waits for a ResponseEvent.
+        This function establish a Unix socket connection to an Endpoint and
+        sends a RequestEvents and waits for a ResponseEvent.
         """
         # filepath = self.server_id + ".ipc"
         filepath = "p2p_endpoint.ipc"
@@ -176,8 +184,8 @@ async def _listen(
     reader: asyncio.StreamReader,
 ) -> RequestEvent | ResponseEvent:
     """
-    This function is used by both the Endpoint to listen to requests and the Client to
-    listen to responses
+    This function is used by both the Endpoint to listen to requests and the
+    Client to listen to responses
     """
     raw_size = await reader.readexactly(4)
     size = int.from_bytes(raw_size, "little")
@@ -191,10 +199,9 @@ async def _broadcast(
     event: RequestEvent | ResponseEvent, writer: asyncio.StreamWriter
 ) -> None:
     """
-    This function is used by both the Endpoint to return responses and the Client to
-    send requests
+    This function is used by both the Endpoint to return responses and
+    the Client to send requests
     """
-
     message = pickle.dumps(event)
     size = len(message)
     writer.write(size.to_bytes(4, "little"))

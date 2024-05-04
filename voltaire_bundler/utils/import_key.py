@@ -1,8 +1,10 @@
 import glob
+
 from eth_account import Account
 
 
-def import_bundler_account(keystore_file_password, keystore_file_path="keystore/*"):
+def import_bundler_account(
+        keystore_file_password, keystore_file_path="keystore/*"):
     if keystore_file_path != "keystore/*":
         keystore = keystore_file_path
     else:

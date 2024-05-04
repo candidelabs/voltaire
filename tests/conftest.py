@@ -1,15 +1,14 @@
 #!/user/bin/python3
 
 import math
-import socket
 import pytest_asyncio
 import pytest
 import asyncio
-from threading import Thread
 from voltaire_bundler.main import main
 import docker
 
 from utils import entrypoint_bytecode
+
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -34,7 +33,7 @@ async def gethDockerContainer():
     factoryDeploymentFee = str(math.ceil(deploymentGasPrice * deploymentGasLimit))
 
     container = client.containers.run(
-        "ethereum/client-go:v1.10.26", 
+        "ethereum/client-go:v1.10.26",
         [
             "--miner.gaslimit", "12000000",
             "--http", "--http.api", "personal,eth,net,web3,debug",
@@ -49,31 +48,31 @@ async def gethDockerContainer():
             "--mine",
             "--miner.threads", "1",
             "--networkid", "1337"
-        ], 
+        ],
         ports={"8545/tcp": "8545"},
         detach=True
     )
     await asyncio.sleep(3)
 
-    #Fund factoryDeployer
+    # Fund factoryDeployer
     client.containers.run(
         "ethereum/client-go:v1.10.26", network_mode="host",
         entrypoint="geth --exec \"eth.sendTransaction({from: eth.coinbase, to:'" + factoryDeployer + "', value: " + factoryDeploymentFee + "})\" attach http://0.0.0.0:8545"
     )
 
-    #Deploy deterministic factory
+    # Deploy deterministic factory
     client.containers.run(
         "ethereum/client-go:v1.10.26", network_mode="host",
         entrypoint="geth --exec \"eth.sendRawTransaction('" + factoryTx + "')\" attach http://0.0.0.0:8545"
     )
 
-    #Fund signer
+    # Fund signer
     client.containers.run(
         "ethereum/client-go:v1.10.26", network_mode="host",
         entrypoint="geth --exec \"eth.sendTransaction({from: eth.coinbase, to: '0x084178a5fd956e624fcb61c3c2209e3dcf42c8e8', value: 10000000000000000000000})\" attach http://0.0.0.0:8545"
     )
 
-    #Unlock signer
+    # Unlock signer
     client.containers.run(
         "ethereum/client-go:v1.10.26", network_mode="host",
         entrypoint="geth --exec \"personal.importRawKey('897368deaa9f3797c02570ef7d3fa4df179b0fc7ad8d8fc2547d04701604eb72', '')\" attach http://0.0.0.0:8545"
@@ -83,7 +82,7 @@ async def gethDockerContainer():
         entrypoint="geth --exec \"personal.unlockAccount('0x084178a5fd956e624fcb61c3c2209e3dcf42c8e8', '')\" attach http://0.0.0.0:8545"
     )
 
-    #Deploy Entrypoint
+    # Deploy Entrypoint
     client.containers.run(
         "ethereum/client-go:v1.10.26", network_mode="host",
         entrypoint="geth --exec \"eth.sendTransaction({from:'0x084178a5fd956e624fcb61c3c2209e3dcf42c8e8', to: '" + factoryAddress + "', data: '" + entrypoint_bytecode + "', gas: 10000000 })\" attach http://0.0.0.0:8545"
@@ -91,21 +90,22 @@ async def gethDockerContainer():
 
     yield container
 
+
 @pytest_asyncio.fixture(scope="module", autouse=True)
 async def bundlerInstance(event_loop, gethDockerContainer):
     """
     Run a bundler instance
     """
     args = [
-        "--entrypoints","0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789",
-        "--bundler_secret","0x897368deaa9f3797c02570ef7d3fa4df179b0fc7ad8d8fc2547d04701604eb72",
-        "--chain_id","1337",
+        "--entrypoints", "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789",
+        "--bundler_secret", "0x897368deaa9f3797c02570ef7d3fa4df179b0fc7ad8d8fc2547d04701604eb72",
+        "--chain_id", "1337",
         "--verbose",
         "--debug",
-        "--bundle_interval","0",
+        "--bundle_interval", "0",
         "--disable_p2p"
     ]
-    
+
     asyncio.create_task(main(args, event_loop))
     await asyncio.sleep(3)
 

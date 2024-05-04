@@ -1,9 +1,11 @@
 from eth_abi import encode
+from typing import Any
+
 from voltaire_bundler.user_operation.user_operation import UserOperation
 
 
-@staticmethod
-def encode_handleops_calldata(user_operations_list: [], bundler_address: str) -> str:
+def encode_handleops_calldata(
+        user_operations_list: list[list[Any]], bundler_address: str) -> str:
     function_selector = "0x1fad948c"  # handleOps
     params = encode(
         [
@@ -17,7 +19,6 @@ def encode_handleops_calldata(user_operations_list: [], bundler_address: str) ->
     return call_data
 
 
-@staticmethod
 def encode_simulate_validation_calldata(user_operation: UserOperation) -> str:
     # simulateValidation(entrypoint solidity function) will always revert
     function_selector = "0xee219423"
@@ -32,7 +33,6 @@ def encode_simulate_validation_calldata(user_operation: UserOperation) -> str:
     return call_data
 
 
-@staticmethod
 def encode_gasEstimateL1Component_calldata(
     entrypoint: str, is_init: bool, handleops_calldata: str
 ) -> str:

@@ -4,28 +4,29 @@ import math
 from typing import List
 
 from eth_account import Account
+
 from voltaire_bundler.bundler.exceptions import ExecutionException
-
-from voltaire_bundler.utils.eth_client_utils import (
-    send_rpc_request_to_eth_client,
-)
+from voltaire_bundler.bundler.mempool.mempool_manager import \
+    LocalMempoolManager
+from voltaire_bundler.typing import Address
 from voltaire_bundler.user_operation.user_operation import UserOperation
-from voltaire_bundler.user_operation.user_operation_handler import (
-    UserOperationHandler,
-)
+from voltaire_bundler.user_operation.user_operation_handler import \
+    UserOperationHandler
+from voltaire_bundler.utils.decode import decode_FailedOp_event
 from voltaire_bundler.utils.encode import encode_handleops_calldata
+from voltaire_bundler.utils.eth_client_utils import \
+    send_rpc_request_to_eth_client
 
-from ..mempool.mempool_manager import LocalMempoolManagerVersion0Point6
+from ..gas_manager import GasManager
 from ..reputation_manager import ReputationManager
 from ..validation_manager import ValidationManager
-from ..gas_manager import GasManager
 
 
 class BundlerManager:
     ethereum_node_url: str
     bundler_private_key: str
     bundler_address: str
-    entrypoints_addresses_to_local_mempools: dict[str, str]
+    entrypoints_addresses_to_local_mempools: dict[Address, LocalMempoolManager]
     user_operation_handler: UserOperationHandler
     reputation_manager: ReputationManager
     chain_id: int
@@ -39,14 +40,14 @@ class BundlerManager:
 
     def __init__(
         self,
-        entrypoints_addresses_to_local_mempools: dict[str, str],
+        entrypoints_addresses_to_local_mempools: dict[Address, LocalMempoolManager],
         user_operation_handler: UserOperationHandler,
         reputation_manager: ReputationManager,
         gas_manager: GasManager,
         ethereum_node_url: str,
         bundler_private_key: str,
         bundler_address: str,
-        chain_id: str,
+        chain_id: int,
         is_legacy_mode: bool,
         is_send_raw_transaction_conditional: bool,
         max_fee_per_gas_percentage_multiplier: int,
@@ -152,13 +153,15 @@ class BundlerManager:
         block_max_priority_fee_per_gas = 0
         if not self.is_legacy_mode:
             block_max_priority_fee_per_gas = tasks[2]["result"]
-            block_max_priority_fee_per_gas_dec = int(block_max_priority_fee_per_gas, 16)
+            block_max_priority_fee_per_gas_dec = int(
+                    block_max_priority_fee_per_gas, 16)
             block_max_priority_fee_per_gas_dec_mod = math.ceil(
                 block_max_priority_fee_per_gas_dec
                 * (self.max_priority_fee_per_gas_percentage_multiplier / 100)
                 * (self.gas_price_percentage_multiplier / 100)
             )
-            block_max_priority_fee_per_gas = hex(block_max_priority_fee_per_gas_dec_mod)
+            block_max_priority_fee_per_gas = hex(
+                    block_max_priority_fee_per_gas_dec_mod)
 
         txnDict = {
             "chainId": self.chain_id,
@@ -197,17 +200,16 @@ class BundlerManager:
         )
         if "error" in result:
             if "data" in result["error"] and ValidationManager.check_if_failed_op_error(
-                solidity_error_selector
+                result["error"]["data"][:10]
             ):
-                # raise ValueError("simulateValidation didn't revert!")
                 error_data = result["error"]["data"]
-                solidity_error_selector = str(error_data[:10])
 
                 solidity_error_params = error_data[10:]
                 (
                     operation_index,
                     reason,
-                ) = ValidationManager.decode_FailedOp_event(solidity_error_params)
+                ) = decode_FailedOp_event(solidity_error_params)
+                user_operation = user_operations[operation_index]
 
                 if (
                     "AA3" in reason
@@ -217,7 +219,8 @@ class BundlerManager:
                         user_operation.paymaster_address_lowercase
                     )
                 elif "AA2" in reason:
-                    self.reputation_manager.ban_entity(user_operation.sender_address)
+                    self.reputation_manager.ban_entity(
+                            user_operation.sender_address)
                 elif (
                     "AA1" in reason
                     and user_operation.factory_address_lowercase is not None
@@ -226,25 +229,30 @@ class BundlerManager:
                         user_operation.factory_address_lowercase
                     )
 
-                logging.info("Dropping user operation that caused bundle crash")
+                logging.info(
+                        "Dropping user operation that caused bundle crash")
                 del user_operations[operation_index]
 
                 if len(user_operations) > 0:
-                    self.send_bundle(user_operations)
+                    await self.send_bundle(user_operations, entrypoint)
+
+                return []
             elif "message" in result["error"]:
                 logging.info("Failed to send bundle." + str(result["error"]))
-                # ErrAlreadyKnown is returned if the transactions is already contained
-                # within the pool.
+                # ErrAlreadyKnown is returned if the transactions is already
+                # contained within the pool.
                 if "already known" in result["error"]["message"]:
                     return []
-                # ErrInvalidSender is returned if the transaction contains an invalid signature.
+                # ErrInvalidSender is returned if the transaction
+                # contains an invalid signature.
                 elif "invalid sender" in result["error"]["message"]:
                     pass  # todo
-                # ErrUnderpriced is returned if a transaction's gas price is below the minimum
-                # configured for the transaction pool.
+                # ErrUnderpriced is returned if a transaction's gas price
+                # is below the minimum configured for the transaction pool.
                 elif "transaction underpriced" in result["error"]["message"]:
                     # retry sending useroperations with higher gas price
-                    # if the gas_price_percentage_multiplier reached 200, drop the user_operations
+                    # if the gas_price_percentage_multiplier reached 200,
+                    # drop the user_operations
                     if self.gas_price_percentage_multiplier <= 200:
                         self.gas_price_percentage_multiplier += 10
                         return user_operations
@@ -254,8 +262,9 @@ class BundlerManager:
                             + str(result["error"])
                         )
                         return []
-                # ErrReplaceUnderpriced is returned if a transaction is attempted to be replaced
-                # with a different one without the required price bump.
+                # ErrReplaceUnderpriced is returned if a transaction is
+                # attempted to be replaced with a different one without
+                # the required price bump.
                 elif (
                     "replacement transaction underpriced" in result["error"]["message"]
                 ):
@@ -268,25 +277,27 @@ class BundlerManager:
                             + str(result["error"])
                         )
                         return []
-                # ErrAccountLimitExceeded is returned if a transaction would exceed the number
-                # allowed by a pool for a single account.
+                # ErrAccountLimitExceeded is returned if a transaction would
+                # exceed the number allowed by a pool for a single account.
                 elif "account limit exceeded" in result["error"]["message"]:
                     pass  # todo
-                # ErrGasLimit is returned if a transaction's requested gas limit exceeds the
-                # maximum allowance of the current block.
+                # ErrGasLimit is returned if a transaction's requested gas
+                # limit exceeds the maximum allowance of the current block.
                 elif "exceeds block gas limit" in result["error"]["message"]:
                     pass  # todo
-                # ErrNegativeValue is a sanity error to ensure no one is able to specify a
-                # transaction with a negative value.
+                # ErrNegativeValue is a sanity error to ensure no one is able
+                # to specify a transaction with a negative value.
                 elif "negative value" in result["error"]["message"]:
                     pass  # todo
-                # ErrOversizedData is returned if the input data of a transaction is greater
-                # than some meaningful limit a user might use. This is not a consensus error
-                # making the transaction invalid, rather a DOS protection.
+                # ErrOversizedData is returned if the input data of
+                # a transaction is greater than some meaningful limit a user
+                # might use. This is not a consensus error making
+                # the transaction invalid, rather a DOS protection.
                 elif "oversized data" in result["error"]["message"]:
                     pass  # todo
-                # ErrFutureReplacePending is returned if a future transaction replaces a pending
-                # one. Future transactions should only be able to replace other future transactions.
+                # ErrFutureReplacePending is returned if a future transaction
+                # replaces a pending one. Future transactions should only
+                # be able to replace other future transactions.
                 elif (
                     "future transaction tries to replace pending"
                     in result["error"]["message"]
@@ -304,10 +315,11 @@ class BundlerManager:
                     + str(result["error"])
                 )
                 return []
-
+            return []
         else:
             transaction_hash = result["result"]
-            logging.info("Bundle was sent with transaction hash : " + transaction_hash)
+            logging.info(
+                    "Bundle was sent with transaction hash : " + transaction_hash)
             self.gas_price_percentage_multiplier = 100
 
             # todo : check if bundle was included on chain
@@ -320,7 +332,9 @@ class BundlerManager:
             return []
 
     def update_included_status(
-        self, sender_address: str, factory_address: str, paymaster_address: str
+        self, sender_address: str,
+        factory_address: str | None,
+        paymaster_address: str | None
     ) -> None:
         self.reputation_manager.update_included_status(sender_address)
 

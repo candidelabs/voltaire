@@ -1,29 +1,16 @@
 import logging
 from functools import partial
-from aiohttp import web
-import aiohttp_cors
-from jsonrpcserver import (
-    method,
-    Result,
-    Success,
-    async_dispatch,
-    Error,
-    InvalidParams,
-)
-from typing import Any
 from importlib.metadata import version
+from typing import Any
 
-from voltaire_bundler.event_bus_manager.endpoint import (
-    Client,
-    RequestEvent,
-    ResponseEvent,
-)
-from voltaire_bundler.bundler.exceptions import (
-    ValidationException,
-    ExecutionException,
-    ValidationExceptionCode,
-)
+import aiohttp_cors
+from aiohttp import web
+from jsonrpcserver import Error, Result, Success, async_dispatch, method
 from prometheus_client import Summary
+
+from voltaire_bundler.bundler.exceptions import (ExecutionException,
+                                                 ValidationException)
+from voltaire_bundler.event_bus_manager.endpoint import Client, RequestEvent
 
 REQUEST_TIME_eth_chainId = Summary(
     "request_processing_seconds_eth_chainId",
@@ -49,13 +36,14 @@ REQUEST_TIME_chainId_eth_getUserOperationByHash = Summary(
     "request_processing_seconds_eth_getUserOperationByHash",
     "Time spent processing request eth_getUserOperationByHash",
 )
+
+
 rpcClient: Client = Client("bundler_endpoint")
 
 
 async def _handle_rpc_request(
     endpoint_id: str, request_type: str, request_arguments: Any = ""
 ) -> Any:
-    # rpcClient: Client = Client(endpoint_id)
     requestEvent: RequestEvent = {
         "request_type": request_type,
         "request_arguments": request_arguments,
@@ -64,7 +52,7 @@ async def _handle_rpc_request(
 
     logging.debug(f"{request_type} RPC served")
 
-    if resp != None and "is_error" in resp and resp["is_error"]:
+    if resp is not None and "is_error" in resp and resp["is_error"]:
         error: ValidationException | ExecutionException = resp["payload"]
         error_code = error.exception_code.value
         error_message = str(error.message)
@@ -99,7 +87,7 @@ async def eth_supportedEntryPoints() -> Result:
 async def eth_estimateUserOperationGas(
     userOperationJson: dict[str, Any],
     entrypoint: str,
-    state_override_set: dict[str, Any] = {},
+    state_override_set: dict[str, Any] | None = None,
 ) -> Result:
     result = await _handle_rpc_request(
         endpoint_id="bundler_endpoint",

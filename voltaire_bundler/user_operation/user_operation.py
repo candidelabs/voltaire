@@ -1,16 +1,14 @@
-from dataclasses import dataclass, InitVar
-from voltaire_bundler.bundler.exceptions import (
-    ValidationException,
-    ValidationExceptionCode,
-)
 import re
+from dataclasses import InitVar, dataclass
 
-from voltaire_bundler.typing import MempoolId
+from voltaire_bundler.bundler.exceptions import (ValidationException,
+                                                 ValidationExceptionCode)
+from voltaire_bundler.typing import Address, MempoolId
 
 
 @dataclass()
 class UserOperation:
-    sender_address: str
+    sender_address: Address
     nonce: int
     init_code: bytes
     call_data: bytes
@@ -22,14 +20,14 @@ class UserOperation:
     paymaster_and_data: bytes
     signature: bytes
     code_hash: str | None
-    associated_addresses: list()
-    factory_address_lowercase: str | None
-    paymaster_address_lowercase: str | None
-    valid_mempools_ids: MempoolId
+    associated_addresses: list[str]
+    factory_address_lowercase: Address | None
+    paymaster_address_lowercase: Address | None
+    valid_mempools_ids: list[MempoolId]
     user_operation_hash: str
-    jsonRequestDict: InitVar[dict]
+    jsonRequestDict: InitVar[dict[str, Address | int | bytes]]
 
-    def __init__(self, jsonRequestDict):
+    def __init__(self, jsonRequestDict) -> None:
         if len(jsonRequestDict) != 11:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
@@ -41,14 +39,16 @@ class UserOperation:
         self.nonce = verify_and_get_uint(jsonRequestDict["nonce"])
         self.init_code = verify_and_get_bytes(jsonRequestDict["initCode"])
         self.call_data = verify_and_get_bytes(jsonRequestDict["callData"])
-        self.call_gas_limit = verify_and_get_uint(jsonRequestDict["callGasLimit"])
+        self.call_gas_limit = verify_and_get_uint(
+                jsonRequestDict["callGasLimit"])
         self.verification_gas_limit = verify_and_get_uint(
             jsonRequestDict["verificationGasLimit"]
         )
         self.pre_verification_gas = verify_and_get_uint(
             jsonRequestDict["preVerificationGas"]
         )
-        self.max_fee_per_gas = verify_and_get_uint(jsonRequestDict["maxFeePerGas"])
+        self.max_fee_per_gas = verify_and_get_uint(
+                jsonRequestDict["maxFeePerGas"])
         self.max_priority_fee_per_gas = verify_and_get_uint(
             jsonRequestDict["maxPriorityFeePerGas"]
         )
@@ -68,7 +68,9 @@ class UserOperation:
         self._set_factory_and_paymaster_address()
 
     @staticmethod
-    def verify_fields_exist(jsonRequestDict) -> None:
+    def verify_fields_exist(
+            jsonRequestDict: dict[str, Address | int | bytes]
+    ) -> None:
         field_list = [
             "sender",
             "nonce",
@@ -90,7 +92,7 @@ class UserOperation:
                     f"UserOperation missing {field} field",
                 )
 
-    def get_user_operation_dict(self) -> tuple:
+    def get_user_operation_dict(self) -> dict[str, Address | int | bytes]:
         return {
             "sender": self.sender_address,
             "nonce": self.nonce,
@@ -105,7 +107,7 @@ class UserOperation:
             "signature": self.signature,
         }
 
-    def get_user_operation_json(self):
+    def get_user_operation_json(self) -> dict[str, Address | str]:
         return {
             "sender": self.sender_address,
             "nonce": hex(self.nonce),
@@ -120,7 +122,7 @@ class UserOperation:
             "signature": "0x" + self.signature.hex(),
         }
 
-    def to_list(self) -> list:
+    def to_list(self) -> list[Address | str | int | bytes]:
         return [
             self.sender_address,
             self.nonce,
@@ -135,19 +137,21 @@ class UserOperation:
             self.signature,
         ]
 
-    def _set_factory_and_paymaster_address(self):
+    def _set_factory_and_paymaster_address(self) -> None:
         if len(self.init_code) > 20:
-            self.factory_address_lowercase = "0x" + self.init_code[:20].hex()
+            self.factory_address_lowercase = Address(
+                "0x" + self.init_code[:20].hex())
         else:
             self.factory_address_lowercase = None
 
         if len(self.paymaster_and_data) > 20:
-            self.paymaster_address_lowercase = "0x" + self.paymaster_and_data[:20].hex()
+            self.paymaster_address_lowercase = Address(
+                "0x" + self.paymaster_and_data[:20].hex())
         else:
             self.paymaster_address_lowercase = None
 
 
-def verify_and_get_address(value) -> str:
+def verify_and_get_address(value: Address) -> Address:
     address_pattern = "^0x[0-9,a-f,A-F]{40}$"
     if isinstance(value, str) and re.match(address_pattern, value) is not None:
         return value
@@ -158,13 +162,13 @@ def verify_and_get_address(value) -> str:
         )
 
 
-def verify_and_get_uint(value) -> int:
+def verify_and_get_uint(value: str) -> int:
     if value is None or value == "0x":
         return 0
     elif isinstance(value, str) and value[:2] == "0x":
         try:
             return int(value, 16)
-        except ValueError as exp:
+        except ValueError:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
                 f"Invalide uint hex value : {value}",
@@ -176,14 +180,14 @@ def verify_and_get_uint(value) -> int:
         )
 
 
-def verify_and_get_bytes(value) -> bytes:
+def verify_and_get_bytes(value: str) -> bytes:
     if value is None:
         return bytes(0)
 
     if isinstance(value, str) and value[:2] == "0x":
         try:
             return bytes.fromhex(value[2:])
-        except ValueError as exp:
+        except ValueError:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
                 f"Invalide bytes value : {value}",
@@ -195,7 +199,7 @@ def verify_and_get_bytes(value) -> bytes:
         )
 
 
-def is_user_operation_hash(user_operation_hash) -> bool:
+def is_user_operation_hash(user_operation_hash: str) -> bool:
     hash_pattern = "^0x[0-9,a-f,A-F]{64}$"
     return (
         isinstance(user_operation_hash, str)

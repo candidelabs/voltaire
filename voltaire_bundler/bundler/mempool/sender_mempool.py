@@ -1,11 +1,12 @@
-from dataclasses import dataclass, field
-from typing import List
+from dataclasses import dataclass
 
-from eth_abi import encode, decode
+from eth_abi import decode
 
-from voltaire_bundler.user_operation.user_operation import UserOperation
-from ..exceptions import ValidationException, ValidationExceptionCode
+from voltaire_bundler.typing import Address
 from voltaire_bundler.user_operation.models import DepositInfo
+from voltaire_bundler.user_operation.user_operation import UserOperation
+
+from ..exceptions import ValidationException, ValidationExceptionCode
 
 MAX_MEMPOOL_USEROPS_PER_SENDER = 4
 MIN_PRICE_BUMP = 10
@@ -19,7 +20,7 @@ class VerifiedUserOperation:
 
 @dataclass
 class SenderMempool:
-    address: str
+    address: Address
     user_operation_hashs_to_verified_user_operation: dict[str, VerifiedUserOperation]
 
     async def add_user_operation(
@@ -36,12 +37,14 @@ class SenderMempool:
         if sender_operations_num == 0:
             self.user_operation_hashs_to_verified_user_operation[
                 new_user_operation_hash
-            ] = VerifiedUserOperation(new_user_operation, verified_at_block_hash)
+            ] = VerifiedUserOperation(
+                    new_user_operation, verified_at_block_hash)
         elif (
             is_sender_staked or sender_operations_num <= MAX_MEMPOOL_USEROPS_PER_SENDER
         ):
             existing_user_operation_hash_with_same_nonce = (
-                self._get_user_operation_hash_with_same_nonce(new_user_operation.nonce)
+                self._get_user_operation_hash_with_same_nonce(
+                    new_user_operation.nonce)
             )
             if existing_user_operation_hash_with_same_nonce is not None:
                 self.replace_user_operation(
@@ -56,7 +59,8 @@ class SenderMempool:
             ):
                 self.user_operation_hashs_to_verified_user_operation[
                     new_user_operation_hash
-                ] = VerifiedUserOperation(new_user_operation, verified_at_block_hash)
+                ] = VerifiedUserOperation(
+                        new_user_operation, verified_at_block_hash)
             else:
                 raise ValidationException(
                     ValidationExceptionCode.InvalidFields,
@@ -81,7 +85,8 @@ class SenderMempool:
             ]
             self.user_operation_hashs_to_verified_user_operation[
                 new_user_operation_hash
-            ] = VerifiedUserOperation(new_user_operation, verified_at_block_hash)
+            ] = VerifiedUserOperation(
+                    new_user_operation, verified_at_block_hash)
         else:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
@@ -117,7 +122,8 @@ class SenderMempool:
     def _calculate_min_fee_to_replace(fee) -> int:
         return round(fee * (100 + MIN_PRICE_BUMP) / 100)
 
-    def _get_user_operation_hash_with_same_nonce(self, nonce) -> UserOperation | None:
+    def _get_user_operation_hash_with_same_nonce(
+            self, nonce) -> str | None:
         for user_operation_hash in self.user_operation_hashs_to_verified_user_operation:
             if (
                 self.user_operation_hashs_to_verified_user_operation[
