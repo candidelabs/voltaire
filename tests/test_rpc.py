@@ -8,7 +8,7 @@ async def test_eth_chain_id(bundlerInstance):
     Test eth_chainId
     """
     chain_id = await send_rpc_request_to_eth_client(
-        "http://127.0.0.1:3000/rpc",
+        "http://127.0.0.1:53000/rpc",
         "eth_chainId",
         [],
     )
@@ -22,7 +22,7 @@ async def test_eth_supportedEntryPoints(bundlerInstance):
     Test eth_chainId
     """
     supportedEntryPoints = await send_rpc_request_to_eth_client(
-        "http://127.0.0.1:3000/rpc",
+        "http://127.0.0.1:53000/rpc",
         "eth_supportedEntryPoints",
         [],
     )
@@ -36,7 +36,7 @@ async def test_eth_estimateUserOperationGas(bundlerInstance):
     Test eth_estimateUserOperationGas
     """
     result = await send_rpc_request_to_eth_client(
-        "http://127.0.0.1:3000/rpc",
+        "http://127.0.0.1:53000/rpc",
         "eth_estimateUserOperationGas",
         [{
             "sender": "0xEed01c4FfA9f88096b77d2f16c2e143a94D71298",
@@ -51,6 +51,7 @@ async def test_eth_estimateUserOperationGas(bundlerInstance):
             "paymasterAndData": "0x",
             "signature": "0x22a1f0d5746116becb77cb47a047cd61a71c4e69defa945680e7b1e468d3297f34d4a343bec3289de1337d264beea73c6c78c35eb15beb1f250b5122ec5957691c"
         },
-         "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"],
+         "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789",
+        ],
     )
     assert result["error"]["message"] == 'AA20 account not deployed'
