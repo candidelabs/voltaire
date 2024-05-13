@@ -54,6 +54,7 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             init_data.bundler_address,
             init_data.entrypoints,
             init_data.bundler_helper_byte_code,
+            init_data.entrypoint_mod_byte_code,
             init_data.chain_id,
             init_data.is_unsafe,
             init_data.is_legacy_mode,

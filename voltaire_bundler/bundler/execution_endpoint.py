@@ -63,6 +63,7 @@ class ExecutionEndpoint(Endpoint):
         bundler_address: Address,
         entrypoints: list[Address],
         bundler_helper_byte_code: str,
+        entrypoint_mod_byte_code: str,
         chain_id: int,
         is_unsafe: bool,
         is_legacy_mode: bool,
@@ -110,6 +111,7 @@ class ExecutionEndpoint(Endpoint):
             max_priority_fee_per_gas_percentage_multiplier,
             max_verification_gas,
             max_call_data_gas,
+            entrypoint_mod_byte_code,
         )
 
         self.user_operation_handler = UserOperationHandler(
@@ -301,7 +303,11 @@ class ExecutionEndpoint(Endpoint):
 
     async def _event_rpc_estimateUserOperationGas(
             self, req_arguments: list) -> dict[str, str]:
-        user_operation: UserOperation = UserOperation(req_arguments[0])
+        user_operation_with_optional_params = (
+                fell_user_operation_optional_parameters(req_arguments[0])
+        )
+        user_operation: UserOperation = UserOperation(
+                user_operation_with_optional_params)
         entrypoint_address: str = req_arguments[1]
         state_override_set_dict: dict[str, Any] = {}
         if req_arguments[2] is not None:
@@ -604,3 +610,39 @@ async def exception_handler_decorator(
     except (ExecutionException, ValidationException) as excp:
         rpc_call_response = {"payload": excp, "is_error": True}
         return rpc_call_response
+
+
+def fell_user_operation_optional_parameters(
+        user_operation_with_optional_params: dict[str, str]) -> dict[str, str]:
+    if (
+        "preVerificationGas" not in user_operation_with_optional_params
+        or
+        user_operation_with_optional_params["preVerificationGas"] is None
+    ):
+        user_operation_with_optional_params["preVerificationGas"] = "0x"
+    if (
+        "verificationGasLimit" not in user_operation_with_optional_params
+        or
+        user_operation_with_optional_params["verificationGasLimit"] is None
+    ):
+        user_operation_with_optional_params["verificationGasLimit"] = "0x"
+    if (
+        "callGasLimit" not in user_operation_with_optional_params
+        or
+        user_operation_with_optional_params["callGasLimit"] is None
+    ):
+        user_operation_with_optional_params["callGasLimit"] = "0x"
+    if (
+        "maxFeePerGas" not in user_operation_with_optional_params
+        or
+        user_operation_with_optional_params["maxFeePerGas"] is None
+    ):
+        user_operation_with_optional_params["maxFeePerGas"] = "0x"
+    if (
+        "maxPriorityFeePerGas" not in user_operation_with_optional_params
+        or
+        user_operation_with_optional_params["maxPriorityFeePerGas"] is None
+    ):
+        user_operation_with_optional_params["maxPriorityFeePerGas"] = "0x"
+
+    return user_operation_with_optional_params
