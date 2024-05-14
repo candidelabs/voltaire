@@ -74,8 +74,7 @@ class GasManager:
 
         estimated_verification_gas_limit = 0
         estimated_call_gas_limit = 0
-        #is_check_once = not (input_call_gas_limit == 0)
-        is_check_once = False
+        is_check_once = not (input_call_gas_limit == 0)
 
         (estimated_call_gas_limit, estimated_verification_gas_limit) = (
             await self.estimate_call_gas_and_verificationgas_limit(
@@ -191,9 +190,8 @@ class GasManager:
                 # override the Entrypoint with EntryPointMod for callGasLimit
                 # binary search
                 "code": self.entrypoint_mod_byte_code
-}
+            }
         }
-
 
         call_data = function_selector + call_data_params.hex()
         # if there is no paymaster, override the sender's balance for gas estimation
