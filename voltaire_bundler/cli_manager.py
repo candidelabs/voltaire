@@ -50,6 +50,7 @@ class InitData:
     bundler_pk: str
     bundler_address: Address
     bundler_helper_byte_code: str
+    entrypoint_mod_byte_code: str
     chain_id: int
     is_debug: bool
     is_unsafe: bool
@@ -435,6 +436,18 @@ def init_bundler_helper():
     return bundler_helper_byte_code
 
 
+def init_entrypoint_mod():
+    package_directory = os.path.dirname(os.path.abspath(__file__))
+    entrypoint_mod_file = os.path.join(
+            package_directory, "utils", "EntryPointMod.json")
+
+    entrypoint_mod_byte_code_file = open(entrypoint_mod_file)
+    data = json.load(entrypoint_mod_byte_code_file)
+    entrypoint_mod_byte_code = data["bytecode"]
+
+    return entrypoint_mod_byte_code
+
+
 def init_entrypoint_and_mempool_data(args: Namespace):
     for (
         entrypoint,
@@ -527,6 +540,7 @@ async def get_init_data(args: Namespace) -> InitData:
     bundler_address, bundler_pk = init_bundler_address_and_secret(args)
 
     bundler_helper_byte_code = init_bundler_helper()
+    entrypoint_mod_byte_code = init_entrypoint_mod()
 
     if args.ethereum_node_debug_trace_call_url is None:
         args.ethereum_node_debug_trace_call_url = args.ethereum_node_url
@@ -553,6 +567,7 @@ async def get_init_data(args: Namespace) -> InitData:
         bundler_pk,
         bundler_address,
         bundler_helper_byte_code,
+        entrypoint_mod_byte_code,
         args.chain_id,
         args.debug,
         args.unsafe,

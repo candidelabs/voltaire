@@ -108,6 +108,7 @@ class BundlerManager:
                 user_operation.call_gas_limit
                 + user_operation.verification_gas_limit * 3
             )
+        gas_estimation += 10_000
 
         call_data = encode_handleops_calldata(
             user_operations_list, self.bundler_address
