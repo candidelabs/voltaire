@@ -15,7 +15,7 @@
 
 # Using an instance
 
-For a quick bundler instance, use one of our [public hosted endpoints](https://docs.candide.dev/wallet/bundler/rpc-endpoints/) for your developement.
+For a quick bundler instance, use one of our [public hosted endpoints](https://docs.candide.dev/wallet/bundler/rpc-endpoints/) for your development.
 
 # Deployment
 
@@ -46,7 +46,7 @@ poetry env use python3.11
 
 ### Install Docker
 
-Follow the installation guide to install [docker on ubunutu](https://docs.docker.com/engine/install/ubuntu/)
+Follow the installation guide to install [docker on ubuntu](https://docs.docker.com/engine/install/ubuntu/)
 
 ### Post docker installation
 
