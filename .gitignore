@@ -13,3 +13,5 @@ key
 metadata
 .hypothesis
 .pytest_cache
+.pytest_cache
+.mypy_cache
