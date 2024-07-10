@@ -22,6 +22,7 @@ from aiohttp.abc import AbstractAccessLogger
 
 RESPONSE_LOG = ContextVar('RESPONSE_LOG', default=dict())
 
+
 class AccessLogger(AbstractAccessLogger):
     def log(self, request, response, time):
         if time >= 1:
@@ -33,12 +34,13 @@ class AccessLogger(AbstractAccessLogger):
 
         log_obj = RESPONSE_LOG.get()
 
+        referer = request.headers.get('Referer')
         agent = request.headers.get('User-Agent')
         base_log = (
             f'{request.remote} '
             f'"{request.method} {request.path}" '
             f'done in {time_str}: {response.status} '
-            f'"{agent}" '
+            f'"{referer}" "{agent}" '
         )
         if "is_error" in log_obj:
             if log_obj["is_error"]:
