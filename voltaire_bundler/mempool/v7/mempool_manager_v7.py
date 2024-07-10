@@ -47,7 +47,14 @@ class LocalMempoolManagerV7(LocalMempoolManager):
         self.entity_to_no_of_ops_in_mempool = {}
         self.verified_useroperations_standard_mempool_gossip_queue = []
         self.seen_user_operation_hashs = set()
-        self.canonical_mempool_id = MempoolId(
+        if (
+            self.entrypoint in DEFAULT_MEMPOOL_INFO and
+            chain_id in DEFAULT_MEMPOOL_INFO[self.entrypoint]
+        ):
+            self.canonical_mempool_id = MempoolId(
                 DEFAULT_MEMPOOL_INFO[self.entrypoint][chain_id])
+        else:
+            self.canonical_mempool_id = None
+
         self.paymaster_deposits_cache = dict()
         self.latest_paymaster_deposits_cache_block = 0
