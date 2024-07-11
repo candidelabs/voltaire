@@ -37,7 +37,7 @@ class ReputationManager:
             await asyncio.sleep(REPUTATION_BACKOFF_INTERVAL)
 
     def _reputation_backoff_cron_job(self) -> None:
-        logging.info("Updating reputation entries")
+        logging.debug("Updating reputation entries")
         entities_to_delete = []
         for entity_address, entry in self.entities_reputation.items():
             entry.ops_seen = math.floor(entry.ops_seen * 23 / 24)

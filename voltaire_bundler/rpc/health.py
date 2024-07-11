@@ -40,7 +40,7 @@ async def check_bundler_balance(
                 "message": error_message
             }
 
-            logging.warning(error_message)
+            logging.error(error_message)
             return False, error_dict
 
 

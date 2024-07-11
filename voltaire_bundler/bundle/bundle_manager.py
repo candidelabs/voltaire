@@ -485,7 +485,7 @@ class BundlerManager:
                     )
                     mempool_manager.reputation_manager.ban_entity(entity_to_ban)
 
-                logging.debug(
+                logging.warning(
                     "Dropping user operation that caused bundle crash - "
                     f"error: {reason}"
                 )

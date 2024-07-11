@@ -279,6 +279,7 @@ async def handle(request: web.Request) -> web.Response:
     method = None
     try:
         res = validate_and_load_json_rpc_request(req_str, METHODS)
+        logging.debug(f"request: {res}")
         try:
             method = res[0]
             params = res[1]
@@ -306,6 +307,7 @@ async def handle(request: web.Request) -> web.Response:
             }
         )
         json_response["result"] = response.payload
+        logging.debug(f"response: {response.payload}")
     elif isinstance(response, Error):
         RESPONSE_LOG.set(
             {
