@@ -69,7 +69,9 @@ class InitData:
     max_call_data_gas: int
     disable_v6: bool
     min_bundler_balance: int
-
+    logs_incremental_range: int
+    logs_number_of_ranges: int
+    health_check_interval: int
 
 def address(ep: str):
     address_pattern = "^0x[0-9,a-f,A-F]{40}$"
@@ -422,6 +424,42 @@ def initialize_argument_parser() -> ArgumentParser:
         default=1_000_000_000_000_000_000,
     )
 
+    parser.add_argument(
+        "--logs_incremental_range",
+        type=int,
+        help=(
+            "eth_getLogs block range per request, affects eth_getUserOperationByHash "
+            "and eth_getUserOperationReceipt. Defaults to 0 which mean earliest"
+        ),
+        nargs="?",
+        const=0,
+        default=0,
+    )
+
+    parser.add_argument(
+        "--logs_number_of_ranges",
+        type=int,
+        help=(
+            "number of ranges to search eth_getLogs. needs to be set with "
+            "--logs_incremental_range"
+        ),
+        nargs="?",
+        const=10,
+        default=10,
+    )
+
+    parser.add_argument(
+        "--health_check_interval",
+        type=int,
+        help=(
+            "Interval in seconds to execute health checks. "
+            "Defaults to 120 seconds(2 minutes)"
+        ),
+        nargs="?",
+        const=120,
+        default=120,
+    )
+
     return parser
 
 
@@ -595,7 +633,10 @@ async def get_init_data(args: Namespace) -> InitData:
         args.max_verification_gas,
         args.max_call_data_gas,
         args.disable_v6,
-        args.min_bundler_balance
+        args.min_bundler_balance,
+        args.logs_incremental_range,
+        args.logs_number_of_ranges,
+        args.health_check_interval,
     )
 
     if args.verbose:

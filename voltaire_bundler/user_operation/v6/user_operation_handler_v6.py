@@ -21,6 +21,8 @@ class UserOperationHandlerV6(UserOperationHandler):
         max_priority_fee_per_gas_percentage_multiplier: int,
         max_verification_gas: int,
         max_call_data_gas: int,
+        logs_incremental_range: int,
+        logs_number_of_ranges: int,
     ):
         self.ethereum_node_url = ethereum_node_url
         self.bundler_address = bundler_address
@@ -35,6 +37,8 @@ class UserOperationHandlerV6(UserOperationHandler):
             max_verification_gas,
             max_call_data_gas,
         )
+        self.logs_incremental_range = logs_incremental_range
+        self.logs_number_of_ranges = logs_number_of_ranges
 
     async def get_user_operation_by_hash(
         self, user_operation_hash: str, entrypoint: str

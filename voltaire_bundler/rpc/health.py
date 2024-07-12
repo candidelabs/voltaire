@@ -1,7 +1,38 @@
 import aiohttp
+import asyncio
 import logging
 from voltaire_bundler.typing import Address
 from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
+
+
+async def periodic_health_check_cron_job(
+    node_urls_to_check: list[str],
+    target_chain_id_hex: str,
+    bundler: Address,
+    min_balance: int,
+    interval: int
+):
+    while True:
+        await periodic_health_check(
+            node_urls_to_check,
+            target_chain_id_hex,
+            bundler,
+            min_balance,
+        )
+        await asyncio.sleep(interval)
+
+
+async def periodic_health_check(
+    node_urls_to_check: list[str],
+    target_chain_id_hex: str,
+    bundler: Address,
+    min_balance: int,
+):
+    nodes_success, _ = await check_node_health(
+        node_urls_to_check, target_chain_id_hex)
+    if nodes_success:
+        await check_bundler_balance(
+            node_urls_to_check[0], bundler, min_balance)
 
 
 async def check_bundler_balance(
@@ -40,7 +71,7 @@ async def check_bundler_balance(
                 "message": error_message
             }
 
-            logging.error(error_message)
+            logging.warning(error_message)
             return False, error_dict
 
 

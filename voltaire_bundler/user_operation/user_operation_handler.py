@@ -4,7 +4,8 @@ import logging
 
 from eth_abi import encode, decode
 from voltaire_bundler.typing import Address
-from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
+from voltaire_bundler.utils.eth_client_utils import \
+        get_latest_block_info, send_rpc_request_to_eth_client
 from typing import Any
 from ..gas.gas_manager import GasManager
 from .models import (Log, ReceiptInfo, UserOperationReceiptInfo)
@@ -16,6 +17,8 @@ class UserOperationHandler(ABC):
     is_legacy_mode: bool
     ethereum_node_eth_get_logs_url: str
     gas_manager: GasManager
+    logs_incremental_range: int
+    logs_number_of_ranges: int
 
     async def get_user_operation_receipt(
         self, user_operation_hash: str, entrypoint: str
@@ -121,13 +124,15 @@ class UserOperationHandler(ABC):
     async def get_user_operation_event_log_info(
         self, user_operation_hash: str, entrypoint: str
     ) -> tuple | None:
-        res: Any = await self.get_user_operation_logs(
-                user_operation_hash, entrypoint)
-
-        if "result" not in res or len(res["result"]) < 1:
+        logs: Any = await self.get_user_operation_logs(
+            user_operation_hash,
+            entrypoint,
+            self.logs_incremental_range,
+            self.logs_number_of_ranges,
+        )
+        if logs is None:
             return None
-        logs = res["result"]
-        log = res["result"][0]
+        log = logs[0]
 
         log_object = Log(
             removed=log["removed"],
@@ -175,7 +180,55 @@ class UserOperationHandler(ABC):
         return res["result"]
 
     async def get_user_operation_logs(
-            self, user_operation_hash: str, entrypoint: str):
+        self,
+        user_operation_hash: str,
+        entrypoint: str,
+        logs_incremental_range: int,
+        logs_number_of_ranges: int,
+    ):
+        if logs_incremental_range > 0:
+            block_info = await get_latest_block_info(
+                self.ethereum_node_eth_get_logs_url)
+
+            latest_block_number = int(block_info[0], 16)
+            earliest_block_number = latest_block_number - (
+                logs_incremental_range * logs_number_of_ranges)
+            if earliest_block_number < 0:
+                earliest_block_number = 0
+            for earliest_block in range(earliest_block_number,
+                                        latest_block_number,
+                                        logs_incremental_range):
+                latest_block = earliest_block + logs_incremental_range
+                if latest_block <= earliest_block:
+                    break
+                res = await self.get_logs(
+                    user_operation_hash,
+                    entrypoint,
+                    hex(earliest_block),
+                    hex(latest_block)
+                )
+                if "result" in res and len(res["result"]) > 0:
+                    return res['result']
+            return None
+        else:
+            res = await self.get_logs(
+                user_operation_hash,
+                entrypoint,
+                "earliest",
+                "latest"
+            )
+            if "result" in res and len(res["result"]) > 0:
+                return res['result']
+            else:
+                return None
+
+    async def get_logs(
+        self,
+        user_operation_hash: str,
+        entrypoint: str,
+        from_block_hex: str,
+        to_block_hex: str,
+    ):
         USER_OPERATIOM_EVENT_DISCRIPTOR = (
             "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
         )
@@ -187,13 +240,13 @@ class UserOperationHandler(ABC):
                     USER_OPERATIOM_EVENT_DISCRIPTOR,
                     user_operation_hash,
                 ],
-                "fromBlock": "earliest",
+                "fromBlock": from_block_hex,
+                "toBlock": to_block_hex,
             }
         ]
         res = await send_rpc_request_to_eth_client(
             self.ethereum_node_eth_get_logs_url, "eth_getLogs", params
         )
-
         return res
 
     async def get_transaction_by_hash(self, transaction_hash) -> dict:

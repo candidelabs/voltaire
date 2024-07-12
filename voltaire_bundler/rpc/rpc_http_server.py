@@ -341,15 +341,18 @@ async def check_health(
     nodes_success, nodes_results = await check_node_health(
         node_urls_to_check, target_chain_id_hex)
 
-    bundler_balance_success, bundler_balance_results = await check_bundler_balance(
-        node_urls_to_check[0], bundler, min_balance)
+    all_ok = nodes_success
 
     results = dict()
     results["nodes_status"] = nodes_results
-    results["bundler_balance"] = bundler_balance_results
+    if nodes_success:
+        bundler_balance_success, bundler_balance_results = await check_bundler_balance(
+            node_urls_to_check[0], bundler, min_balance)
+        results["bundler_balance"] = bundler_balance_results
+        all_ok = nodes_success and bundler_balance_success
+
     results_str = json.dumps(results)
 
-    all_ok = nodes_success and bundler_balance_success
     if all_ok:
         return web.Response(text=results_str)
     else:

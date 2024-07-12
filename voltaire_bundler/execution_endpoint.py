@@ -60,6 +60,8 @@ class ExecutionEndpoint(Endpoint):
         max_verification_gas: int,
         max_call_data_gas: int,
         disable_v6: bool,
+        logs_incremental_range: int,
+        logs_number_of_ranges: int,
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_url = ethereum_node_url
@@ -75,6 +77,8 @@ class ExecutionEndpoint(Endpoint):
             max_priority_fee_per_gas_percentage_multiplier,
             max_verification_gas,
             max_call_data_gas,
+            logs_incremental_range,
+            logs_number_of_ranges,
         )
 
         self.local_mempool_manager_v7 = LocalMempoolManagerV7(
@@ -102,6 +106,8 @@ class ExecutionEndpoint(Endpoint):
                 max_priority_fee_per_gas_percentage_multiplier,
                 max_verification_gas,
                 max_call_data_gas,
+                logs_incremental_range,
+                logs_number_of_ranges,
             )
 
             self.local_mempool_manager_v6 = LocalMempoolManagerV6(
