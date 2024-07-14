@@ -531,7 +531,7 @@ class BundlerManager:
                 user_operations, senders_root_hashes
             ):
                 merged_storage_map[
-                    user_operation.sender_address] = root_hash_result["result"]["codeHash"]
+                    user_operation.sender_address] = root_hash_result["result"]["storageHash"]
         return call_data, call_gas_limit, merged_storage_map
 
     @staticmethod
