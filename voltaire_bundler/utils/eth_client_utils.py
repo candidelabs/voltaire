@@ -1,5 +1,4 @@
 import json
-from dataclasses import dataclass
 from typing import Any
 
 from aiohttp import ClientSession
@@ -52,34 +51,3 @@ async def get_latest_block_info(
         latest_block_timestamp,
         latest_block_hash,
     )
-
-
-@dataclass
-class DebugEntityData:
-    access: dict[str, dict[str, list[str]]]
-    opcodes: dict[str, int]
-    contract_size: dict[str, int]
-
-
-@dataclass
-class DebugTraceCallData:
-    factory_data: DebugEntityData
-    account_data: DebugEntityData
-    paymaster_data: DebugEntityData
-    keccak: list[str]
-    logs: list
-    calls: list
-    debug: list
-
-
-@dataclass
-class Call:
-    _to: str = ""
-    _from: str = ""
-    _type: str = ""
-    _method: str = ""
-    _value: str = ""
-    _gas: str = ""
-    _data: str = ""
-    _gas_used: str = ""
-    _return_type: str = ""  # RETURN or REVERT

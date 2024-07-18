@@ -1,22 +1,18 @@
-
-import json
+from enum import Enum
 import logging
-import os
 import re
 import socket
 import sys
 from argparse import ArgumentParser, Namespace, ArgumentTypeError
 from dataclasses import dataclass
-from enum import Enum
 from importlib.metadata import version
 
 import aiohttp
 
-from voltaire_bundler.bundler.mempool.mempool_info import DEFAULT_MEMPOOL_INFO
 from voltaire_bundler.utils.eth_client_utils import \
     send_rpc_request_to_eth_client
 
-from .typing import Address, MempoolId
+from .typing import Address
 from .utils.import_key import (import_bundler_account,
                                public_address_from_private_key)
 
@@ -32,43 +28,37 @@ VOLTAIRE_HEADER = "\n".join(
 __version__ = version("voltaire_bundler")
 
 
-class EntrypointType(Enum):
-    v_0_6 = "0.6"
+class ConditionalRpc(Enum):
+    eth = "eth"
+    fastlane = "pfl"
 
-
-class MempoolType(Enum):
-    default = "default"
+    def __str__(self):
+        return self.value
 
 
 @dataclass()
 class InitData:
-    entrypoints: list[Address]
-    entrypoints_versions: list[EntrypointType]
     rpc_url: str
     rpc_port: int
     ethereum_node_url: str
     bundler_pk: str
     bundler_address: Address
-    bundler_helper_byte_code: str
-    entrypoint_mod_byte_code: str
     chain_id: int
     is_debug: bool
     is_unsafe: bool
     is_legacy_mode: bool
-    is_send_raw_transaction_conditional: bool
+    conditional_rpc: ConditionalRpc | None
     bundle_interval: int
-    whitelist_entity_storage_access: list[str]
     max_fee_per_gas_percentage_multiplier: int
     max_priority_fee_per_gas_percentage_multiplier: int
     is_metrics: bool
     rpc_cors_domain: str
     enforce_gas_price_tolerance: int
     ethereum_node_debug_trace_call_url: str
+    ethereum_node_eth_get_logs_url: str
     p2p_enr_address: str
     p2p_enr_tcp_port: int
     p2p_enr_udp_port: int
-    p2p_mempools_types: list[list[MempoolType]]
-    p2p_mempools_ids: list[list[MempoolId]]
     p2p_target_peers_number: int
     p2p_boot_nodes_enr: str
     p2p_upnp_enabled: bool
@@ -77,7 +67,11 @@ class InitData:
     disable_p2p: bool
     max_verification_gas: int
     max_call_data_gas: int
-
+    disable_v6: bool
+    min_bundler_balance: int
+    logs_incremental_range: int
+    logs_number_of_ranges: int
+    health_check_interval: int
 
 def address(ep: str):
     address_pattern = "^0x[0-9,a-f,A-F]{40}$"
@@ -105,22 +99,10 @@ def initialize_argument_parser() -> ArgumentParser:
     parser = ArgumentParser(
         prog="Voltaire",
         description="EIP-4337 python Bundler",
-        epilog="Candide Labs : https://candide.dev/ - Github : https://github.com/candidelabs",
-    )
-    parser.add_argument(
-        "--entrypoints",
-        type=address,
-        nargs="+",
-        help="Supported entrypoints addresses.",
-        default=["0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"],
-    )
-
-    parser.add_argument(
-        "--entrypoints_versions",
-        type=EntrypointType,
-        nargs="+",
-        help="Supported entrypoints version.",
-        default=[EntrypointType.v_0_6],
+        epilog=(
+            "Candide Labs : https://candide.dev/ - "
+            "Github : https://github.com/candidelabs"
+        ),
     )
 
     group = parser.add_mutually_exclusive_group(required=True)
@@ -135,7 +117,10 @@ def initialize_argument_parser() -> ArgumentParser:
     group.add_argument(
         "--keystore_file_path",
         type=str,
-        help="Bundler Keystore file path - defaults to first file in keystore folder",
+        help=(
+            "Bundler Keystore file path - "
+            "defaults to first file in keystore folder"
+        ),
         nargs="?",
     )
 
@@ -189,6 +174,7 @@ def initialize_argument_parser() -> ArgumentParser:
         type=unsigned_int,
         help="chain id",
         nargs="?",
+        default=1337,
     )
 
     parser.add_argument(
@@ -212,7 +198,10 @@ def initialize_argument_parser() -> ArgumentParser:
     group2.add_argument(
         "--ethereum_node_debug_trace_call_url",
         type=str,
-        help="An Eth Client JSON-RPC Url for debug_traceCall only - defaults to ethereum_node_url value",
+        help=(
+            "An Eth Client JSON-RPC Url for debug_traceCall only - "
+            "defaults to ethereum_node_url value"
+        ),
         nargs="?",
         const=None,
         default=None,
@@ -220,10 +209,25 @@ def initialize_argument_parser() -> ArgumentParser:
 
     group2.add_argument(
         "--unsafe",
-        help="UNSAFE mode: no storage or opcode checks - when debug_traceCall is not available",
+        help=(
+            "UNSAFE mode: no storage or opcode checks - "
+            "when debug_traceCall is not available"
+        ),
         nargs="?",
         const=True,
         default=False,
+    )
+
+    parser.add_argument(
+        "--ethereum_node_eth_get_logs_url",
+        type=str,
+        help=(
+            "An Eth Client JSON-RPC Url for eth_getLogs only - "
+            "defaults to ethereum_node_url value"
+        ),
+        nargs="?",
+        const=None,
+        default=None,
     )
 
     parser.add_argument(
@@ -235,34 +239,35 @@ def initialize_argument_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
-        "--send_raw_transaction_conditional",
-        help="use eth_SendRawTransactionConditional with comptaible rollups",
+        "--conditional_rpc",
+        help="use sendRawTransactionConditional",
         nargs="?",
-        const=True,
-        default=False,
+        type=ConditionalRpc,
+        const=ConditionalRpc.eth,
+        default=None,
+        choices=list(ConditionalRpc)
     )
 
     parser.add_argument(
         "--bundle_interval",
         type=int,
-        help="set the bundle interval in seconds for the auto bundle mode - set to zero for manual mode",
+        help=(
+            "set the bundle interval in seconds for the auto bundle mode - "
+            "set to zero for manual mode"
+        ),
         nargs="?",
         const=1,
         default=1,
     )
 
     parser.add_argument(
-        "--whitelist_entity_storage_access",
-        type=address,
-        nargs="+",
-        help="list of entities to whitelist for storage access rules",
-        default=[],
-    )
-
-    parser.add_argument(
         "--max_fee_per_gas_percentage_multiplier",
         type=unsigned_int,
-        help="modify the bundle max_fee_per_gas value as the following formula [bundle_max_fee_per_gas = block_max_fee_per_gas * max_fee_per_gas_percentage_multiplier /100], defaults to 110",
+        help=(
+            "modify the bundle max_fee_per_gas value as the following formula "
+            "[bundle_max_fee_per_gas = block_max_fee_per_gas * "
+            "max_fee_per_gas_percentage_multiplier /100], defaults to 110"
+        ),
         nargs="?",
         const=110,
         default=110,
@@ -271,7 +276,11 @@ def initialize_argument_parser() -> ArgumentParser:
     parser.add_argument(
         "--max_priority_fee_per_gas_percentage_multiplier",
         type=unsigned_int,
-        help="modify the bundle max_priority_fee_per_gas value as the following formula [bundle_max_priority_fee_per_gas = block_max_priority_fee_per_gas * max_priority_fee_per_gas_percentage_multiplier /100], defaults to 100",
+        help=(
+            "modify the bundle max_priority_fee_per_gas value as the following formula "
+            "[bundle_max_priority_fee_per_gas = block_max_priority_fee_per_gas * "
+            "max_priority_fee_per_gas_percentage_multiplier /100], defaults to 100"
+        ),
         nargs="?",
         const=110,
         default=110,
@@ -280,7 +289,13 @@ def initialize_argument_parser() -> ArgumentParser:
     parser.add_argument(
         "--enforce_gas_price_tolerance",
         type=unsigned_int,
-        help="eth_sendUserOperation will return an error if the useroperation gas price is less than min_max_fee_per_gas, takes a tolerance percentage as a paramter as the following formula min_max_fee_per_gas = block_max_fee_per_gas * (1-tolerance/100), tolerance defaults to 10",
+        help=(
+            "eth_sendUserOperation will return an error if the useroperation "
+            "gas price is less than min_max_fee_per_gas, "
+            "takes a tolerance percentage as a paramter as the following formula "
+            "min_max_fee_per_gas = block_max_fee_per_gas * (1-tolerance/100), "
+            "tolerance defaults to 10"
+        ),
         nargs="?",
         const=10,
         default=10,
@@ -302,41 +317,41 @@ def initialize_argument_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
+        "--disable_v6",
+        type=bool,
+        help="disable support for entrypoint v0.06",
+        nargs="?",
+        const=True,
+        default=False,
+    )
+
+    parser.add_argument(
         "--p2p_enr_address",
         type=str,
-        help="P2P - The address to broadcast to peers about which address we are listening on.",
+        help=(
+            "P2P - The address to broadcast to peers about which address"
+            " the bundler is listening on."
+        ),
     )
 
     parser.add_argument(
         "--p2p_enr_tcp_port",
         type=unsigned_int,
-        help="P2P - The tcp ipv4 port to broadcast to peers in order to reach back for discovery.",
+        help=(
+            "P2P - The tcp ipv4 port to broadcast to peers in order to reach "
+            "back for discovery."
+        ),
         default=9000,
     )
 
     parser.add_argument(
         "--p2p_enr_udp_port",
         type=unsigned_int,
-        help="P2P - The udp ipv4 port to broadcast to peers in order to reach back for discovery.",
+        help=(
+            "P2P - The udp ipv4 port to broadcast to peers in order to reach "
+            "back for discovery."
+        ),
         default=9000,
-    )
-
-    parser.add_argument(
-        "--p2p_mempools_types",
-        type=MempoolType,
-        nargs="+",
-        action="append",
-        default=[[MempoolType.default]],
-        help="P2P - List of mempool types per entrypoint.",
-    )
-
-    parser.add_argument(
-        "--p2p_mempools_ids",
-        type=MempoolId,
-        nargs="+",
-        action="append",
-        default=[[None]],
-        help="P2P - List of supported mempools ids per mempool type.",
     )
 
     parser.add_argument(
@@ -397,6 +412,54 @@ def initialize_argument_parser() -> ArgumentParser:
         default=30_000_000,
     )
 
+    parser.add_argument(
+        "--min_bundler_balance",
+        type=int,
+        help=(
+            "Minimum bundler balance in wei, "
+            "if crossed the bundler will create warining logs"
+        ),
+        nargs="?",
+        const=1_000_000_000_000_000_000,
+        default=1_000_000_000_000_000_000,
+    )
+
+    parser.add_argument(
+        "--logs_incremental_range",
+        type=int,
+        help=(
+            "eth_getLogs block range per request, affects eth_getUserOperationByHash "
+            "and eth_getUserOperationReceipt. Defaults to 0 which mean earliest"
+        ),
+        nargs="?",
+        const=0,
+        default=0,
+    )
+
+    parser.add_argument(
+        "--logs_number_of_ranges",
+        type=int,
+        help=(
+            "number of ranges to search eth_getLogs. needs to be set with "
+            "--logs_incremental_range"
+        ),
+        nargs="?",
+        const=10,
+        default=10,
+    )
+
+    parser.add_argument(
+        "--health_check_interval",
+        type=int,
+        help=(
+            "Interval in seconds to execute health checks. "
+            "Defaults to 120 seconds(2 minutes)"
+        ),
+        nargs="?",
+        const=120,
+        default=120,
+    )
+
     return parser
 
 
@@ -424,79 +487,18 @@ def init_bundler_address_and_secret(args: Namespace):
     return bundler_address, bundler_pk
 
 
-def init_bundler_helper():
-    package_directory = os.path.dirname(os.path.abspath(__file__))
-    BundlerHelper_file = os.path.join(
-            package_directory, "utils", "BundlerHelper.json")
-
-    bundler_helper_byte_code_file = open(BundlerHelper_file)
-    data = json.load(bundler_helper_byte_code_file)
-    bundler_helper_byte_code = data["bytecode"]
-
-    return bundler_helper_byte_code
-
-
-def init_entrypoint_mod():
-    package_directory = os.path.dirname(os.path.abspath(__file__))
-    entrypoint_mod_file = os.path.join(
-            package_directory, "utils", "EntryPointMod.json")
-
-    entrypoint_mod_byte_code_file = open(entrypoint_mod_file)
-    data = json.load(entrypoint_mod_byte_code_file)
-    entrypoint_mod_byte_code = data["bytecode"]
-
-    return entrypoint_mod_byte_code
-
-
-def init_entrypoint_and_mempool_data(args: Namespace):
-    for (
-        entrypoint,
-        entrypoint_mempools_types,
-        entrypoint_mempool_ids,
-    ) in zip(
-        args.entrypoints,
-        args.p2p_mempools_types,
-        args.p2p_mempools_ids,
-    ):
-        index = 0
-        for mempool_type, mempool_id in zip(
-            entrypoint_mempools_types, entrypoint_mempool_ids
-        ):
-            if mempool_id is None and mempool_type == MempoolType.default:
-                if entrypoint in DEFAULT_MEMPOOL_INFO:
-                    if args.chain_id in DEFAULT_MEMPOOL_INFO[entrypoint]:
-                        entrypoint_mempool_ids[index] = DEFAULT_MEMPOOL_INFO[
-                            entrypoint
-                        ][args.chain_id]
-                    elif args.disable_p2p:
-                        entrypoint_mempool_ids[index] = (
-                            ""  # set mempool id to empty string if disable_p2p
-                        )
-                    else:
-                        logging.error(
-                            f"Chain without default mempool ids : {entrypoint}, please specify the mempool id"
-                        )
-                        sys.exit(1)
-                else:
-                    logging.error(
-                        f"Entrypoint without default mempool ids : {entrypoint}, please specify the mempool id"
-                    )
-                    sys.exit(1)
-                index = index + 1
-
-
 def check_if_valid_rpc_url_and_port(rpc_url, rpc_port) -> None:
     try:
         socket.getaddrinfo(rpc_url, rpc_port)
     except socket.gaierror:
-        logging.error(f"Invalid RPC url {rpc_url} and port {rpc_port}")
+        logging.critical(f"Invalid RPC url {rpc_url} and port {rpc_port}")
         sys.exit(1)
 
     soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         soc.bind((rpc_url, rpc_port))
     except socket.error as message:
-        logging.error(
+        logging.critical(
             f"Bind failed. {str(message)} for RPC url {rpc_url} and port {rpc_port}"
         )
         sys.exit(1)
@@ -510,16 +512,39 @@ async def check_valid_ethereum_rpc_and_get_chain_id(ethereum_node_url) -> str:
             [],
         )
         if "result" not in chain_id_hex:
-            logging.error(f"Invalide Eth node {ethereum_node_url}")
+            logging.critical(f"Invalide Eth node {ethereum_node_url}")
             sys.exit(1)
         else:
             return chain_id_hex["result"]
     except aiohttp.client_exceptions.ClientConnectorError:
-        logging.error(f"Connection refused for Eth node {ethereum_node_url}")
+        logging.critical(f"Connection refused for Eth node {ethereum_node_url}")
         sys.exit(1)
     except Exception:
-        logging.error(f"Error when connecting to Eth node {ethereum_node_url}")
+        logging.critical(f"Error when connecting to Eth node {ethereum_node_url}")
         sys.exit(1)
+
+
+async def check_valid_entrypoint(ethereum_node_url: str, entrypoint: Address):
+    entrypoint_code = await send_rpc_request_to_eth_client(
+        ethereum_node_url,
+        "eth_getCode",
+        [entrypoint, "latest"],
+    )
+    if "result" not in entrypoint_code or len(entrypoint_code["result"]) < 10:
+        logging.critical(f"entrypoint not deployed at {entrypoint}")
+        sys.exit(1)
+
+
+async def check_valid_entrypoints(ethereum_node_url: str, disable_v6: bool):
+    if not disable_v6:
+        await check_valid_entrypoint(
+            ethereum_node_url,
+            Address("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789")
+        )
+    await check_valid_entrypoint(
+        ethereum_node_url,
+        Address("0x0000000071727De22E5E9d8BAf0edAc6f37da032")
+    )
 
 
 async def get_init_data(args: Namespace) -> InitData:
@@ -532,60 +557,73 @@ async def get_init_data(args: Namespace) -> InitData:
     )
 
     if hex(args.chain_id) != ethereum_node_chain_id_hex.lower():
-        logging.error(
+        logging.critical(
             f"Invalide chain id {args.chain_id} with Eth node {args.ethereum_node_url}"
         )
         sys.exit(1)
 
     bundler_address, bundler_pk = init_bundler_address_and_secret(args)
 
-    bundler_helper_byte_code = init_bundler_helper()
-    entrypoint_mod_byte_code = init_entrypoint_mod()
-
     if args.ethereum_node_debug_trace_call_url is None:
         args.ethereum_node_debug_trace_call_url = args.ethereum_node_url
-    else:
+    if args.ethereum_node_eth_get_logs_url is None:
+        args.ethereum_node_eth_get_logs_url = args.ethereum_node_url
+
+    if args.ethereum_node_debug_trace_call_url != args.ethereum_node_url:
         ethereum_node_debug_chain_id_hex = (
             await check_valid_ethereum_rpc_and_get_chain_id(
                 args.ethereum_node_debug_trace_call_url
             )
         )
         if ethereum_node_chain_id_hex != ethereum_node_debug_chain_id_hex:
-            logging.error(
-                f"Eth node chain id {ethereum_node_chain_id_hex} not eqaul Eth node debug chain id {ethereum_node_debug_chain_id_hex}"
+            logging.critical(
+                f"Eth node chain id {ethereum_node_chain_id_hex} not eqaul " +
+                f"Eth node debug chain id {ethereum_node_debug_chain_id_hex}"
             )
             sys.exit(1)
 
-    init_entrypoint_and_mempool_data(args)
+    if args.ethereum_node_eth_get_logs_url != args.ethereum_node_url:
+        eth_get_logs_url_chain_id_hex = (
+            await check_valid_ethereum_rpc_and_get_chain_id(
+                args.ethereum_node_eth_get_logs_url
+            )
+        )
+        if ethereum_node_chain_id_hex != eth_get_logs_url_chain_id_hex:
+            logging.critical(
+                f"Eth node chain id {ethereum_node_chain_id_hex} not eqaul " +
+                f"Eth node debug chain id {eth_get_logs_url_chain_id_hex}"
+            )
+            sys.exit(1)
+
+    if args.conditional_rpc is not None and args.unsafe:
+        logging.critical(
+            "sendRawTransactionalConditional can't work with unsafe mode."
+        )
+        sys.exit(1)
+    await check_valid_entrypoints(args.ethereum_node_url, args.disable_v6)
 
     ret = InitData(
-        args.entrypoints,
-        args.entrypoints_versions,
         args.rpc_url,
         args.rpc_port,
         args.ethereum_node_url,
         bundler_pk,
         bundler_address,
-        bundler_helper_byte_code,
-        entrypoint_mod_byte_code,
         args.chain_id,
         args.debug,
         args.unsafe,
         args.legacy_mode,
-        args.send_raw_transaction_conditional,
+        args.conditional_rpc,
         args.bundle_interval,
-        args.whitelist_entity_storage_access,
         args.max_fee_per_gas_percentage_multiplier,
         args.max_priority_fee_per_gas_percentage_multiplier,
         args.metrics,
         args.rpc_cors_domain,
         args.enforce_gas_price_tolerance,
         args.ethereum_node_debug_trace_call_url,
+        args.ethereum_node_eth_get_logs_url,
         args.p2p_enr_address,
         args.p2p_enr_tcp_port,
         args.p2p_enr_udp_port,
-        args.p2p_mempools_types,
-        args.p2p_mempools_ids,
         args.p2p_target_peers_number,
         args.p2p_boot_nodes_enr,
         args.p2p_upnp_enabled,
@@ -594,6 +632,11 @@ async def get_init_data(args: Namespace) -> InitData:
         args.disable_p2p,
         args.max_verification_gas,
         args.max_call_data_gas,
+        args.disable_v6,
+        args.min_bundler_balance,
+        args.logs_incremental_range,
+        args.logs_number_of_ranges,
+        args.health_check_interval,
     )
 
     if args.verbose:

@@ -1,4 +1,10 @@
 from dataclasses import dataclass
+from voltaire_bundler.typing import Address
+from voltaire_bundler.user_operation.v6.user_operation_v6 import UserOperationV6
+from voltaire_bundler.user_operation.v7.user_operation_v7 import UserOperationV7
+from typing import TypeVar
+
+UserOperationType = TypeVar('UserOperationType', UserOperationV6, UserOperationV7)
 
 
 @dataclass
@@ -19,11 +25,48 @@ class StakeInfo:
 
 
 @dataclass
-class FailedOpRevertData:
-    SELECTOR = "0x00fa072b"
+class SenderValidationData:
+    sig_failed: bool | None
+    aggregator: Address | None
+    valid_until: int
+    valid_after: int
+
+
+@dataclass
+class PaymasterValidationData:
+    sig_failed: bool
+    valid_until: int
+    valid_after: int
+
+
+@dataclass
+class AggregatorStakeInfo:
+    aggregator: str
+    stake_info: StakeInfo
+
+
+@dataclass
+class ReturnInfoV7:
+    pre_op_gas: int
+    prefund: int
+    sender_validation_data: SenderValidationData
+    paymaster_validation_data: PaymasterValidationData
+    paymaster_context: bytes
+
+
+@dataclass
+class FailedOp:
+    SELECTOR = "0x220266b6"
     opIndex: int
-    paymaster: str
     reason: str
+
+
+@dataclass
+class FailedOpWithRevert:
+    SELECTOR = "0x65c8fd4d"
+    opIndex: int
+    reason: str
+    inner: bytes
 
 
 @dataclass

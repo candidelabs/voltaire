@@ -1,117 +1,24 @@
-from functools import reduce
-from typing import Any
+from abc import ABC
+from functools import cache
+import logging
 
-from eth_abi import decode, encode
-from eth_utils import keccak, to_checksum_address
-
-from voltaire_bundler.bundler.mempool.sender_mempool import \
-    VerifiedUserOperation
-from voltaire_bundler.user_operation.models import (Log, ReceiptInfo,
-                                                    UserOperationReceiptInfo)
+from eth_abi import encode, decode
+from voltaire_bundler.typing import Address
 from voltaire_bundler.utils.eth_client_utils import \
-    send_rpc_request_to_eth_client
+        get_latest_block_info, send_rpc_request_to_eth_client
+from typing import Any
+from ..gas.gas_manager import GasManager
+from .models import (Log, ReceiptInfo, UserOperationReceiptInfo)
 
 
-class UserOperationHandler:
+class UserOperationHandler(ABC):
     ethereum_node_url: str
-    bundler_private_key: str
-    bundler_address: str
+    bundler_address: Address
     is_legacy_mode: bool
-
-    def __init__(
-        self,
-        ethereum_node_url,
-        bundler_private_key,
-        bundler_address,
-        is_legacy_mode,
-    ):
-        self.ethereum_node_url = ethereum_node_url
-        self.bundler_private_key = bundler_private_key
-        self.bundler_address = bundler_address
-        self.is_legacy_mode = is_legacy_mode
-
-    async def get_user_operation_by_hash(
-        self, user_operation_hash: str, entrypoint: str
-    ) -> tuple | None:
-        event_log_info = await self.get_user_operation_event_log_info(
-            user_operation_hash, entrypoint
-        )
-        if event_log_info is None:
-            return None
-        log_object = event_log_info[0]
-        transaction_hash = log_object.transactionHash
-
-        transaction = await self.get_transaction_by_hash(transaction_hash)
-
-        block_hash = transaction["blockHash"]
-        block_number = transaction["blockNumber"]
-        user_operation = transaction["input"]
-
-        return user_operation, block_number, block_hash, transaction_hash
-
-    async def get_user_operation_by_hash_rpc(
-        self,
-        user_operation_hash: str,
-        entrypoint: str,
-        senders_mempools,
-    ) -> dict | None:
-        user_operation_by_hash = await self.get_user_operation_by_hash(
-            user_operation_hash, entrypoint
-        )
-        if user_operation_by_hash is None:
-            user_operation_hashs_to_verified_user_operation: dict[str, VerifiedUserOperation] = reduce(
-                lambda a, b: a | b,
-                (
-                    map(
-                        lambda sender_mempool: sender_mempool.user_operation_hashs_to_verified_user_operation,
-                        senders_mempools,
-                    )
-                ),
-                dict(),
-            )
-            if user_operation_hash in user_operation_hashs_to_verified_user_operation:
-                user_operation_by_hash_json = {
-                    "userOperation": user_operation_hashs_to_verified_user_operation[
-                        user_operation_hash
-                    ].user_operation,
-                    "entryPoint": entrypoint,
-                    "blockNumber": None,
-                    "blockHash": None,
-                    "transactionHash": None,
-                }
-                return user_operation_by_hash_json
-            else:
-                return None
-        (
-            handle_op_input,
-            block_number,
-            block_hash,
-            transaction_hash,
-        ) = user_operation_by_hash
-
-        user_operation = UserOperationHandler.decode_handle_op_input(handle_op_input)
-
-        user_operation_json = {
-            "sender": to_checksum_address(user_operation[0]),
-            "nonce": hex(user_operation[1]),
-            "initCode": "0x" + user_operation[2].hex(),
-            "callData": "0x" + user_operation[3].hex(),
-            "callGasLimit": hex(user_operation[4]),
-            "verificationGasLimit": hex(user_operation[5]),
-            "preVerificationGas": hex(user_operation[6]),
-            "maxFeePerGas": hex(user_operation[7]),
-            "maxPriorityFeePerGas": hex(user_operation[8]),
-            "paymasterAndData": "0x" + user_operation[9].hex(),
-            "signature": "0x" + user_operation[10].hex(),
-        }
-        user_operation_by_hash_json = {
-            "userOperation": user_operation_json,
-            "entryPoint": entrypoint,
-            "blockNumber": block_number,
-            "blockHash": block_hash,
-            "transactionHash": transaction_hash,
-        }
-        return user_operation_by_hash_json
+    ethereum_node_eth_get_logs_url: str
+    gas_manager: GasManager
+    logs_incremental_range: int
+    logs_number_of_ranges: int
 
     async def get_user_operation_receipt(
         self, user_operation_hash: str, entrypoint: str
@@ -217,13 +124,15 @@ class UserOperationHandler:
     async def get_user_operation_event_log_info(
         self, user_operation_hash: str, entrypoint: str
     ) -> tuple | None:
-        res: Any = await self.get_user_operation_logs(
-                user_operation_hash, entrypoint)
-
-        if "result" not in res or len(res["result"]) < 1:
+        logs: Any = await self.get_user_operation_logs(
+            user_operation_hash,
+            entrypoint,
+            self.logs_incremental_range,
+            self.logs_number_of_ranges,
+        )
+        if logs is None:
             return None
-        logs = res["result"]
-        log = res["result"][0]
+        log = logs[0]
 
         log_object = Log(
             removed=log["removed"],
@@ -271,7 +180,55 @@ class UserOperationHandler:
         return res["result"]
 
     async def get_user_operation_logs(
-            self, user_operation_hash: str, entrypoint: str):
+        self,
+        user_operation_hash: str,
+        entrypoint: str,
+        logs_incremental_range: int,
+        logs_number_of_ranges: int,
+    ):
+        if logs_incremental_range > 0:
+            block_info = await get_latest_block_info(
+                self.ethereum_node_eth_get_logs_url)
+
+            latest_block_number = int(block_info[0], 16)
+            earliest_block_number = latest_block_number - (
+                logs_incremental_range * logs_number_of_ranges)
+            if earliest_block_number < 0:
+                earliest_block_number = 0
+            for earliest_block in range(earliest_block_number,
+                                        latest_block_number,
+                                        logs_incremental_range):
+                latest_block = earliest_block + logs_incremental_range
+                if latest_block <= earliest_block:
+                    break
+                res = await self.get_logs(
+                    user_operation_hash,
+                    entrypoint,
+                    hex(earliest_block),
+                    hex(latest_block)
+                )
+                if "result" in res and len(res["result"]) > 0:
+                    return res['result']
+            return None
+        else:
+            res = await self.get_logs(
+                user_operation_hash,
+                entrypoint,
+                "earliest",
+                "latest"
+            )
+            if "result" in res and len(res["result"]) > 0:
+                return res['result']
+            else:
+                return None
+
+    async def get_logs(
+        self,
+        user_operation_hash: str,
+        entrypoint: str,
+        from_block_hex: str,
+        to_block_hex: str,
+    ):
         USER_OPERATIOM_EVENT_DISCRIPTOR = (
             "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
         )
@@ -283,13 +240,13 @@ class UserOperationHandler:
                     USER_OPERATIOM_EVENT_DISCRIPTOR,
                     user_operation_hash,
                 ],
-                "fromBlock": "earliest",
+                "fromBlock": from_block_hex,
+                "toBlock": to_block_hex,
             }
         ]
         res = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_getLogs", params
+            self.ethereum_node_eth_get_logs_url, "eth_getLogs", params
         )
-
         return res
 
     async def get_transaction_by_hash(self, transaction_hash) -> dict:
@@ -299,70 +256,99 @@ class UserOperationHandler:
         )
         return res["result"]
 
-    @staticmethod
-    def get_user_operation_hash(
-        user_operation_list: list, entrypoint_addr: str, chain_id: int
-    ):
-        packed_user_operation = keccak(
-            UserOperationHandler.pack_user_operation(user_operation_list)
-        )
 
-        encoded_user_operation_hash = encode(
-            ["(bytes32,address,uint256)"],
-            [[packed_user_operation, entrypoint_addr, chain_id]],
-        )
-        user_operation_hash = "0x" + keccak(encoded_user_operation_hash).hex()
-        return user_operation_hash
+async def get_deposit_info(
+    address: Address, entrypoint: Address, node_url: str
+) -> tuple[int, bool, int, int, int]:
+    function_selector = "0x5287ce12"  # getDepositInfo
+    params = encode(["address"], [address])
 
-    @staticmethod
-    def pack_user_operation(
-        user_operation_list: list, for_signature: bool = True
-    ) -> bytes:
-        if for_signature:
-            user_operation_list[2] = keccak(user_operation_list[2])
-            user_operation_list[3] = keccak(user_operation_list[3])
-            user_operation_list[9] = keccak(user_operation_list[9])
-            user_operation_list_without_signature = user_operation_list[:-1]
+    call_data = function_selector + params.hex()
 
-            packed_user_operation = encode(
-                [
-                    "address",
-                    "uint256",
-                    "bytes32",
-                    "bytes32",
-                    "uint256",
-                    "uint256",
-                    "uint256",
-                    "uint256",
-                    "uint256",
-                    "bytes32",
-                ],
-                user_operation_list_without_signature,
-            )
+    params = [
+        {
+            "to": entrypoint,
+            "data": call_data,
+        },
+        "latest",
+    ]
+
+    result: Any = await send_rpc_request_to_eth_client(
+        node_url, "eth_call", params
+    )
+    if "result" in result:
+        (deposit, staked, stake, unstake_delay_sec, withdraw_time) = decode(
+            ["(uint256,bool,uint112,uint32,uint48)"],
+            bytes.fromhex(result["result"][2:])
+        )[0]
+        return deposit, staked, stake, unstake_delay_sec, withdraw_time
+    else:
+        logging.critical("balanceOf eth_call failed")
+        if "error" in result:
+            error = str(result["error"])
+            raise ValueError(f"balanceOf eth_call failed - {error}")
         else:
-            packed_user_operation = encode(
-                [
-                    "address",
-                    "uint256",
-                    "bytes",
-                    "bytes",
-                    "uint256",
-                    "uint256",
-                    "uint256",
-                    "uint256",
-                    "uint256",
-                    "bytes",
-                    "bytes",
-                ],
-                user_operation_list,
-            )
-        return packed_user_operation
+            raise ValueError("balanceOf eth_call failed")
 
-    @staticmethod
-    def decode_handle_op_input(handle_op_input) -> list:
-        INPUT_ABI = [
-            "(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)[]",
-            "address",
-        ]
-        inputResult = decode(INPUT_ABI, bytes.fromhex(handle_op_input[10:]))
-        return inputResult[0][0]
+
+@cache
+def decode_failed_op_event(solidity_error_params: str) -> tuple[int, str]:
+    FAILED_OP_PARAMS_API = ["uint256", "string"]
+    failed_op_params_res = decode(
+        FAILED_OP_PARAMS_API, bytes.fromhex(solidity_error_params)
+    )
+    operation_index = failed_op_params_res[0]
+    reason = failed_op_params_res[1]
+
+    return operation_index, reason
+
+
+@cache
+def decode_failed_op_with_revert_event(
+        solidity_error_params: str) -> tuple[int, str, bytes]:
+    FAILED_OP_PARAMS_API = ["uint256", "string", "bytes"]
+    failed_op_params_res = decode(
+        FAILED_OP_PARAMS_API, bytes.fromhex(solidity_error_params)
+    )
+    operation_index = failed_op_params_res[0]
+    reason = failed_op_params_res[1]
+    inner = failed_op_params_res[2]
+
+    return operation_index, reason, inner
+
+
+def fell_user_operation_optional_parameters(
+    user_operation_with_optional_params: dict[str, str]
+ ) -> dict[str, str]:
+    if (
+        "preVerificationGas" not in user_operation_with_optional_params
+        or
+        user_operation_with_optional_params["preVerificationGas"] is None
+    ):
+        user_operation_with_optional_params["preVerificationGas"] = "0x"
+    if (
+        "verificationGasLimit" not in user_operation_with_optional_params
+        or
+        user_operation_with_optional_params["verificationGasLimit"] is None
+    ):
+        user_operation_with_optional_params["verificationGasLimit"] = "0x"
+    if (
+        "callGasLimit" not in user_operation_with_optional_params
+        or
+        user_operation_with_optional_params["callGasLimit"] is None
+    ):
+        user_operation_with_optional_params["callGasLimit"] = "0x"
+    if (
+        "maxFeePerGas" not in user_operation_with_optional_params
+        or
+        user_operation_with_optional_params["maxFeePerGas"] is None
+    ):
+        user_operation_with_optional_params["maxFeePerGas"] = "0x"
+    if (
+        "maxPriorityFeePerGas" not in user_operation_with_optional_params
+        or
+        user_operation_with_optional_params["maxPriorityFeePerGas"] is None
+    ):
+        user_operation_with_optional_params["maxPriorityFeePerGas"] = "0x"
+
+    return user_operation_with_optional_params
