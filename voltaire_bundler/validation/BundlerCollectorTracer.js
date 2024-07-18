@@ -74,7 +74,9 @@
         const opcode = log.op.toString();
         const stackSize = log.stack.length();
         const stackTop3 = [];
-        for (let i = 0; i < 3 && i < stackSize; i++) {
+        // different than infinitism's implementation by only storing
+        // one value to stakcTop as the tracer reverts with large validation
+        for (let i = 0; i < 1 && i < stackSize; i++) {
             stackTop3.push(log.stack.peek(i));
         }
         this.lastThreeOpcodes.push({ opcode, stackTop3 });
