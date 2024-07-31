@@ -121,7 +121,6 @@ class ValidationManagerV6(ValidationManager):
         )
 
         if self.is_unsafe:
-            #addresses_called = None
             associated_addresses = None
             storage_map = None
         else:
@@ -181,32 +180,25 @@ class ValidationManagerV6(ValidationManager):
     ) -> tuple[str, str]:
         call_data = ValidationManagerV6.encode_simulate_validation_calldata(
                 user_operation)
-        gas_limit_hex = hex(
-            user_operation.pre_verification_gas + user_operation.verification_gas_limit
-        )
 
         params = [
             {
                 "from": ZERO_ADDRESS,
                 "to": entrypoint,
                 "data": call_data,
-                "gas": gas_limit_hex,
             },
             "latest",
         ]
-
         result: Any = await send_rpc_request_to_eth_client(
             self.ethereum_node_url, "eth_call", params
         )
-        if (
-            "error" not in result
-            or "execution reverted" not in result["error"]["message"]
-        ):
+        if ("error" not in result):
             # this should never happen
             logging.critical("simulateValidation didn't revert!")
             raise ValueError("simulateValidation didn't revert!")
-
         elif (
+                "revert" not in result["error"]["message"]
+                or
                 "data" not in result["error"]
                 or
                 len(result["error"]["data"]) < 10
@@ -228,9 +220,8 @@ class ValidationManagerV6(ValidationManager):
         entrypoint: str,
         block_number: str,
     ) -> str:
-        call_data = ValidationManagerV6.encode_simulate_validation_calldata(user_operation)
-        gas_limit_hex = hex(
-            user_operation.pre_verification_gas + user_operation.verification_gas_limit
+        call_data = ValidationManagerV6.encode_simulate_validation_calldata(
+            user_operation
         )
 
         params = [
@@ -238,7 +229,6 @@ class ValidationManagerV6(ValidationManager):
                 "from": ZERO_ADDRESS,
                 "to": entrypoint,
                 "data": call_data,
-                "gas": gas_limit_hex,
             },
             block_number,
             {"tracer": self.bundler_collector_tracer},
