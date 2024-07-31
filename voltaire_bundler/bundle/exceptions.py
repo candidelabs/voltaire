@@ -31,6 +31,16 @@ class ExecutionException(Exception):
     message: str
 
 
+class OtherJsonRpcErrorCode(Enum):
+    InternalError = -32603
+
+
+@dataclass
+class OtherJsonRpcErrorException(Exception):
+    exception_code: OtherJsonRpcErrorCode
+    message: str
+
+
 @dataclass
 class MethodNotFoundException(Exception):
     exception_code: ExecutionExceptionCode

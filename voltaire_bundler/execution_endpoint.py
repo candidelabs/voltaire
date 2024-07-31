@@ -1,18 +1,23 @@
 import asyncio
 import logging
+import traceback
 import math
 import os
 from typing import Any, Optional
 
 from voltaire_bundler.bundle.exceptions import \
-    ExecutionException, ValidationException, ValidationExceptionCode
+    ExecutionException, OtherJsonRpcErrorCode, OtherJsonRpcErrorException, ValidationException, ValidationExceptionCode
 from voltaire_bundler.cli_manager import ConditionalRpc
 from voltaire_bundler.event_bus_manager.endpoint import Client, Endpoint
 from voltaire_bundler.typing import Address
-from voltaire_bundler.user_operation.user_operation_handler import get_deposit_info
-from voltaire_bundler.user_operation.v6.user_operation_v6 import UserOperationV6
-from voltaire_bundler.user_operation.v7.user_operation_v7 import UserOperationV7
-from voltaire_bundler.user_operation.user_operation import is_user_operation_hash
+from voltaire_bundler.user_operation.user_operation_handler import \
+        get_deposit_info
+from voltaire_bundler.user_operation.v6.user_operation_v6 import \
+        UserOperationV6
+from voltaire_bundler.user_operation.v7.user_operation_v7 import \
+        UserOperationV7
+from voltaire_bundler.user_operation.user_operation import \
+        is_user_operation_hash
 from voltaire_bundler.user_operation.v6.user_operation_handler_v6 import \
     UserOperationHandlerV6
 from voltaire_bundler.user_operation.v7.user_operation_handler_v7 import \
@@ -638,8 +643,23 @@ async def exception_handler_decorator(
 ) -> dict:
     try:
         rpc_call_response = await response_function(rpc_call_request)
-        return rpc_call_response
-
     except (ExecutionException, ValidationException) as excp:
         rpc_call_response = {"payload": excp, "is_error": True}
-        return rpc_call_response
+    except ValueError:
+        rpc_call_response = {
+            "payload": OtherJsonRpcErrorException(
+                OtherJsonRpcErrorCode.InternalError,
+                "Unexpected Error"
+            ),
+            "is_error": True
+        }
+    except Exception:
+        logging.error(traceback.format_exc())
+        rpc_call_response = {
+            "payload": OtherJsonRpcErrorException(
+                OtherJsonRpcErrorCode.InternalError,
+                "Unexpected Error"
+            ),
+            "is_error": True
+        }
+    return rpc_call_response
