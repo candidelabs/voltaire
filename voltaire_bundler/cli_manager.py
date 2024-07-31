@@ -73,6 +73,7 @@ class InitData:
     logs_number_of_ranges: int
     health_check_interval: int
 
+
 def address(ep: str):
     address_pattern = "^0x[0-9,a-f,A-F]{40}$"
     if not isinstance(ep, str) or re.match(address_pattern, ep) is None:
@@ -453,11 +454,11 @@ def initialize_argument_parser() -> ArgumentParser:
         type=int,
         help=(
             "Interval in seconds to execute health checks. "
-            "Defaults to 120 seconds(2 minutes)"
+            "Defaults to 600 seconds(10 minutes)"
         ),
         nargs="?",
-        const=120,
-        default=120,
+        const=600,
+        default=600,
     )
 
     return parser
