@@ -161,16 +161,12 @@ class ValidationManagerV7(ValidationManager):
     ) -> str:
         call_data = ValidationManagerV7.encode_simulate_validation_calldata(
                 user_operation)
-        gas_limit_hex = hex(
-            user_operation.pre_verification_gas + user_operation.verification_gas_limit
-        )
 
         params = [
             {
                 "from": ZERO_ADDRESS,
                 "to": entrypoint,
                 "data": call_data,
-                "gas": gas_limit_hex,
             },
             "latest",
             {  # override the Entrypoint with EntryPointSimulationsV7
@@ -229,16 +225,12 @@ class ValidationManagerV7(ValidationManager):
     ) -> tuple[str, str]:
         call_data = ValidationManagerV7.encode_simulate_validation_calldata(
             user_operation)
-        gas_limit_hex = hex(
-            user_operation.pre_verification_gas + user_operation.verification_gas_limit
-        )
 
         params = [
             {
                 "from": ZERO_ADDRESS,
                 "to": entrypoint,
                 "data": call_data,
-                "gas": gas_limit_hex,
             },
             block_number,
             {
