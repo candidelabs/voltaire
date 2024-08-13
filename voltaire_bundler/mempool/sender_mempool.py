@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import logging
 
 from voltaire_bundler.typing import Address
 from voltaire_bundler.user_operation.user_operation import UserOperation
@@ -25,19 +26,20 @@ class SenderMempool:
         new_user_operation: UserOperation,
         new_user_operation_hash: str,
         verified_at_block_hash: str,
-    ):
+    ) -> str | None:
         existing_user_operation_hash_with_same_nonce = (
             self._get_user_operation_hash_with_same_nonce(
                 new_user_operation.nonce)
         )
 
         if existing_user_operation_hash_with_same_nonce is not None:
-            self.try_replace_user_operation(
+            replaced_user_operation_hash = self.try_replace_user_operation(
                 new_user_operation,
                 new_user_operation_hash,
                 verified_at_block_hash,
                 existing_user_operation_hash_with_same_nonce,
             )
+            return replaced_user_operation_hash
         else:
             self.user_operation_hashs_to_verified_user_operation[
                 new_user_operation_hash
@@ -50,7 +52,7 @@ class SenderMempool:
         new_user_operation_hash: str,
         verified_at_block_hash: str,
         existing_user_operation_hash_with_same_nonce: str,
-    ) -> None:
+    ) -> str:
         if self._check_if_new_operation_can_replace_existing_operation(
             new_user_operation,
             self.user_operation_hashs_to_verified_user_operation[
@@ -64,6 +66,12 @@ class SenderMempool:
                 new_user_operation_hash
             ] = VerifiedUserOperation(
                     new_user_operation, verified_at_block_hash)
+            logging.debug(
+                "useroperation with hash: " + new_user_operation_hash +
+                " replaced useroperation with same nonce with hash: " +
+                existing_user_operation_hash_with_same_nonce
+            )
+            return existing_user_operation_hash_with_same_nonce
         else:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
