@@ -383,8 +383,10 @@ class LocalMempoolManager():
                 self._remove_hash_from_entities_ops_hashes_in_mempool(
                     user_operation_hash
                 )
-                if len(sender_mempool.user_operation_hashs_to_verified_user_operation) == 0:
-                    del self.senders_to_senders_mempools[sender_mempool.address]
+        for sender_address in list(self.senders_to_senders_mempools):
+            sender_mempool = self.senders_to_senders_mempools[sender_address]
+            if len(sender_mempool.user_operation_hashs_to_verified_user_operation) == 0:
+                del self.senders_to_senders_mempools[sender_address]
         return bundle
 
     def get_user_operations_hashes_with_mempool_id(
