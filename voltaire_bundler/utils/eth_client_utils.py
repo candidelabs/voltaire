@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Any
 
 from aiohttp import ClientSession
@@ -22,8 +23,12 @@ async def send_rpc_request_to_eth_client(
             data=json.dumps(json_request),
             headers={"content-type": "application/json"},
         ) as response:
-            resp = await response.read()
-            return json.loads(resp)
+            try:
+                resp = await response.read()
+                return json.loads(resp)
+            except json.decoder.JSONDecodeError:
+                logging.critical("Invalide json response from eth client")
+                raise ValueError("Invalide json response from eth client")
 
 
 async def get_latest_block_info(

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import sys
 from argparse import ArgumentParser
@@ -97,12 +98,15 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
                 host=init_data.rpc_url,
             )
         if init_data.health_check_interval > 0:
-            await asyncio.ensure_future(
-                periodic_health_check_cron_job(
-                    node_urls_to_check=node_urls_to_check,
-                    target_chain_id_hex=hex(init_data.chain_id),
-                    bundler=init_data.bundler_address,
-                    min_balance=init_data.min_bundler_balance,
-                    interval=init_data.health_check_interval
+            try:
+                await asyncio.ensure_future(
+                    periodic_health_check_cron_job(
+                        node_urls_to_check=node_urls_to_check,
+                        target_chain_id_hex=hex(init_data.chain_id),
+                        bundler=init_data.bundler_address,
+                        min_balance=init_data.min_bundler_balance,
+                        interval=init_data.health_check_interval
+                    )
                 )
-            )
+            except ValueError as excp:
+                logging.exception(str(excp))
