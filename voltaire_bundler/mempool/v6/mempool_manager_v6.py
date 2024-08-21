@@ -44,7 +44,7 @@ class LocalMempoolManagerV6(LocalMempoolManager):
         self.is_unsafe = is_unsafe
         self.enforce_gas_price_tolerance = enforce_gas_price_tolerance
         self.senders_to_senders_mempools = {}
-        self.entity_to_no_of_ops_in_mempool = {}
+        self.paymasters_and_factories_to_ops_hashes_in_mempool = {}
         self.verified_useroperations_standard_mempool_gossip_queue = []
         self.seen_user_operation_hashs = set()
         if (

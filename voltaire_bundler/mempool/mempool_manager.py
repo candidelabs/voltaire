@@ -37,7 +37,7 @@ class LocalMempoolManager():
     senders_to_senders_mempools: dict[Address, SenderMempool]
     is_unsafe: bool
     enforce_gas_price_tolerance: int
-    entity_to_no_of_ops_in_mempool: dict[Address, int]  # factory and paymaster
+    paymasters_and_factories_to_ops_hashes_in_mempool: dict[Address, set[str]]
     verified_useroperations_standard_mempool_gossip_queue: List[Any]
     canonical_mempool_id: MempoolId
     seen_user_operation_hashs: set[str]
@@ -49,6 +49,7 @@ class LocalMempoolManager():
 
     def clear_user_operations(self) -> None:
         self.senders_to_senders_mempools.clear()
+        self.paymasters_and_factories_to_ops_hashes_in_mempool.clear()
 
     async def add_user_operation(
         self,
@@ -99,10 +100,8 @@ class LocalMempoolManager():
 
         self._verify_max_allowed_user_operations(
             user_operation.sender_address,
-            user_operation.factory_address_lowercase,
             user_operation.paymaster_address_lowercase,
             sender_stake_info,
-            factory_stake_info,
             paymaster_stake_info,
         )
 
@@ -121,11 +120,15 @@ class LocalMempoolManager():
 
         new_sender = self.senders_to_senders_mempools[new_sender_address]
 
-        await new_sender.add_user_operation(
+        replaced_user_operation_hash = await new_sender.add_user_operation(
             user_operation,
             user_operation_hash,
             latest_block_hash,
         )
+        if replaced_user_operation_hash is not None:
+            self._remove_hash_from_entities_ops_hashes_in_mempool(
+                user_operation_hash
+            )
 
         self.update_all_seen_status(
             user_operation.sender_address,
@@ -134,13 +137,15 @@ class LocalMempoolManager():
         )
 
         if user_operation.factory_address_lowercase is not None:
-            self._update_entity_no_of_ops_in_mempool(
-                user_operation.factory_address_lowercase
+            self._add_hash_to_entity_ops_hashes_in_mempool(
+                user_operation.factory_address_lowercase,
+                user_operation_hash
             )
 
         if user_operation.paymaster_address_lowercase is not None:
-            self._update_entity_no_of_ops_in_mempool(
-                user_operation.paymaster_address_lowercase
+            self._add_hash_to_entity_ops_hashes_in_mempool(
+                user_operation.paymaster_address_lowercase,
+                user_operation_hash
             )
         valid_mempools_ids = [self.canonical_mempool_id]
 
@@ -223,10 +228,8 @@ class LocalMempoolManager():
 
         self._verify_max_allowed_user_operations(
             user_operation.sender_address,
-            user_operation.factory_address_lowercase,
             user_operation.paymaster_address_lowercase,
             sender_stake_info,
-            factory_stake_info,
             paymaster_stake_info,
         )
 
@@ -245,9 +248,13 @@ class LocalMempoolManager():
 
         new_sender = self.senders_to_senders_mempools[new_sender_address]
 
-        await new_sender.add_user_operation(
+        replaced_user_operation_hash = await new_sender.add_user_operation(
             user_operation, user_operation_hash, latest_block_hash
         )
+        if replaced_user_operation_hash is not None:
+            self._remove_hash_from_entities_ops_hashes_in_mempool(
+                user_operation_hash
+            )
 
         self.update_all_seen_status(
             user_operation.sender_address,
@@ -256,13 +263,15 @@ class LocalMempoolManager():
         )
 
         if user_operation.factory_address_lowercase is not None:
-            self._update_entity_no_of_ops_in_mempool(
-                user_operation.factory_address_lowercase
+            self._add_hash_to_entity_ops_hashes_in_mempool(
+                user_operation.factory_address_lowercase,
+                user_operation_hash
             )
 
         if user_operation.paymaster_address_lowercase is not None:
-            self._update_entity_no_of_ops_in_mempool(
-                user_operation.paymaster_address_lowercase
+            self._add_hash_to_entity_ops_hashes_in_mempool(
+                user_operation.paymaster_address_lowercase,
+                user_operation_hash
             )
 
         valid_mempools_ids = [self.canonical_mempool_id]
@@ -319,6 +328,11 @@ class LocalMempoolManager():
                             user_operation.storage_map = storage_map
 
                         if not to_bundle:
+                            logging.debug(
+                                "user operation skipped for bundling because " +
+                                "user_op_access_other_ops_sender_in_bundle."
+                                "user_operation_hash: " + user_operation_hash
+                            )
                             continue
                     if associated_addresses is None:
                         new_code_hash = None
@@ -332,6 +346,13 @@ class LocalMempoolManager():
                     if new_code_hash != user_operation.code_hash:
                         del sender_mempool.user_operation_hashs_to_verified_user_operation[
                             user_operation_hash]
+                        self._remove_hash_from_entities_ops_hashes_in_mempool(
+                            user_operation_hash
+                        )
+                        logging.debug(
+                            "user operation dropped because code hash changed." +
+                            "user_operation_hash: " + user_operation_hash
+                        )
                         continue
 
                 except ValidationException as err:
@@ -346,11 +367,22 @@ class LocalMempoolManager():
 
                     del sender_mempool.user_operation_hashs_to_verified_user_operation[
                         user_operation_hash]
+                    self._remove_hash_from_entities_ops_hashes_in_mempool(
+                            user_operation_hash
+                        )
+                    logging.debug(
+                        "user operation dropped because it failed second validation: " 
+                        + str(err.message) +
+                        " user_operation_hash: " + user_operation_hash
+                    )
                     continue
 
                 bundle.append(user_operation)
                 del sender_mempool.user_operation_hashs_to_verified_user_operation[
                     user_operation_hash]
+                self._remove_hash_from_entities_ops_hashes_in_mempool(
+                    user_operation_hash
+                )
                 if len(sender_mempool.user_operation_hashs_to_verified_user_operation) == 0:
                     del self.senders_to_senders_mempools[sender_mempool.address]
         return bundle
@@ -473,65 +505,62 @@ class LocalMempoolManager():
     def _verify_max_allowed_user_operations(
         self,
         sender_address: Address,
-        factory_address: Address | None,
         paymaster_address: Address | None,
         sender_stake_info: StakeInfo,
-        factory_stake_info: StakeInfo | None,
         paymaster_stake_info: StakeInfo | None,
     ) -> None:
-        self._verify_max_allowed_user_operations_per_entity(
+        self._verify_max_allowed_user_operations_for_sender(
             sender_address,
-            "sender",
             sender_stake_info.stake,
             sender_stake_info.unstakeDelaySec
         )
 
-        if factory_address is not None:
-            assert factory_stake_info is not None
-            self._verify_max_allowed_user_operations_per_entity(
-                factory_address,
-                "factory",
-                factory_stake_info.stake,
-                factory_stake_info.unstakeDelaySec
-            )
-
         if paymaster_address is not None:
             assert paymaster_stake_info is not None
-            self._verify_max_allowed_user_operations_per_entity(
+            self._verify_max_allowed_user_operations_for_paymaster(
                 paymaster_address,
-                "paymaster",
                 paymaster_stake_info.stake,
                 paymaster_stake_info.unstakeDelaySec
             )
 
-    def _verify_max_allowed_user_operations_per_entity(
+    def _verify_max_allowed_user_operations_for_sender(
         self,
         entity: Address,
-        entity_title: str,
         stake: int,
         unstake_delay: int
     ) -> None:
-        if entity_title == "sender":
-            if entity in self.senders_to_senders_mempools:
-                sender_mempool = self.senders_to_senders_mempools[entity]
-                entity_no_of_ops = len(
-                        sender_mempool.user_operation_hashs_to_verified_user_operation)
-            else:
-                entity_no_of_ops = 0
-
-            MAX_MEMPOOL_USEROPS_PER_SENDER = 4
-            max_allowed_user_operations = MAX_MEMPOOL_USEROPS_PER_SENDER
+        if entity in self.senders_to_senders_mempools:
+            sender_mempool = self.senders_to_senders_mempools[entity]
+            entity_no_of_ops = len(
+                sender_mempool.user_operation_hashs_to_verified_user_operation)
         else:
-            if entity in self.entity_to_no_of_ops_in_mempool:
-                entity_no_of_ops = self.entity_to_no_of_ops_in_mempool[entity]
-            else:
-                entity_no_of_ops = 0
+            entity_no_of_ops = 0
 
-            max_allowed_user_operations = self.get_max_allowed_user_operations_for_unstaked_non_senders(
-                entity)
+        MAX_MEMPOOL_USEROPS_PER_SENDER = 4
+        if entity_no_of_ops >= MAX_MEMPOOL_USEROPS_PER_SENDER:
+            self.validate_staked_entity_can_include_more_user_operations(
+                "sender",
+                entity,
+                stake,
+                unstake_delay
+            )
+
+    def _verify_max_allowed_user_operations_for_paymaster(
+        self,
+        entity: Address,
+        stake: int,
+        unstake_delay: int
+    ) -> None:
+        if entity in self.paymasters_and_factories_to_ops_hashes_in_mempool:
+            entity_no_of_ops = self._get_entity_no_of_ops_in_mempool(entity)
+        else:
+            entity_no_of_ops = 0
+
+        max_allowed_user_operations = self.get_max_allowed_user_operations_for_unstaked_paymasters(
+            entity)
         if entity_no_of_ops >= max_allowed_user_operations:
             self.validate_staked_entity_can_include_more_user_operations(
-                entity_title,
+                "paymaster",
                 entity,
                 stake,
                 unstake_delay
@@ -551,20 +580,20 @@ class LocalMempoolManager():
         if paymaster_address is not None:
             self._verify_banned_and_throttled_entity(paymaster_address, "paymaster")
 
-    def _verify_banned_and_throttled_entity(self, entity: Address, entity_title: str) -> None:
+    def _verify_banned_and_throttled_entity(
+            self, entity: Address, entity_title: str) -> None:
         if entity_title == "sender":
             if entity in self.senders_to_senders_mempools:
                 sender_mempool = self.senders_to_senders_mempools[entity]
                 entity_no_of_ops = len(
-                        sender_mempool.user_operation_hashs_to_verified_user_operation)
+                    sender_mempool.user_operation_hashs_to_verified_user_operation)
             else:
                 entity_no_of_ops = 0
         else:
-            if entity in self.entity_to_no_of_ops_in_mempool:
-                entity_no_of_ops = self.entity_to_no_of_ops_in_mempool[entity]
+            if entity in self.paymasters_and_factories_to_ops_hashes_in_mempool:
+                entity_no_of_ops = self._get_entity_no_of_ops_in_mempool(entity)
             else:
                 entity_no_of_ops = 0
-
         status = self.reputation_manager.get_status(entity)
         if status == ReputationStatus.BANNED:
             raise ValidationException(
@@ -583,12 +612,25 @@ class LocalMempoolManager():
                 f"is throttled {entity_title}"
             )
 
-    def _update_entity_no_of_ops_in_mempool(
-            self, entity_address: Address) -> None:
-        no_of_ops = 0
-        if entity_address in self.entity_to_no_of_ops_in_mempool:
-            no_of_ops = self.entity_to_no_of_ops_in_mempool[entity_address]
-        self.entity_to_no_of_ops_in_mempool[entity_address] = no_of_ops + 1
+    def _add_hash_to_entity_ops_hashes_in_mempool(
+            self, entity_address: Address, op_hash: str) -> None:
+        if entity_address not in self.paymasters_and_factories_to_ops_hashes_in_mempool:
+            self.paymasters_and_factories_to_ops_hashes_in_mempool[entity_address] = set()
+        self.paymasters_and_factories_to_ops_hashes_in_mempool[entity_address].add(op_hash)
+
+    def _remove_hash_from_entities_ops_hashes_in_mempool(
+            self, op_hash: str) -> None:
+        for entity_address in self.paymasters_and_factories_to_ops_hashes_in_mempool:
+            if op_hash in self.paymasters_and_factories_to_ops_hashes_in_mempool[entity_address]:
+                self.paymasters_and_factories_to_ops_hashes_in_mempool[entity_address].remove(
+                    op_hash)
+
+    def _get_entity_no_of_ops_in_mempool(
+            self, entity_address: Address) -> int:
+        if entity_address in self.paymasters_and_factories_to_ops_hashes_in_mempool:
+            return len(self.paymasters_and_factories_to_ops_hashes_in_mempool[entity_address])
+        else:
+            return 0
 
     async def validate_paymaster_deposit(
         self,
@@ -735,7 +777,7 @@ class LocalMempoolManager():
                 f"is lower than minimum {self.MIN_UNSTAKE_DELAY}"
             )
 
-    def get_max_allowed_user_operations_for_unstaked_non_senders(
+    def get_max_allowed_user_operations_for_unstaked_paymasters(
             self, entity: Address) -> int:
         SAME_UNSTAKED_ENTITY_MEMPOOL_COUNT = 10
 
