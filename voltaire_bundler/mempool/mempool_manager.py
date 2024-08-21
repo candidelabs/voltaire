@@ -617,20 +617,31 @@ class LocalMempoolManager():
     def _add_hash_to_entity_ops_hashes_in_mempool(
             self, entity_address: Address, op_hash: str) -> None:
         if entity_address not in self.paymasters_and_factories_to_ops_hashes_in_mempool:
-            self.paymasters_and_factories_to_ops_hashes_in_mempool[entity_address] = set()
-        self.paymasters_and_factories_to_ops_hashes_in_mempool[entity_address].add(op_hash)
+            self.paymasters_and_factories_to_ops_hashes_in_mempool[
+                    entity_address] = set()
+        self.paymasters_and_factories_to_ops_hashes_in_mempool[entity_address].add(
+                op_hash)
 
     def _remove_hash_from_entities_ops_hashes_in_mempool(
             self, op_hash: str) -> None:
+        to_delete = []
         for entity_address in self.paymasters_and_factories_to_ops_hashes_in_mempool:
-            if op_hash in self.paymasters_and_factories_to_ops_hashes_in_mempool[entity_address]:
-                self.paymasters_and_factories_to_ops_hashes_in_mempool[entity_address].remove(
-                    op_hash)
+            if op_hash in self.paymasters_and_factories_to_ops_hashes_in_mempool[
+                    entity_address]:
+                self.paymasters_and_factories_to_ops_hashes_in_mempool[
+                        entity_address].remove(op_hash)
+                if (len(
+                    self.paymasters_and_factories_to_ops_hashes_in_mempool[
+                        entity_address]) < 1):
+                    to_delete.append(entity_address)
+        for entity_address in to_delete:
+            del self.paymasters_and_factories_to_ops_hashes_in_mempool[entity_address]
 
     def _get_entity_no_of_ops_in_mempool(
             self, entity_address: Address) -> int:
         if entity_address in self.paymasters_and_factories_to_ops_hashes_in_mempool:
-            return len(self.paymasters_and_factories_to_ops_hashes_in_mempool[entity_address])
+            return len(self.paymasters_and_factories_to_ops_hashes_in_mempool[
+                entity_address])
         else:
             return 0
 
