@@ -112,9 +112,12 @@ class ValidationManagerV6(ValidationManager):
             factory_stake_info,
             paymaster_stake_info,
         ) = ValidationManagerV6.decode_validation_result(validation_result)
-
         ValidationManagerV6.verify_sig_and_timestamp(
-                return_info, latest_block_timestamp)
+            return_info.sigFailed,
+            return_info.validUntil,
+            return_info.validAfter,
+            latest_block_timestamp
+        )
 
         user_operation_hash = get_user_operation_hash(
             user_operation.to_list(), entrypoint, self.chain_id
@@ -303,25 +306,6 @@ class ValidationManagerV6(ValidationManager):
             factory_info,
             paymaster_info,
         )
-
-    @staticmethod
-    def verify_sig_and_timestamp(
-        return_info: ReturnInfo, latest_block_timestamp: int
-    ) -> None:
-        sigFailed = return_info.sigFailed
-        validUntil = return_info.validUntil
-
-        if sigFailed:
-            raise ValidationException(
-                ValidationExceptionCode.InvalidSignature,
-                "Invalid UserOp signature or paymaster signature",
-            )
-
-        if validUntil is None or validUntil < latest_block_timestamp + 30:
-            raise ValidationException(
-                ValidationExceptionCode.ExpiresShortly,
-                "Transaction will expire shortly or has expired.",
-            )
 
     @staticmethod
     def encode_simulate_validation_calldata(user_operation: UserOperationV6) -> str:

@@ -98,7 +98,11 @@ class ValidationManagerV7(ValidationManager):
             aggregator_stake_info,
         ) = ValidationManagerV7.decode_validation_result(validation_result)
         ValidationManagerV7.verify_sig_and_timestamp(
-            return_info, latest_block_timestamp)
+            return_info.sender_validation_data.sig_failed,
+            return_info.sender_validation_data.valid_until,
+            return_info.sender_validation_data.valid_after,
+            latest_block_timestamp
+        )
 
         user_operation_hash = get_user_operation_hash(
             user_operation.to_list(), entrypoint, self.chain_id
@@ -309,21 +313,21 @@ class ValidationManagerV7(ValidationManager):
         return_info_arr = validation_result_decoded[0]
 
         sender_validation_data_bytes = encode(["uint256"], [return_info_arr[2]])
-        sender_validation_data_int = int(sender_validation_data_bytes.hex())
+        sender_validation_data_int = int(sender_validation_data_bytes.hex() ,16)
         if sender_validation_data_int > 1:
             sig_failed_or_aggregator = sender_validation_data_bytes[12:].hex()
-            if int(sig_failed_or_aggregator) > 1:
+            if int(sig_failed_or_aggregator, 16) > 1:
                 sender_sig_failed = None
                 aggregator = '0x' + sig_failed_or_aggregator
             else:
-                sender_sig_failed = (int(sig_failed_or_aggregator) == 1)
+                sender_sig_failed = (int(sig_failed_or_aggregator, 16) == 1)
                 aggregator = None
-            sender_valid_until_int = int(sender_validation_data_bytes[:6].hex())
+            sender_valid_until_int = int(sender_validation_data_bytes[6:12].hex(), 16)
             if sender_valid_until_int == 0:
                 sender_valid_until = 18446744073709551615  # type(uint64).max
             else:
                 sender_valid_until = sender_valid_until_int
-            sender_valid_after = int(sender_validation_data_bytes[6:12].hex())
+            sender_valid_after = int(sender_validation_data_bytes[:6].hex() ,16)
         else:
             # the most likely validation_data_int is either 0 or 1
             # this is why a separate branch is created
@@ -339,16 +343,16 @@ class ValidationManagerV7(ValidationManager):
         )
 
         paymaster_validation_data_bytes = encode(["uint256"], [return_info_arr[3]])
-        paymaster_validation_data_int = int(sender_validation_data_bytes.hex())
+        paymaster_validation_data_int = int(sender_validation_data_bytes.hex(), 16)
         if paymaster_validation_data_int > 1:
             paymaster_sig_failed = (
-                    int(paymaster_validation_data_bytes[12:].hex()) == 1)
-            paymaster_valid_until_int = int(paymaster_validation_data_bytes[:6].hex())
+                    int(paymaster_validation_data_bytes[12:].hex() ,16) == 1)
+            paymaster_valid_until_int = int(paymaster_validation_data_bytes[:6].hex(), 16)
             if paymaster_valid_until_int == 0:
                 paymaster_valid_until = 18446744073709551615  # type(uint64).max
             else:
                 paymaster_valid_until = paymaster_valid_until_int
-            paymaster_valid_after = int(paymaster_validation_data_bytes[6:12].hex())
+            paymaster_valid_after = int(paymaster_validation_data_bytes[6:12].hex(), 16)
         else:
             # the most likely validation_data_int is either 0 or 1
             # this is why a separate branch is created
@@ -399,22 +403,6 @@ class ValidationManagerV7(ValidationManager):
             paymaster_info,
             aggregator_staked_info,
         )
-
-    @staticmethod
-    def verify_sig_and_timestamp(
-        return_info: ReturnInfoV7, latest_block_timestamp: int
-    ) -> None:
-        if return_info.sender_validation_data.sig_failed:
-            raise ValidationException(
-                ValidationExceptionCode.InvalidSignature,
-                "Invalid UserOp signature or paymaster signature",
-            )
-
-        if return_info.sender_validation_data.valid_until < latest_block_timestamp + 30:
-            raise ValidationException(
-                ValidationExceptionCode.ExpiresShortly,
-                "Transaction will expire shortly or has expired.",
-            )
 
     @staticmethod
     def encode_simulate_validation_calldata(user_operation: UserOperationV7) -> str:
