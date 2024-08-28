@@ -645,7 +645,8 @@ async def exception_handler_decorator(
         rpc_call_response = await response_function(rpc_call_request)
     except (ExecutionException, ValidationException) as excp:
         rpc_call_response = {"payload": excp, "is_error": True}
-    except ValueError:
+    except ValueError as excp:
+        logging.error(str(excp))
         rpc_call_response = {
             "payload": OtherJsonRpcErrorException(
                 OtherJsonRpcErrorCode.InternalError,
@@ -653,8 +654,9 @@ async def exception_handler_decorator(
             ),
             "is_error": True
         }
-    except Exception:
+    except Exception as excp:
         logging.error(traceback.format_exc())
+        logging.error(str(excp))
         rpc_call_response = {
             "payload": OtherJsonRpcErrorException(
                 OtherJsonRpcErrorCode.InternalError,
