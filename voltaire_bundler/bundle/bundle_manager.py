@@ -164,10 +164,14 @@ class BundlerManager:
             logging.error(f"Sending bundle failed with erro: {err.message}") 
             return
 
-        call_data, gas_estimation, merged_storage_map = tasks[0]
-        if call_data is None or gas_estimation is None:
+        call_data, gas_estimation_hex, merged_storage_map = tasks[0]
+
+        if call_data is None or gas_estimation_hex is None:
             logging.error(f"Sending bundle failed. failed call data or gas estimation.") 
             return
+
+        gas_estimation_hex = hex(math.ceil(
+            int(gas_estimation_hex, 16) * 1.2))  # 20% buffer
 
         block_max_fee_per_gas = tasks[1]["result"]
         nonce = tasks[2]["result"]
@@ -198,7 +202,7 @@ class BundlerManager:
             "from": self.bundler_address,
             "to": entrypoint,
             "nonce": nonce,
-            "gas": gas_estimation,
+            "gas": gas_estimation_hex,
             "data": call_data,
         }
 
