@@ -73,6 +73,8 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             init_data.disable_v6,
             init_data.logs_incremental_range,
             init_data.logs_number_of_ranges,
+            init_data.reputation_whitelist,
+            init_data.reputation_blacklist
         )
         task_group.create_task(execution_endpoint.start_execution_endpoint())
 

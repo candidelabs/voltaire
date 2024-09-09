@@ -25,6 +25,8 @@ class LocalMempoolManagerV7(LocalMempoolManager):
         enforce_gas_price_tolerance: int,
         is_legacy_mode: bool,
         ethereum_node_debug_trace_call_url: str,
+        reputation_whitelist: list[str],
+        reputation_blacklist: list[str]
     ):
         self.validation_manager = ValidationManagerV7(
             user_operation_handler,
@@ -37,7 +39,8 @@ class LocalMempoolManagerV7(LocalMempoolManager):
             ethereum_node_debug_trace_call_url,
         )
         self.user_operation_handler = user_operation_handler
-        self.reputation_manager = ReputationManager()
+        self.reputation_manager = ReputationManager(
+            reputation_whitelist, reputation_blacklist)
         self.ethereum_node_url = ethereum_node_url
         self.bundler_address = bundler_address
         self.chain_id = chain_id

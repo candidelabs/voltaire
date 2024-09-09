@@ -67,6 +67,8 @@ class ExecutionEndpoint(Endpoint):
         disable_v6: bool,
         logs_incremental_range: int,
         logs_number_of_ranges: int,
+        reputation_whitelist: list[str],
+        reputation_blacklist: list[str]
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_url = ethereum_node_url
@@ -95,6 +97,8 @@ class ExecutionEndpoint(Endpoint):
             enforce_gas_price_tolerance,
             is_legacy_mode,
             ethereum_node_debug_trace_call_url,
+            reputation_whitelist,
+            reputation_blacklist
         )
 
         if disable_v6:
@@ -124,6 +128,8 @@ class ExecutionEndpoint(Endpoint):
                 enforce_gas_price_tolerance,
                 is_legacy_mode,
                 ethereum_node_debug_trace_call_url,
+                reputation_whitelist,
+                reputation_blacklist
             )
 
         self.bundle_manager = BundlerManager(

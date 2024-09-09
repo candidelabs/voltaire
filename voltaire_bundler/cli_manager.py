@@ -72,6 +72,8 @@ class InitData:
     logs_incremental_range: int
     logs_number_of_ranges: int
     health_check_interval: int
+    reputation_whitelist: list[str]
+    reputation_blacklist: list[str]
 
 
 def address(ep: str):
@@ -460,6 +462,20 @@ def initialize_argument_parser() -> ArgumentParser:
         const=600,
         default=600,
     )
+    
+    parser.add_argument(
+        "--reputation_whitelist",
+        help="Entities that will not be banned or throttled.",
+        type=str,
+        nargs="+",
+    )
+
+    parser.add_argument(
+        "--reputation_blacklist",
+        help="Entities that are always banned.",
+        type=str,
+        nargs="+",
+    )
 
     return parser
 
@@ -638,6 +654,8 @@ async def get_init_data(args: Namespace) -> InitData:
         args.logs_incremental_range,
         args.logs_number_of_ranges,
         args.health_check_interval,
+        args.reputation_whitelist,
+        args.reputation_blacklist
     )
 
     if args.verbose:

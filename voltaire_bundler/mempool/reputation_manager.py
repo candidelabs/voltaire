@@ -25,10 +25,23 @@ class ReputationEntry:
 
 class ReputationManager:
     entities_reputation: dict[str, ReputationEntry] = {}
-    white_list: list = []
-    black_list: list = []
+    whitelist: list[str] = []
+    blacklist: list[str] = []
 
-    def __init__(self) -> None:
+    def __init__(
+            self,
+            reputation_whitelist: list[str],
+            reputation_blacklist: list[str]
+    ) -> None:
+        if reputation_whitelist is not None:
+            reputation_whitelist = list(map(
+                lambda entity: entity.lower(), reputation_whitelist))
+        if reputation_blacklist is not None:
+            reputation_blacklist = list(map(
+                lambda entity: entity.lower(), reputation_blacklist))
+            
+            self.whitelist = reputation_whitelist
+            self.blacklist = reputation_blacklist
         asyncio.ensure_future(self.execute_reputation_cron_job())
 
     async def execute_reputation_cron_job(self) -> None:
@@ -66,17 +79,29 @@ class ReputationManager:
         self.entities_reputation[entity_address].ops_included += modifier
 
     def ban_entity(self, entity: str) -> None:
-        self.entities_reputation[entity.lower()] = ReputationEntry(10000, 0)
+        if self.is_whitelisted(entity):
+            logging.warning(
+                f"{entity} won't be banned because it is whitelisted.")
+        else:
+            self.entities_reputation[entity.lower()] = ReputationEntry(10000, 0)
 
     def is_whitelisted(self, entity: str) -> bool:
-        return entity.lower() in self.white_list
+        return entity.lower() in self.whitelist
 
     def is_blacklisted(self, entity: str) -> bool:
-        return entity.lower() in self.black_list
+        return entity.lower() in self.blacklist
 
     def get_status(self, entity: str) -> ReputationStatus:
         entity_address = entity.lower()
-        if entity_address not in self.entities_reputation:
+        if (
+            self.is_blacklisted(entity)
+        ):
+            return ReputationStatus.BANNED
+        
+        if (
+            entity_address not in self.entities_reputation or
+            self.is_whitelisted(entity)
+        ):
             return ReputationStatus.OK
 
         reputation_entry = self.entities_reputation[entity_address]
