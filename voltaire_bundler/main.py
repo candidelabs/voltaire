@@ -28,6 +28,7 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
         os.remove("p2p_endpoint.ipc")
 
     # this release doesn't support p2p
+    init_data.disable_p2p = True
     if False and not init_data.disable_p2p:
         p2p_process = p2p_boot(
             init_data.p2p_enr_tcp_port,
