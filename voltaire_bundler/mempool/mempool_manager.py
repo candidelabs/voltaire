@@ -596,7 +596,7 @@ class LocalMempoolManager():
                 entity_no_of_ops = self._get_entity_no_of_ops_in_mempool(entity)
             else:
                 entity_no_of_ops = 0
-        status = self.reputation_manager.get_status(entity)
+        status = self.reputation_manager.get_status(entity.lower())
         if status == ReputationStatus.BANNED:
             raise ValidationException(
                 ValidationExceptionCode.Reputation,
@@ -761,10 +761,11 @@ class LocalMempoolManager():
         stake: int,
         unstake_delay: int
     ):
-        if self.reputation_manager.is_whitelisted(entity):
+        entity_lowercase = entity.lower()
+        if self.reputation_manager.is_whitelisted(entity_lowercase):
             return
 
-        if self.reputation_manager.get_status(entity) == ReputationStatus.BANNED:
+        if self.reputation_manager.get_status(entity_lowercase) == ReputationStatus.BANNED:
             raise ValidationException(
                 ValidationExceptionCode.Reputation,
                 f"{entity_title} {entity} is banned."

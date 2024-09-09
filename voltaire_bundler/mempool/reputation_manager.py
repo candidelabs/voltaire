@@ -79,32 +79,32 @@ class ReputationManager:
         self.entities_reputation[entity_address].ops_included += modifier
 
     def ban_entity(self, entity: str) -> None:
-        if self.is_whitelisted(entity):
+        entity_lowercase = entity.lower()
+        if self.is_whitelisted(entity_lowercase):
             logging.warning(
                 f"{entity} won't be banned because it is whitelisted.")
         else:
-            self.entities_reputation[entity.lower()] = ReputationEntry(10000, 0)
+            self.entities_reputation[entity_lowercase] = ReputationEntry(10000, 0)
 
-    def is_whitelisted(self, entity: str) -> bool:
-        return entity.lower() in self.whitelist
+    def is_whitelisted(self, entity_lowercase: str) -> bool:
+        return entity_lowercase in self.whitelist
 
-    def is_blacklisted(self, entity: str) -> bool:
-        return entity.lower() in self.blacklist
+    def is_blacklisted(self, entity_lowercase: str) -> bool:
+        return entity_lowercase in self.blacklist
 
-    def get_status(self, entity: str) -> ReputationStatus:
-        entity_address = entity.lower()
+    def get_status(self, entity_lowercase: str) -> ReputationStatus:
         if (
-            self.is_blacklisted(entity)
+            self.is_blacklisted(entity_lowercase)
         ):
             return ReputationStatus.BANNED
-        
+
         if (
-            entity_address not in self.entities_reputation or
-            self.is_whitelisted(entity)
+            entity_lowercase not in self.entities_reputation or
+            self.is_whitelisted(entity_lowercase)
         ):
             return ReputationStatus.OK
 
-        reputation_entry = self.entities_reputation[entity_address]
+        reputation_entry = self.entities_reputation[entity_lowercase]
         min_expected_included = (
             reputation_entry.ops_seen // MIN_INCLUSION_RATE_DENOMINATOR
         )
@@ -129,11 +129,11 @@ class ReputationManager:
 
     def get_entities_reputation_json(self) -> list[dict[str, str]]:
         entities_reputation_json = []
-        for entity_address in self.entities_reputation.keys():
+        for entity_address_lowercase in self.entities_reputation.keys():
             entry = entity_reputation_json = self.entities_reputation[
-                entity_address]
+                entity_address_lowercase]
 
-            status = self.get_status(entity_address)
+            status = self.get_status(entity_address_lowercase)
             if status == ReputationStatus.OK:
                 status_str = "ok"
             elif status == ReputationStatus.THROTTLED:
@@ -145,7 +145,7 @@ class ReputationManager:
                 "opsSeen": entry.ops_seen,
                 "opsIncluded": entry.ops_included,
                 "status": status_str,
-                "address": entity_address
+                "address": entity_address_lowercase
             }
             entities_reputation_json.append(entity_reputation_json)
 
