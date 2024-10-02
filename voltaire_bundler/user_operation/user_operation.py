@@ -16,6 +16,7 @@ class UserOperation(ABC):
     user_operation_hash: str
     code_hash: str | None
     storage_map: dict[str, str | dict[str, str]] | None
+    validated_at_block_hex: str | None
 
     @abstractmethod
     def get_user_operation_json(

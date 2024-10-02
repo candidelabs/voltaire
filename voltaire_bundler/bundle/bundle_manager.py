@@ -416,6 +416,41 @@ class BundlerManager:
                     return None, None, None
 
                 user_operation = user_operations[operation_index]
+
+                # check if userop was already executed if userop caused bundle
+                # gas estimation to fail
+                if user_operation.validated_at_block_hex is not None:
+                    earliest_block = user_operation.validated_at_block_hex
+                else:
+                    raise ValueError(
+                        "useroperation without validated_at_block_hex")
+
+                logs_res = await mempool_manager.user_operation_handler.get_logs(
+                    user_operation.user_operation_hash,
+                    entrypoint,
+                    earliest_block,
+                    "latest"
+                )
+
+                # if there is a UserOperationEvent for the user_operation_hash,
+                # that means userop was already executed
+                if "result" in logs_res and len(logs_res["result"]) > 0:
+                    logging.warning(
+                        "Dropping user operation that was already executed from bundle."
+                        f"useroperation: {user_operation}"
+                    )
+                    del user_operations[operation_index]
+
+                    if len(user_operations) > 0:
+                        return await self.create_bundle_calldata_and_estimate_gas(
+                            user_operations,
+                            bundler,
+                            entrypoint,
+                        )
+                    else:
+                        logging.info("No useroperations to bundle")
+                        return None, None, None
+
                 entity_to_ban = None
                 if "AA3" in reason:
                     (

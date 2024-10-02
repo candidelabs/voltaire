@@ -116,6 +116,9 @@ class UserOperationV7(UserOperation):
         self.valid_mempools_ids = []
 
         self.user_operation_hash = ""
+
+        self.validated_at_block_hex = None
+
         self._set_factory_and_paymaster_address()
 
     @staticmethod

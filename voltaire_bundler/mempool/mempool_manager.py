@@ -110,6 +110,7 @@ class LocalMempoolManager():
 
         self.validate_multiple_roles_violation(user_operation)
 
+        user_operation.validated_at_block_hex = latest_block_number
         new_sender = None
         new_sender_address = user_operation.sender_address
 
@@ -173,6 +174,7 @@ class LocalMempoolManager():
             gas_price_hex = await self.user_operation_handler.gas_manager.verify_gas_fees_and_get_price(
                 user_operation, self.enforce_gas_price_tolerance
             )
+            user_operation.validated_at_block_hex = verified_at_block_hash
         except ValidationException:
             return "No"
 

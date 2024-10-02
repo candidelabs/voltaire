@@ -68,6 +68,8 @@ class UserOperationV6(UserOperation):
 
         self.user_operation_hash = ""
 
+        self.validated_at_block_hex = None
+
         self._set_factory_and_paymaster_address()
 
     @staticmethod
