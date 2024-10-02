@@ -39,9 +39,9 @@ class ReputationManager:
         if reputation_blacklist is not None:
             reputation_blacklist = list(map(
                 lambda entity: entity.lower(), reputation_blacklist))
-            
-            self.whitelist = reputation_whitelist
-            self.blacklist = reputation_blacklist
+
+        self.whitelist = reputation_whitelist
+        self.blacklist = reputation_blacklist
         asyncio.ensure_future(self.execute_reputation_cron_job())
 
     async def execute_reputation_cron_job(self) -> None:
@@ -87,10 +87,16 @@ class ReputationManager:
             self.entities_reputation[entity_lowercase] = ReputationEntry(10000, 0)
 
     def is_whitelisted(self, entity_lowercase: str) -> bool:
-        return entity_lowercase in self.whitelist
+        if self.whitelist is not None:
+            return entity_lowercase in self.whitelist
+        else:
+            return False
 
     def is_blacklisted(self, entity_lowercase: str) -> bool:
-        return entity_lowercase in self.blacklist
+        if self.blacklist is not None:
+            return entity_lowercase in self.blacklist
+        else:
+            return False
 
     def get_status(self, entity_lowercase: str) -> ReputationStatus:
         if (
