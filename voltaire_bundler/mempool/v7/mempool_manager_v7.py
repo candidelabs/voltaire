@@ -13,7 +13,7 @@ from ...validation.v7.validation_manager_v7 import ValidationManagerV7
 @dataclass
 class LocalMempoolManagerV7(LocalMempoolManager):
     entrypoint = Address("0x0000000071727De22E5E9d8BAf0edAc6f37da032")
-    entrypoint_lowercase = Address("0x0000000071727De22E5E9d8BAf0edAc6f37da032")
+    entrypoint_lowercase = Address("0x0000000071727de22e5e9d8baf0edac6f37da032")
 
     def __init__(
         self,
