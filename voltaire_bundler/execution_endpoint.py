@@ -23,7 +23,7 @@ from voltaire_bundler.user_operation.v6.user_operation_handler_v6 import \
 from voltaire_bundler.user_operation.v7.user_operation_handler_v7 import \
     UserOperationHandlerV7
 from voltaire_bundler.user_operation.user_operation_handler import \
-    fell_user_operation_optional_parameters
+    fell_user_operation_optional_parameters_for_estimateUserOperationGas
 from voltaire_bundler.utils.eth_client_utils import get_latest_block_info
 
 from .bundle.bundle_manager import BundlerManager
@@ -261,7 +261,7 @@ class ExecutionEndpoint(Endpoint):
         if input_entrypoint == LocalMempoolManagerV7.entrypoint_lowercase:
             entrypoint = LocalMempoolManagerV7.entrypoint
             user_operation_with_optional_params = (
-                fell_user_operation_optional_parameters(
+                fell_user_operation_optional_parameters_for_estimateUserOperationGas(
                     req_arguments[0]))
             user_operation = UserOperationV7(
                 user_operation_with_optional_params)
@@ -284,7 +284,7 @@ class ExecutionEndpoint(Endpoint):
               self.user_operation_handler_v6 is not None):
             entrypoint = LocalMempoolManagerV6.entrypoint
             user_operation_with_optional_params = (
-                fell_user_operation_optional_parameters(
+                fell_user_operation_optional_parameters_for_estimateUserOperationGas(
                     req_arguments[0])
             )
             user_operation = UserOperationV6(

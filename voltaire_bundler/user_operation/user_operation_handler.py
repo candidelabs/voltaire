@@ -317,7 +317,7 @@ def decode_failed_op_with_revert_event(
     return operation_index, reason, inner
 
 
-def fell_user_operation_optional_parameters(
+def fell_user_operation_optional_parameters_for_estimateUserOperationGas(
     user_operation_with_optional_params: dict[str, str]
  ) -> dict[str, str]:
     if (
