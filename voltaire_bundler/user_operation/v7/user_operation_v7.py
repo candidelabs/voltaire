@@ -35,12 +35,12 @@ class UserOperationV7(UserOperation):
     jsonRequestDict: InitVar[dict[str, Address | int | bytes]]
 
     def __init__(self, jsonRequestDict) -> None:
+        self.verify_fields_exist_and_fill_optional(jsonRequestDict)
         if len(jsonRequestDict) != 15:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
                 "Invalide UserOperation",
             )
-        self.verify_fields_exist(jsonRequestDict)
 
         self.sender_address = verify_and_get_address(jsonRequestDict["sender"])
         self.nonce = verify_and_get_uint(jsonRequestDict["nonce"])
@@ -122,35 +122,42 @@ class UserOperationV7(UserOperation):
         self._set_factory_and_paymaster_address()
 
     @staticmethod
-    def verify_fields_exist(
-        jsonRequestDict: dict[str, Address | int | bytes]
+    def verify_fields_exist_and_fill_optional(
+        jsonRequestDict: dict[str, Address | int | bytes | None]
     ) -> None:
-        field_list = [
+        required_fields_list = [
             "sender",
             "nonce",
-            "factory",
-            "factoryData",
             "callData",
             "callGasLimit",
             "verificationGasLimit",
             "preVerificationGas",
             "maxFeePerGas",
             "maxPriorityFeePerGas",
-            "paymaster",
-            "paymasterVerificationGasLimit",
-            "paymasterPostOpGasLimit",
-            "paymasterData",
             "signature",
         ]
 
-        for field in field_list:
+        for field in required_fields_list:
             if field not in jsonRequestDict:
                 raise ValidationException(
                     ValidationExceptionCode.InvalidFields,
                     f"UserOperation missing {field} field",
                 )
 
-    def get_user_operation_dict(self) -> dict[str, Address | int | bytes | None]:
+        optional_fields_list = [
+            "factory",
+            "factoryData",
+            "paymaster",
+            "paymasterVerificationGasLimit",
+            "paymasterPostOpGasLimit",
+            "paymasterData",
+        ]
+
+        for field in optional_fields_list:
+            if field not in jsonRequestDict:
+                jsonRequestDict[field] = None
+
+    def get_use_operation_dict(self) -> dict[str, Address | int | bytes | None]:
         return {
             "sender": self.sender_address,
             "nonce": self.nonce,
