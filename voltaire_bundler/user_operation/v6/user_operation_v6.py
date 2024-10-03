@@ -38,27 +38,32 @@ class UserOperationV6(UserOperation):
             )
         self.verify_fields_exist(jsonRequestDict)
 
-        self.sender_address = verify_and_get_address(jsonRequestDict["sender"])
-        self.nonce = verify_and_get_uint(jsonRequestDict["nonce"])
-        self.init_code = verify_and_get_bytes(jsonRequestDict["initCode"])
-        self.call_data = verify_and_get_bytes(jsonRequestDict["callData"])
+        self.sender_address = verify_and_get_address(
+            "sender", jsonRequestDict["sender"])
+        self.nonce = verify_and_get_uint(
+            "nonce", jsonRequestDict["nonce"])
+        self.init_code = verify_and_get_bytes(
+            "initCode", jsonRequestDict["initCode"])
+        self.call_data = verify_and_get_bytes(
+            "callData", jsonRequestDict["callData"])
         self.call_gas_limit = verify_and_get_uint(
-                jsonRequestDict["callGasLimit"])
+            "callGasLimit", jsonRequestDict["callGasLimit"])
         self.verification_gas_limit = verify_and_get_uint(
-            jsonRequestDict["verificationGasLimit"]
+            "verificationGasLimit", jsonRequestDict["verificationGasLimit"]
         )
         self.pre_verification_gas = verify_and_get_uint(
-            jsonRequestDict["preVerificationGas"]
+            "preVerificationGas", jsonRequestDict["preVerificationGas"]
         )
         self.max_fee_per_gas = verify_and_get_uint(
-                jsonRequestDict["maxFeePerGas"])
+            "maxFeePerGas", jsonRequestDict["maxFeePerGas"])
         self.max_priority_fee_per_gas = verify_and_get_uint(
-            jsonRequestDict["maxPriorityFeePerGas"]
+            "maxPriorityFeePerGas", jsonRequestDict["maxPriorityFeePerGas"]
         )
         self.paymaster_and_data = verify_and_get_bytes(
-            jsonRequestDict["paymasterAndData"]
+            "paymasterAndData", jsonRequestDict["paymasterAndData"]
         )
-        self.signature = verify_and_get_bytes(jsonRequestDict["signature"])
+        self.signature = verify_and_get_bytes(
+            "signature", jsonRequestDict["signature"])
 
         self.code_hash = None
 

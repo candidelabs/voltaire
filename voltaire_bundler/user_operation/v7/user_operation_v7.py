@@ -42,37 +42,41 @@ class UserOperationV7(UserOperation):
                 "Invalide UserOperation",
             )
 
-        self.sender_address = verify_and_get_address(jsonRequestDict["sender"])
-        self.nonce = verify_and_get_uint(jsonRequestDict["nonce"])
+        self.sender_address = verify_and_get_address(
+            "sender", jsonRequestDict["sender"])
+        self.nonce = verify_and_get_uint(
+            "nonce", jsonRequestDict["nonce"])
 
         factory = jsonRequestDict["factory"]
         factory_data = jsonRequestDict["factoryData"]
         if factory is not None:
-            self.factory = verify_and_get_address(factory)
-            self.factory_data = verify_and_get_bytes(factory_data)
+            self.factory = verify_and_get_address("factory", factory)
+            self.factory_data = verify_and_get_bytes("factoryData", factory_data)
         elif factory_data is None:
             self.factory = None
             self.factory_data = None
         else:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
-                "Invalide UserOperation",
+                'Invalide UserOperation, '
+                '"factoryData" has to be null if "factory" is null',
             )
 
-        self.call_data = verify_and_get_bytes(jsonRequestDict["callData"])
+        self.call_data = verify_and_get_bytes(
+            "callData", jsonRequestDict["callData"])
         self.call_gas_limit = verify_and_get_uint(
-                jsonRequestDict["callGasLimit"])
+            "callGasLimit", jsonRequestDict["callGasLimit"])
         self.verification_gas_limit = verify_and_get_uint(
-            jsonRequestDict["verificationGasLimit"]
+            "verificationGasLimit", jsonRequestDict["verificationGasLimit"]
         )
 
         self.pre_verification_gas = verify_and_get_uint(
-            jsonRequestDict["preVerificationGas"]
+            "preVerificationGas", jsonRequestDict["preVerificationGas"]
         )
         self.max_fee_per_gas = verify_and_get_uint(
-                jsonRequestDict["maxFeePerGas"])
+            "maxFeePerGas", jsonRequestDict["maxFeePerGas"])
         self.max_priority_fee_per_gas = verify_and_get_uint(
-            jsonRequestDict["maxPriorityFeePerGas"]
+            "maxPriorityFeePerGas", jsonRequestDict["maxPriorityFeePerGas"]
         )
 
         paymaster = jsonRequestDict["paymaster"]
@@ -81,15 +85,15 @@ class UserOperationV7(UserOperation):
         paymaster_post_op_gas_limit = jsonRequestDict["paymasterPostOpGasLimit"]
         paymaster_data = jsonRequestDict["paymasterData"]
         if paymaster is not None:
-            self.paymaster = verify_and_get_address(paymaster)
+            self.paymaster = verify_and_get_address("paymaster", paymaster)
             self.paymaster_verification_gas_limit = verify_and_get_uint(
-                paymaster_verification_gas_limit
+                "paymasterVerificationGasLimit", paymaster_verification_gas_limit
             )
             self.paymaster_post_op_gas_limit = verify_and_get_uint(
-               paymaster_post_op_gas_limit
+               "paymasterPostOpGasLimit", paymaster_post_op_gas_limit
             )
             self.paymaster_data = verify_and_get_bytes(
-               paymaster_data
+               "paymasterData", paymaster_data
             )
 
         elif (
@@ -104,10 +108,13 @@ class UserOperationV7(UserOperation):
         else:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
-                "Invalide UserOperation",
+                "Invalide UserOperation, "
+                '"paymasterVerificationGasLimit", "paymasterPostOpGasLimit" '
+                'and "paymasterData" have to be null if "paymaster" is null',
             )
 
-        self.signature = verify_and_get_bytes(jsonRequestDict["signature"])
+        self.signature = verify_and_get_bytes(
+            "signature", jsonRequestDict["signature"])
 
         self.code_hash = None
 
