@@ -48,7 +48,7 @@ def verify_and_get_uint(value: str) -> int:
     if value is None:
         raise ValidationException(
             ValidationExceptionCode.InvalidFields,
-            "Invalide bytes hex value",
+            f"Invalide uint hex value in field {field_name}",
         )
 
     if value == "0x":
