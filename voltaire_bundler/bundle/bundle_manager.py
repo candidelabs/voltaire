@@ -34,6 +34,7 @@ class BundlerManager:
     chain_id: int
     is_legacy_mode: bool
     conditional_rpc: ConditionalRpc | None
+    flashbots_protect_node_url: str | None
     max_fee_per_gas_percentage_multiplier: int
     max_priority_fee_per_gas_percentage_multiplier: int
     user_operations_to_send_v6: list[UserOperationV6] | None
@@ -50,6 +51,7 @@ class BundlerManager:
         chain_id: int,
         is_legacy_mode: bool,
         conditional_rpc: ConditionalRpc | None,
+        flashbots_protect_node_url: str | None,
         max_fee_per_gas_percentage_multiplier: int,
         max_priority_fee_per_gas_percentage_multiplier: int,
     ):
@@ -61,6 +63,7 @@ class BundlerManager:
         self.chain_id = chain_id
         self.is_legacy_mode = is_legacy_mode
         self.conditional_rpc = conditional_rpc
+        self.flashbots_protect_node_url = flashbots_protect_node_url
         self.max_fee_per_gas_percentage_multiplier = (
             max_fee_per_gas_percentage_multiplier
         )
@@ -235,6 +238,16 @@ class BundlerManager:
                     "0x" + sign_store_txn.raw_transaction.hex(),
                     {"knownAccounts": merged_storage_map}
                 ]
+            )
+        elif self.flashbots_protect_node_url is not None:
+            result = await send_rpc_request_to_eth_client(
+                self.flashbots_protect_node_url,
+                "eth_sendPrivateRawTransaction",
+                [
+                    "0x" + sign_store_txn.raw_transaction.hex(),
+                    {"fast": True}
+                ],
+                (self.bundler_address, self.bundler_private_key)
             )
         else:
             result = await send_rpc_request_to_eth_client(

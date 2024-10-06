@@ -4,9 +4,29 @@ from typing import Any
 
 from aiohttp import ClientSession
 
+from eth_account import Account, messages
+from eth_utils import keccak
+
+
+def create_flashbots_signature(
+    request_data: str,
+    signer: str,
+    private_key: str
+) -> str:
+    message = messages.encode_defunct(
+        text='0x' + keccak(text=request_data).hex()
+    )
+    signed_message = Account.sign_message(
+        message, private_key=private_key
+    )
+    return f"{signer}:0x{signed_message.signature.hex()}"
+
 
 async def send_rpc_request_to_eth_client(
-    ethereum_node_url, method, params=None
+    ethereum_node_url,
+    method,
+    params=None,
+    flashbots_signer_private_key_pair: tuple[str, str] | None = None
 ) -> Any:
     json_request = {
         "jsonrpc": "2.0",
@@ -14,14 +34,19 @@ async def send_rpc_request_to_eth_client(
         "method": method,
         "params": params,
     }
-
-    if params is not None:
-        json_request["params"] = params
+    headers = {"content-type": "application/json"}
+    if flashbots_signer_private_key_pair is not None:
+        signer, private_key = flashbots_signer_private_key_pair
+        headers["X-Flashbots-Signature"] = create_flashbots_signature(
+            json.dumps(json_request),
+            signer,
+            private_key
+        )
     async with ClientSession() as session:
         async with session.post(
             ethereum_node_url,
-            data=json.dumps(json_request),
-            headers={"content-type": "application/json"},
+            json=json_request,
+            headers=headers
         ) as response:
             try:
                 resp = await response.read()

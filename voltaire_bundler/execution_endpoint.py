@@ -55,6 +55,7 @@ class ExecutionEndpoint(Endpoint):
         is_debug: bool,
         is_legacy_mode: bool,
         conditional_rpc: ConditionalRpc | None,
+        flashbots_protect_node_url: str | None,
         bundle_interval: int,
         max_fee_per_gas_percentage_multiplier: int,
         max_priority_fee_per_gas_percentage_multiplier: int,
@@ -141,6 +142,7 @@ class ExecutionEndpoint(Endpoint):
             chain_id,
             is_legacy_mode,
             conditional_rpc,
+            flashbots_protect_node_url,
             max_fee_per_gas_percentage_multiplier,
             max_priority_fee_per_gas_percentage_multiplier,
         )

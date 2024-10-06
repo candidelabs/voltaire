@@ -48,6 +48,7 @@ class InitData:
     is_unsafe: bool
     is_legacy_mode: bool
     conditional_rpc: ConditionalRpc | None
+    flashbots_protect_node_url: str | None
     bundle_interval: int
     max_fee_per_gas_percentage_multiplier: int
     max_priority_fee_per_gas_percentage_multiplier: int
@@ -241,7 +242,8 @@ def initialize_argument_parser() -> ArgumentParser:
         default=False,
     )
 
-    parser.add_argument(
+    group3 = parser.add_mutually_exclusive_group()
+    group3.add_argument(
         "--conditional_rpc",
         help="use sendRawTransactionConditional",
         nargs="?",
@@ -249,6 +251,14 @@ def initialize_argument_parser() -> ArgumentParser:
         const=ConditionalRpc.eth,
         default=None,
         choices=list(ConditionalRpc)
+    )
+
+    group3.add_argument(
+        "--flashbots_protect_node_url",
+        type=str,
+        help="Flashbots JSON-RPC Url",
+        nargs="?",
+        default=None,
     )
 
     parser.add_argument(
@@ -462,7 +472,7 @@ def initialize_argument_parser() -> ArgumentParser:
         const=600,
         default=600,
     )
-    
+
     parser.add_argument(
         "--reputation_whitelist",
         help="Entities that will not be banned or throttled.",
@@ -630,6 +640,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.unsafe,
         args.legacy_mode,
         args.conditional_rpc,
+        args.flashbots_protect_node_url,
         args.bundle_interval,
         args.max_fee_per_gas_percentage_multiplier,
         args.max_priority_fee_per_gas_percentage_multiplier,

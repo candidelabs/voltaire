@@ -61,6 +61,7 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             init_data.is_debug,
             init_data.is_legacy_mode,
             init_data.conditional_rpc,
+            init_data.flashbots_protect_node_url,
             init_data.bundle_interval,
             init_data.max_fee_per_gas_percentage_multiplier,
             init_data.max_priority_fee_per_gas_percentage_multiplier,
