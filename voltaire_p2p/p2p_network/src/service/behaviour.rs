@@ -6,8 +6,6 @@ use crate::types::SnappyTransform;
 use libp2p::gossipsub;
 use libp2p::identify;
 use libp2p::swarm::NetworkBehaviour;
-use types::eth_spec::EthSpec;
-// use types::EthSpec;
 
 use super::api_types::RequestId;
 
@@ -16,10 +14,9 @@ pub type SubscriptionFilter =
 pub type Gossipsub = gossipsub::Behaviour<SnappyTransform, SubscriptionFilter>;
 
 #[derive(NetworkBehaviour)]
-pub(crate) struct Behaviour<AppReqId, TSpec>
+pub(crate) struct Behaviour<AppReqId>
 where
     AppReqId: ReqId,
-    TSpec: EthSpec,
 {
     /// Peers banned.
     pub banned_peers: libp2p::allow_block_list::Behaviour<libp2p::allow_block_list::BlockedPeers>,
@@ -28,7 +25,7 @@ where
     /// The routing pub-sub mechanism for eth2.
     pub gossipsub: Gossipsub,
     /// The Eth2 RPC specified in the wire-0 protocol.
-    pub eth2_rpc: RPC<RequestId<AppReqId>, TSpec>,
+    pub eth2_rpc: RPC<RequestId<AppReqId>>,
     /// Discv5 Discovery protocol.
     pub discovery: Discovery,
     /// Keep regular connection to peers and disconnect if absent.

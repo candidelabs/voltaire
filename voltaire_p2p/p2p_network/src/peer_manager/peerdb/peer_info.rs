@@ -9,7 +9,6 @@ use serde::{
     ser::{SerializeStruct, Serializer},
     Serialize,
 };
-use types::eth_spec::EthSpec;
 use std::collections::HashSet;
 use std::net::IpAddr;
 use std::time::Instant;

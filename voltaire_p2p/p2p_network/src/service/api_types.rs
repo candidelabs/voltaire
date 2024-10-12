@@ -1,6 +1,4 @@
 use libp2p::swarm::ConnectionId;
-use types::eth_spec::EthSpec;
-
 
 use crate::rpc::{
     methods::{
@@ -35,8 +33,8 @@ pub enum Request {
     PooledUserOpsByHash(PooledUserOpsByHashRequest),
 }
 
-impl<TSpec: EthSpec> std::convert::From<Request> for OutboundRequest<TSpec> {
-    fn from(req: Request) -> OutboundRequest<TSpec> {
+impl std::convert::From<Request> for OutboundRequest {
+    fn from(req: Request) -> OutboundRequest {
         match req {
             Request::PooledUserOpHashes(r) => OutboundRequest::PooledUserOpHashes(r),
             Request::PooledUserOpsByHash(r) => OutboundRequest::PooledUserOpsByHash(r),

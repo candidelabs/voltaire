@@ -1,8 +1,6 @@
 use libp2p::gossipsub::{IdentTopic as Topic, TopicHash};
 use serde_derive::{Deserialize, Serialize};
-use ssz_types::FixedVector;
 use strum::AsRefStr;
-use types::{subnet_id::SubnetId};
 
 use crate::Subnet;
 

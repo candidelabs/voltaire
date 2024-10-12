@@ -1,17 +1,16 @@
 //! Available RPC methods types and ids.
 
-use crate::types::{UserOperation};
+use crate::types::UserOperation;
 
 use ethereum_types::H256;
 use regex::bytes::Regex;
 use serde::{Serialize, Deserialize};
 use ssz_derive::{Decode, Encode};
 use ssz_types::{
-    typenum::{U1024, U256, U46,U4096, U66, U34, U32, U64},
+    typenum::{U1024, U256, U4096, U32},
     VariableList, FixedVector,
 };
-use types::eth_spec::EthSpec;
-use std::{marker::PhantomData, fmt::{Debug, self}};
+use std::fmt::Debug;
 use std::ops::Deref;
 use strum::IntoStaticStr;
 
@@ -84,26 +83,17 @@ pub struct Ping {
 //     variant_attributes(derive(Clone, Debug, PartialEq, Serialize),)
 // )]
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct MetadataRequest<T: EthSpec> {
-    _phantom_data: PhantomData<T>,
+pub struct MetadataRequest {
 }
 
-impl<T: EthSpec> MetadataRequest<T> {
+impl MetadataRequest {
     pub fn new() -> Self {
         MetadataRequest {
-            _phantom_data: PhantomData,
         }
     }
 }
 
 /// The METADATA response structure.
-// #[superstruct(
-//     variants(V1, V2),
-//     variant_attributes(
-//         derive(Encode, Decode, Clone, Debug, PartialEq, Serialize),
-//         serde(bound = "T: EthSpec", deny_unknown_fields),
-//     )
-// )]
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Serialize)]
 pub struct MetaData {
     /// A sequential counter indicating when data gets modified.
@@ -479,7 +469,6 @@ impl slog::KV for StatusMessage {
         record: &slog::Record,
         serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
-        use slog::Value;
         serializer.emit_arguments("chain_id", &format_args!("{:?}", self.chain_id))?;
         serializer.emit_arguments("block_hash", &format_args!("{:?}", self.block_hash))?;
         serializer.emit_arguments("block_number", &format_args!("{:?}", self.block_number))?;

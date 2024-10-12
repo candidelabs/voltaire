@@ -8,7 +8,6 @@ use futures::prelude::{AsyncRead, AsyncWrite};
 use futures::{FutureExt, StreamExt};
 use libp2p::core::{InboundUpgrade, UpgradeInfo};
 use ssz::Encode;
-use types::eth_spec::EthSpec;
 use std::io;
 use std::marker::PhantomData;
 use std::time::Duration;
@@ -121,15 +120,14 @@ impl std::fmt::Display for Encoding {
 }
 
 #[derive(Debug, Clone)]
-pub struct RPCProtocol<TSpec: EthSpec> {
+pub struct RPCProtocol {
     // pub fork_context: Arc<ForkContext>,
     pub max_rpc_size: usize,
     // pub enable_light_client_server: bool,
-    pub phantom: PhantomData<TSpec>,
     pub ttfb_timeout: Duration,
 }
 
-impl<TSpec: EthSpec> UpgradeInfo for RPCProtocol<TSpec> {
+impl UpgradeInfo for RPCProtocol {
     type Info = ProtocolId;
     type InfoIter = Vec<Self::Info>;
 
@@ -214,7 +212,7 @@ impl ProtocolId {
     }
 
     /// Returns min and max size for messages of given protocol id responses.
-    pub fn rpc_response_limits<T: EthSpec>(&self, /*fork_context: &ForkContext*/) -> RpcLimits {
+    pub fn rpc_response_limits(&self, /*fork_context: &ForkContext*/) -> RpcLimits {
         match self.versioned_protocol.protocol() {
             Protocol::Status => RpcLimits::new(
                 0,
@@ -277,16 +275,15 @@ impl ProtocolId {
 // The inbound protocol reads the request, decodes it and returns the stream to the protocol
 // handler to respond to once ready.
 
-pub type InboundOutput<TSocket, TSpec> = (InboundRequest<TSpec>, InboundFramed<TSocket, TSpec>);
-pub type InboundFramed<TSocket, TSpec> =
-    Framed<std::pin::Pin<Box<TimeoutStream<Compat<TSocket>>>>, InboundCodec<TSpec>>;
+pub type InboundOutput<TSocket> = (InboundRequest, InboundFramed<TSocket>);
+pub type InboundFramed<TSocket> =
+    Framed<std::pin::Pin<Box<TimeoutStream<Compat<TSocket>>>>, InboundCodec>;
 
-impl<TSocket, TSpec> InboundUpgrade<TSocket> for RPCProtocol<TSpec>
+impl<TSocket> InboundUpgrade<TSocket> for RPCProtocol
 where
     TSocket: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-    TSpec: EthSpec,
 {
-    type Output = InboundOutput<TSocket, TSpec>;
+    type Output = InboundOutput<TSocket>;
     type Error = RPCError;
     type Future = BoxFuture<'static, Result<Self::Output, Self::Error>>;
 
@@ -338,17 +335,17 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum InboundRequest<TSpec: EthSpec> {
+pub enum InboundRequest {
     Status(StatusMessage),
     Goodbye(GoodbyeReason),
     Ping(Ping),
-    MetaData(MetadataRequest<TSpec>),
+    MetaData(MetadataRequest),
     PooledUserOpHashes(PooledUserOpHashesRequest),
     PooledUserOpsByHash(PooledUserOpsByHashRequest),
 }
 
 /// Implements the encoding per supported protocol for `RPCRequest`.
-impl<TSpec: EthSpec> InboundRequest<TSpec> {
+impl InboundRequest {
     /* These functions are used in the handler for stream management */
 
     /// Number of responses expected for this request.
@@ -481,7 +478,7 @@ impl std::error::Error for RPCError {
     }
 }
 
-impl<TSpec: EthSpec> std::fmt::Display for InboundRequest<TSpec> {
+impl std::fmt::Display for InboundRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             InboundRequest::Status(status) => write!(f, "Status Message: {}", status),

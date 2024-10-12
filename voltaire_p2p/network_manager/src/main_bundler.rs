@@ -158,7 +158,7 @@ pub struct BundlerGossibRequest {
     pub request_arguments:MessageTypeToBundler,
 }
 
-pub async fn broadcast_to_main_bundler(message_to_send:BundlerGossibRequest,log: &slog::Logger) {//-> Result<String,serde_pickle::Error>{
+pub async fn broadcast_to_main_bundler(message_to_send:BundlerGossibRequest,_log: &slog::Logger) {//-> Result<String,serde_pickle::Error>{
     let socket = Path::new(BUNDLER_ENDPOINT_SOCKET_PATH);
     let mut stream = match UnixStream::connect(&socket).await {
         Err(_) => panic!("server is not running"),

@@ -1,10 +1,10 @@
 use crate::main_bundler::{listen_to_main_bundler,GossibMessageToSendToMainBundler, BundlerGossibRequest, MessageTypeToBundler, MessageTypeFromBundler, broadcast_and_listen_for_response_from_main_bundler, broadcast_to_main_bundler, PooledUserOpHashesAndPeerId};
+use crate::status::status_message;
+use ethereum_types::H256;
 use p2p_voltaire_network::rpc::methods::{PooledUserOpHashesRequest, PooledUserOpsByHashRequest, PooledUserOpHashes, PooledUserOpsByHash};
 use p2p_voltaire_network::rpc::StatusMessage;
-use p2p_voltaire_network::{PeerId, NetworkGlobals, MessageId, NetworkEvent, GossipTopic, Topic};
-use types::eth_spec::EthSpec;
+use p2p_voltaire_network::{PeerId, NetworkGlobals, MessageId, NetworkEvent};
 use crate::nat::EstablishedUPnPMappings;
-use crate::router::{Router, RouterMessage};
 use crate::{error, metrics};
 use crate::NetworkConfig;
 use futures::channel::mpsc::Sender;
@@ -13,11 +13,11 @@ use p2p_voltaire_network::service::Network;
 use p2p_voltaire_network::MessageAcceptance;
 use p2p_voltaire_network::{
     rpc::{GoodbyeReason, RPCResponseErrorCode},
-    Context, PeerAction, PeerRequestId, PubsubMessage, ReportSource, Request, Response, Subnet,
+    PeerAction, PeerRequestId, PubsubMessage, ReportSource, Request, Response,
 };
 
 
-use slog::{crit, debug, error, info, o, trace, warn};
+use slog::{debug, error, info, o, trace, warn};
 use std::str::FromStr;
 use std::{sync::Arc, time::Duration};
 use strum::IntoStaticStr;
@@ -138,26 +138,21 @@ pub enum NetworkMessage  {
 #[derive(Clone)]
 pub struct NetworkSenders {
     pub network_send: mpsc::UnboundedSender<NetworkMessage>,
-    // validator_subscription_send: mpsc::Sender<ValidatorSubscriptionMessage>,
 }
 
 pub struct NetworkReceivers {
     pub network_recv: mpsc::UnboundedReceiver<NetworkMessage>,
-    // pub validator_subscription_recv: mpsc::Receiver<ValidatorSubscriptionMessage>,
 }
 
 impl NetworkSenders {
     pub fn new() -> (Self, NetworkReceivers) {
         let (network_send, network_recv) = mpsc::unbounded_channel::<NetworkMessage>();
-        // let (validator_subscription_send, validator_subscription_recv) =
-        //     mpsc::channel(VALIDATOR_SUBSCRIPTION_MESSAGE_QUEUE_SIZE);
+
         let senders = Self {
             network_send,
-            // validator_subscription_send,
         };
         let receivers = NetworkReceivers {
             network_recv,
-            // validator_subscription_recv,
         };
         (senders, receivers)
     }
@@ -165,23 +160,15 @@ impl NetworkSenders {
     pub fn network_send(&self) -> mpsc::UnboundedSender<NetworkMessage> {
         self.network_send.clone()
     }
-
-    // pub fn validator_subscription_send(&self) -> mpsc::Sender<ValidatorSubscriptionMessage> {
-    //     self.validator_subscription_send.clone()
-    // }
 }
 
 /// Service that handles communication between internal services and the `p2p_voltaire_network` network service.
-pub struct NetworkService<T: EthSpec> {
+pub struct NetworkService {
     /// The underlying libp2p service that drives all the network interactions.
-    libp2p: Network<RequestId, T>,
+    libp2p: Network<RequestId>,
     /// The receiver channel for voltaire to communicate with the network service.
     network_recv: mpsc::UnboundedReceiver<NetworkMessage>,
-    // /// The receiver channel for voltaire to send validator subscription requests.
-    // validator_subscription_recv: mpsc::Receiver<ValidatorSubscriptionMessage>,
-    /// The sending channel for the network service to send messages to be routed throughout
-    /// voltaire.
-    router_send: mpsc::UnboundedSender<RouterMessage>,
+    network: HandlerNetworkContext,
     /// A collection of global variables, accessible outside of the network service.
     network_globals: Arc<NetworkGlobals>,
     /// Stores potentially created UPnP mappings to be removed on shutdown. (TCP port and UDP
@@ -195,7 +182,7 @@ pub struct NetworkService<T: EthSpec> {
     log: slog::Logger,
 }
 
-impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
+impl NetworkService {
     #[allow(clippy::type_complexity)]
     pub async fn start(
         config: &NetworkConfig,
@@ -240,12 +227,12 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
         // }
 
         // router task
-        let router_send = Router::spawn(
-            network_globals.clone(),
-            network_senders.network_send(),
-            executor.clone(),
-            network_log.clone(),
-        ).await.unwrap();
+        // let router_send = Router::spawn(
+        //     network_globals.clone(),
+        //     network_senders.network_send(),
+        //     executor.clone(),
+        //     network_log.clone(),
+        // ).await.unwrap();
 
         // create a timer for updating network metrics
         let metrics_update = tokio::time::interval(Duration::from_secs(METRIC_UPDATE_INTERVAL));
@@ -257,13 +244,14 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
             network_recv,
             // validator_subscription_recv,
         } = network_recievers;
-
+        let network = HandlerNetworkContext::new(network_senders.network_send(), network_log.clone());
         // create the network service and spawn the task
         let network_log = network_log.new(o!("service" => "network"));
-        let network_service:NetworkService<T> = NetworkService {
+        let network_service:NetworkService = NetworkService {
             libp2p,
             network_recv,
-            router_send,
+            // router_send,
+            network,
             network_globals: network_globals.clone(),
             upnp_mappings: EstablishedUPnPMappings::default(),
             metrics_enabled: config.metrics_enabled,
@@ -277,12 +265,12 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
     }
 
 
-    fn send_to_router(&mut self, msg: RouterMessage) {
-        if let Err(mpsc::error::SendError(msg)) = self.router_send.send(msg) {
-            // debug!(self.log, "Failed to send msg to router"; "msg" => ?msg);
-            debug!(self.log, "Failed to send msg to router");
-        }
-    }
+    // fn send_to_router(&mut self, msg: RouterMessage) {
+    //     if let Err(mpsc::error::SendError(msg)) = self.router_send.send(msg) {
+    //         // debug!(self.log, "Failed to send msg to router"; "msg" => ?msg);
+    //         debug!(self.log, "Failed to send msg to router");
+    //     }
+    // }
 
     fn spawn_service(mut self, executor: task_executor::TaskExecutor, network_send: mpsc::UnboundedSender<NetworkMessage>){//} -> impl Future{
         let mut shutdown_sender = executor.shutdown_sender();
@@ -351,14 +339,14 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
 
                     _ = self.metrics_update.tick(), if self.metrics_enabled => {
                         // update various network metrics
-                        metrics::update_gossip_metrics::<T>();
+                        metrics::update_gossip_metrics();
                       
                     }
 
                     // handle a message sent to the network
                     Some(msg) = self.network_recv.recv() => self.on_network_msg(msg, &mut shutdown_sender).await,
 
-                    event = self.libp2p.next_event() => self.on_libp2p_event(event, &mut shutdown_sender, network_send.clone()).await,
+                    event = self.libp2p.next_event() => self.on_libp2p_event(event, &mut shutdown_sender).await,
 
                 }
                 metrics::update_bandwidth_metrics(self.libp2p.bandwidth.clone());
@@ -374,52 +362,67 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
         &mut self,
         ev: NetworkEvent<RequestId>,
         shutdown_sender: &mut Sender<ShutdownReason>,
-        network_send: mpsc::UnboundedSender<NetworkMessage>,
     ) {
         match ev {
             NetworkEvent::PeerConnectedOutgoing(peer_id) => {
-                self.send_to_router(RouterMessage::StatusPeer(peer_id));
+                // self.send_to_router(RouterMessage::StatusPeer(peer_id));
+                let status_message = status_message(0, H256::default(),0);
+                self.network.send_processor_request(peer_id, Request::Status(status_message));
             }
             NetworkEvent::PeerConnectedIncoming(_) => {
                 // No action required for this event.
             }
-            NetworkEvent::PeerDisconnected(peer_id) => {
-                self.send_to_router(RouterMessage::PeerDisconnected(peer_id));
+            NetworkEvent::PeerDisconnected(_peer_id) => {
+                // self.send_to_router(RouterMessage::PeerDisconnected(peer_id));
+                // self.network.send_to_sync(SyncMessage::Disconnect(peer_id));
             }
             NetworkEvent::RequestReceived {
                 peer_id,
                 id,
                 request,
             } => {
-                
-                self.send_to_router(RouterMessage::RPCRequestReceived {
-                    peer_id,
-                    id,
-                    request,
-                });
+                if !self.network_globals.peers.read().is_connected(&peer_id) {
+                    debug!(self.log, "Dropping request of disconnected peer"; "peer_id" => %peer_id, "request" => ?request);
+                    return;
+                }
+                match request {
+                    Request::Status(status_message) => {
+                        self.on_status_request(peer_id, id, status_message)
+                    }
+                    Request::PooledUserOpHashes(pooled_user_op_hashes_request) => {
+                        self.on_pooled_user_op_hashes_request(peer_id, id, pooled_user_op_hashes_request)
+                       
+                    },
+                    Request::PooledUserOpsByHash(pooled_user_ops_by_hash) => {
+                        self.on_pooled_user_ops_by_hash_request(peer_id, id, pooled_user_ops_by_hash)
+                    },
+                }
             }
             NetworkEvent::ResponseReceived {
                 peer_id,
                 id,
                 response,
             } => {
-                self.send_to_router(RouterMessage::RPCResponseReceived {
-                    peer_id,
-                    request_id: id,
-                    response,
-                });
+                // self.send_to_router(RouterMessage::RPCResponseReceived {
+                //     peer_id,
+                //     request_id: id,
+                //     response,
+                // });
+                self.handle_rpc_response(peer_id, id, response);
             }
             NetworkEvent::RPCFailed { id, peer_id } => {
-                self.send_to_router(RouterMessage::RPCFailed {
-                    peer_id,
-                    request_id: id,
-                });
+                // self.send_to_router(RouterMessage::RPCFailed {
+                //     peer_id,
+                //     request_id: id,
+                // });
+                self.on_rpc_error(peer_id, id);
             }
             NetworkEvent::StatusPeer(peer_id) => {
-                self.send_to_router(RouterMessage::StatusPeer(peer_id));
+                //self.send_to_router(RouterMessage::StatusPeer(peer_id));
+                self.send_status(peer_id);
             }
             NetworkEvent::PubsubMessage {
-                id,
+                id: _,
                 source,
                 message,
                 topic
@@ -438,13 +441,6 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
 
                         broadcast_to_main_bundler(message_to_send, &self.log).await;
                     }
-
-                    // _ => {
-                    //     // all else is sent to the router
-                    //     self.send_to_router(RouterMessage::PubsubMessage(
-                    //         id, source, message, true,
-                    //     ));
-                    // }
                 }
             }
             NetworkEvent::NewListenAddr(multiaddr) => {
@@ -468,11 +464,7 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
                     });
             }
             NetworkEvent::ResponseReceivedFromInternal { peer_id, response } => {
-                self.send_to_router(RouterMessage::RPCResponseReceived {
-                    peer_id,
-                    request_id: RequestId::Router,
-                    response,
-                });
+                self.handle_rpc_response(peer_id, RequestId::Router, response);
             },
         }
     }
@@ -481,7 +473,7 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
     async fn on_network_msg(
         &mut self,
         msg: NetworkMessage,
-        shutdown_sender: &mut Sender<ShutdownReason>,
+        _shutdown_sender: &mut Sender<ShutdownReason>,
     ) {
         metrics::inc_counter_vec(&metrics::NETWORK_RECEIVE_EVENTS, &[(&msg).into()]);
         let _timer = metrics::start_timer_vec(&metrics::NETWORK_RECEIVE_TIMES, &[(&msg).into()]);
@@ -586,22 +578,25 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
                 //     );
                 // }
             }
-            NetworkMessage::PooledUserOpHashesRequestMessageToAllPeers { pooled_user_op_hashes_request } => {
+            NetworkMessage::PooledUserOpHashesRequestMessageToAllPeers { pooled_user_op_hashes_request: _ } => {
                 self.libp2p.send_outbound_pooled_user_op_hashes_request_to_all_peers()
             },
             NetworkMessage::PooledUserOpHashesRequestMessage { id, peer_id, pooled_user_op_hashes_request } => {
-                self.send_to_router(RouterMessage::PooledUserOpHashesRequest (
-                    RequestId::FromMainBundler(id),
-                    PeerId::from_str(&peer_id).unwrap() ,
-                    pooled_user_op_hashes_request
-                ));
+                // self.send_to_router(RouterMessage::PooledUserOpHashesRequest (
+                //     RequestId::FromMainBundler(id),
+                //     PeerId::from_str(&peer_id).unwrap() ,
+                //     pooled_user_op_hashes_request
+                // ));
+                self.network.send_request(RequestId::FromMainBundler(id), PeerId::from_str(&peer_id).unwrap(), Request::PooledUserOpHashes(pooled_user_op_hashes_request));
             },
             NetworkMessage::PooledUserOpsByHashRequestMessage { id, peer_id, pooled_user_ops_by_hash_request } => {
-                self.send_to_router(RouterMessage::PooledUserOpsByHashRequest (
-                    RequestId::FromMainBundler(id),
-                    PeerId::from_str(&peer_id).unwrap() ,
-                    pooled_user_ops_by_hash_request
-                ));
+                // self.send_to_router(RouterMessage::PooledUserOpsByHashRequest (
+                //     RequestId::FromMainBundler(id),
+                //     PeerId::from_str(&peer_id).unwrap() ,
+                //     pooled_user_ops_by_hash_request
+                // ));
+                self.network.send_request(
+                    RequestId::FromMainBundler(id), PeerId::from_str(&peer_id).unwrap(), Request::PooledUserOpsByHash(pooled_user_ops_by_hash_request));
             },
             NetworkMessage::PooledUserOpHashesRequestS{
                 peer_id,
@@ -637,7 +632,7 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
                 debug!(self.log, "Sending PooledUserOpsByHash Response"; "peer" => %peer_id);
                 self.libp2p.send_response(peer_id, request_id,  Response::PooledUserOpsByHash(Some(deserialized_result.unwrap())));
             },
-            NetworkMessage::PooledUserOpHashesResponseS { peer_id, request_id, pooled_user_op_hashes } => {
+            NetworkMessage::PooledUserOpHashesResponseS { peer_id, request_id: _, pooled_user_op_hashes } => {
                 let pooled_user_op_hashes_message = PooledUserOpHashesAndPeerId{
                     peer_id:peer_id.to_string(),
                     pooled_user_op_hashes,
@@ -650,7 +645,7 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
                 broadcast_to_main_bundler(message_to_send, &self.log).await;
                 
             },
-            NetworkMessage::PooledUserOpsByHashResponseS { peer_id, request_id, pooled_user_ops_by_hash } => {
+            NetworkMessage::PooledUserOpsByHashResponseS { peer_id: _, request_id: _, pooled_user_ops_by_hash } => {
                 let message_to_send = BundlerGossibRequest {
                     request_type:"p2p_received_pooled_user_ops_by_hash_response".to_string(), 
                     request_arguments:MessageTypeToBundler::PooledUserOpsByHashResponseToBundler(pooled_user_ops_by_hash)
@@ -677,37 +672,154 @@ impl<T: EthSpec+ std::marker::Copy> NetworkService<T> {
         }
     }
 
-    /// Sends an arbitrary network message.
-    // fn send_network_msg(&mut self, msg: NetworkMessage) -> Result<(), &'static str> {
-    //     self.network_recv
-    //     self.n.send(msg).map_err(|_| {
-    //         debug!(self.log, "Could not send message to the network service");
-    //         "Network channel send Failed"
-    //     })
-    // }
 
-    fn subscribed_core_topics(&self) -> bool {
-        // let core_topics = core_topics_to_subscribe(self.fork_context.current_fork());
-        // let core_topics: HashSet<&GossipKind> = HashSet::from_iter(&core_topics);
-        // let subscriptions = self.network_globals.gossipsub_subscriptions.read();
-        // let subscribed_topics: HashSet<&GossipKind> =
-        //     subscriptions.iter().map(|topic| topic.kind()).collect();
+     /* RPC - Related functionality */
 
-        // core_topics.is_subset(&subscribed_topics)
-        false
+    /// An RPC response has been received from the network.
+    fn handle_rpc_response(
+        &mut self,
+        peer_id: PeerId,
+        request_id: RequestId,
+        response: Response,
+    ) {
+        match response {
+            Response::Status(status_message) => {
+                debug!(self.log, "Received Status Response"; "peer_id" => %peer_id, 
+                    "chain_id" => status_message.chain_id,
+                    "block_hash" => status_message.block_hash.to_string(),
+                    "block_number" => status_message.block_number,
+                );
+            }
+            Response::PooledUserOpHashes(pooled_user_op_hashes) => { 
+                self.on_pooled_user_op_hashes_response(
+                    peer_id, 
+                    request_id, 
+                    pooled_user_op_hashes.unwrap()
+                )
+              
+            },
+            Response::PooledUserOpsByHash(pooled_user_ops_by_hash) => { 
+                self.on_pooled_user_ops_by_hash_response(
+                    peer_id, 
+                    request_id,
+                    pooled_user_ops_by_hash.unwrap()
+                )
+            },
+        }
+    }
+
+
+    fn send_status(&mut self, peer_id: PeerId) {
+        // let topics = self.network_globals.local_metadata.read().clone();
+        let status_message = status_message(0, H256::default(),0);
+
+        // let supported_mempools_string:Vec<String> = status_message.supported_mempools.to_vec().iter().map(
+        //     |mempool| std::str::from_utf8(&mempool.to_vec()).unwrap().to_string()
+        // ).collect();
+        // let supported_mempools_string_joined = supported_mempools_string.join(",");
+        // debug!(self.log, "Sending Status Request"; "peer" => %peer_id, 
+        //     "supported mempools" => &supported_mempools_string_joined
+        // );
+
+        self.network
+            .send_processor_request(peer_id, Request::Status(status_message));
+    }
+
+    /// An error occurred during an RPC request. The state is maintained by the sync manager, so
+    /// this function notifies the sync manager of the error.
+    pub fn on_rpc_error(&mut self, peer_id: PeerId, _request_id: RequestId) {
+        error!(self.log, "An error occurred during an RPC request"; "peer" => peer_id.to_string());
+    }
+
+    /// Handle a `Status` request.
+    ///
+    /// Processes the `Status` from the remote peer and sends back our `Status`.
+    pub fn on_status_request(
+        &mut self,
+        peer_id: PeerId,
+        request_id: PeerRequestId,
+        status: StatusMessage,
+    ) {
+        debug!(self.log, "Received Status Request"; "peer_id" => %peer_id, &status);
+
+        self.network.inform_network(NetworkMessage::Status {
+            peer_id,
+            request_id,
+        });
+    }
+
+    pub fn on_pooled_user_op_hashes_request(
+        &mut self,
+        peer_id: PeerId,
+        request_id: PeerRequestId,
+        pooled_user_op_hashes_request: PooledUserOpHashesRequest,
+    ) {
+        debug!(self.log, "Received PooledUserOpHashes Request"; "peer_id" => %peer_id);
+
+
+        self.network.inform_network(NetworkMessage::PooledUserOpHashesRequestS {
+            peer_id,
+            request_id,
+            pooled_user_op_hashes_request,
+        })
+    }
+
+    pub fn on_pooled_user_op_hashes_response(
+        &mut self,
+        peer_id: PeerId,
+        request_id: RequestId,
+        pooled_user_op_hashes: PooledUserOpHashes,
+    ) {
+        debug!(self.log, "Received PooledUserOpHashes Response"; "peer_id" => %peer_id);
+
+        self.network.inform_network(NetworkMessage::PooledUserOpHashesResponseS {
+            peer_id,
+            request_id,
+            pooled_user_op_hashes,
+        });
+    }
+
+    pub fn on_pooled_user_ops_by_hash_request(
+        &mut self,
+        peer_id: PeerId,
+        request_id: PeerRequestId,
+        pooled_user_ops_by_hash_request: PooledUserOpsByHashRequest,
+    ) {
+        debug!(self.log, "Received PooledUserOpsByHash Request"; "peer_id" => %peer_id);
+
+        self.network.inform_network(NetworkMessage::PooledUserOpsByHashRequestS {
+            peer_id,
+            request_id,
+            pooled_user_ops_by_hash_request,
+        });
+    }
+
+    pub fn on_pooled_user_ops_by_hash_response(
+        &mut self,
+        peer_id: PeerId,
+        request_id: RequestId,
+        pooled_user_ops_by_hash: PooledUserOpsByHash,
+    ) {
+        debug!(self.log, "Received PooledUserOpsByHash Response"; "peer_id" => %peer_id);
+
+        self.network.inform_network(NetworkMessage::PooledUserOpsByHashResponseS {
+            peer_id,
+            request_id,
+            pooled_user_ops_by_hash,
+        });
     }
 }
 
 
-impl<T: EthSpec> Drop for NetworkService<T> {
+impl Drop for NetworkService {
     fn drop(&mut self) {
         // network thread is terminating
-        // let enrs = self.libp2p.enr_entries();
-        // debug!(
-        //     self.log,
-        //     "Persisting DHT to store";
-        //     "Number of peers" => enrs.len(),
-        // );
+        let enrs = self.libp2p.enr_entries();
+        debug!(
+            self.log,
+            "Persisting DHT to store";
+            "Number of peers" => enrs.len(),
+        );
         // if let Err(e) = clear_dht::<T::EthSpec, T::HotStore, T::ColdStore>(self.store.clone()) {
         //     error!(self.log, "Failed to clear old DHT entries"; "error" => ?e);
         // }
@@ -728,5 +840,56 @@ impl<T: EthSpec> Drop for NetworkService<T> {
         crate::nat::remove_mappings(&self.upnp_mappings, &self.log);
 
         info!(self.log, "Network service shutdown");
+    }
+}
+
+
+/// Wraps a Network Channel to employ various RPC related network functionality for the
+/// processor.
+#[derive(Clone)]
+pub struct HandlerNetworkContext  {
+    /// The network channel to relay messages to the Network service.
+    network_send: mpsc::UnboundedSender<NetworkMessage>,
+    /// Logger for the `NetworkContext`.
+    log: slog::Logger,
+}
+
+impl  HandlerNetworkContext {
+    pub fn new(network_send: mpsc::UnboundedSender<NetworkMessage>, log: slog::Logger) -> Self {
+        Self { network_send, log }
+    }
+
+    /// Sends a message to the network task.
+    pub fn inform_network(&mut self, msg: NetworkMessage) {
+        self.network_send.send(msg).unwrap_or_else(
+            |e| warn!(self.log, "Could not send message to the network service"; "error" => %e),
+        )
+    }
+
+    /// Sends a request to the network task.
+    pub fn send_processor_request(&mut self, peer_id: PeerId, request: Request) {
+        self.inform_network(NetworkMessage::SendRequest {
+            peer_id,
+            request_id: RequestId::Router,
+            request,
+        })
+    }
+
+    /// Sends a request to the network task.
+    pub fn send_request(&mut self,request_id:RequestId,  peer_id: PeerId, request: Request) {
+        self.inform_network(NetworkMessage::SendRequest {
+            peer_id,
+            request_id,
+            request,
+        })
+    }
+
+    /// Sends a response to the network task.
+    pub fn send_response(&mut self, peer_id: PeerId, response: Response, id: PeerRequestId) {
+        self.inform_network(NetworkMessage::SendResponse {
+            peer_id,
+            id,
+            response,
+        })
     }
 }

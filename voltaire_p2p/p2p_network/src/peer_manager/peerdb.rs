@@ -1,9 +1,8 @@
-use crate::{metrics, multiaddr::Multiaddr, types::Subnet, Enr, Gossipsub, PeerId};
+use crate::{metrics, multiaddr::Multiaddr, Enr, Gossipsub, PeerId};
 use peer_info::{ConnectionDirection, PeerConnectionStatus, PeerInfo};
 use rand::seq::SliceRandom;
 use score::{PeerAction, ReportSource, Score, ScoreState};
-use slog::{crit, debug, error, trace, warn};
-use types::eth_spec::EthSpec;
+use slog::{crit, debug, error, warn};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
@@ -227,7 +226,7 @@ impl PeerDB {
     pub fn advanced_peers(&self) -> impl Iterator<Item = &PeerId> {
         self.peers
             .iter()
-            .filter(|(_, info)| {
+            .filter(|(_, _)| {
                 // if info.sync_status().is_advanced() {
                 //     return info.is_connected();
                 // }

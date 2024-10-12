@@ -1,10 +1,6 @@
 use crate::listen_addr::{ListenAddr, ListenAddress};
 use crate::rpc::config::{InboundRateLimiterConfig, OutboundRateLimiterConfig};
-use crate::types::GossipKind;
 use crate::{Enr, PeerIdSerialized};
-// use directory::{
-//     DEFAULT_BEACON_NODE_DIR, DEFAULT_HARDCODED_NETWORK, DEFAULT_NETWORK_DIR, DEFAULT_ROOT_DIR,
-// };
 use discv5::{Discv5Config, Discv5ConfigBuilder};
 use libp2p::gossipsub;
 use libp2p::Multiaddr;
@@ -12,7 +8,6 @@ use serde_derive::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 
 /// The time period that messages are stored in the cache.

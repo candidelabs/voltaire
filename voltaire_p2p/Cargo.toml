@@ -16,7 +16,6 @@ futures = "0.3.28"
 slog-async = "2"
 slog = { version = "2.5.2", features = ["max_level_trace"] }
 strum = { version = "0.24", features = ["derive"] }
-types = { path =  "./p2p_network/types" }
 clap = { version = "2.34.0", feature= ["cargo"]}
 unused_port = { path = "./p2p_network/unused_port" }
 # network = { path =  "./network" }

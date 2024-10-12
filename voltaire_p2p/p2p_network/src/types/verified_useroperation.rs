@@ -7,7 +7,6 @@ use tree_hash_derive::TreeHash;
 use ssz_types::typenum::U1000000;
 use ethereum_types::U256;
 use ethereum_types::Address;
-use crate::rpc::methods::MaxOpsPerRequest;
 
 type MaxCallDataSize = U1000000;
 pub const MAX_CONTRACT_SIZE: usize = 24576;

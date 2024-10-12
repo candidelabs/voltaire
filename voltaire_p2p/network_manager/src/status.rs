@@ -1,6 +1,5 @@
 use ethereum_types::H256;
-use p2p_voltaire_network::rpc::{StatusMessage, methods::MaxOpsPerRequest};
-use ssz_types::{typenum::U32, FixedVector, VariableList};
+use p2p_voltaire_network::rpc::StatusMessage;
 
 /// Trait to produce a `StatusMessage` representing the state of the given `beacon_chain`.
 ///

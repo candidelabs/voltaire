@@ -7,7 +7,6 @@ pub(crate) mod enr;
 pub mod enr_ext;
 
 // Allow external use of the voltaire ENR builder
-use crate::service::TARGET_SUBNET_PEERS;
 use crate::{error, Enr, NetworkConfig, NetworkGlobals, Subnet, SubnetDiscovery};
 use crate::{metrics, ClearDialError};
 use discv5::{enr::NodeId, Discv5, Discv5Event};
@@ -17,7 +16,6 @@ pub use enr::{
 pub use enr_ext::{peer_id_to_node_id, CombinedKeyExt, EnrExt};
 pub use libp2p::identity::{Keypair, PublicKey};
 
-// use enr::{mempools_bitfield_ENR_KEY, ETH2_ENR_KEY, SYNC_COMMITTEE_BITFIELD_ENR_KEY};
 use futures::prelude::*;
 use futures::stream::FuturesUnordered;
 use libp2p::swarm::behaviour::{DialFailure, FromSwarm};
@@ -31,9 +29,7 @@ pub use libp2p::{
     },
 };
 use lru::LruCache;
-use slog::{crit, debug, error, info, trace, warn};
-use ssz::Encode;
-use types::eth_spec::EthSpec;
+use slog::{debug, error, info, trace, warn};
 use std::{
     collections::{HashMap, VecDeque},
     net::{IpAddr, SocketAddr},
@@ -44,10 +40,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::mpsc;
-use types::{EnrForkId};
 
-mod subnet_predicate;
-// pub use subnet_predicate::subnet_predicate;
 
 /// Local ENR storage filename.
 pub const ENR_FILENAME: &str = "enr.dat";
@@ -473,7 +466,7 @@ impl Discovery {
     //         }
     //         // Subnet::SyncCommittee(id) => {
     //         //     let id = *id as usize;
-    //         //     let mut current_bitfield = local_enr.sync_committee_bitfield::<TSpec>()?;
+    //         //     let mut current_bitfield = local_enr.sync_committee_bitfield::()?;
 
     //         //     if id >= current_bitfield.len() {
     //         //         return Err(format!(
@@ -650,10 +643,6 @@ impl Discovery {
                 //  1. We've grouped MAX_SUBNETS_IN_QUERY subnets together.
                 //  2. There are no more messages in the queue.
                 if subnet_queries.len() == MAX_SUBNETS_IN_QUERY || self.queued_queries.is_empty() {
-                    // This query is for searching for peers of a particular subnet
-                    // Drain subnet_queries so we can re-use it as we continue to process the queue
-                    let grouped_queries: Vec<SubnetQuery> = std::mem::take(&mut subnet_queries);
-                    self.start_subnet_query(grouped_queries);
                     processed = true;
                 }
             }
@@ -670,61 +659,6 @@ impl Discovery {
             .len()
             .saturating_sub(self.find_peer_active as usize) // We only count active subnet queries
             >= MAX_CONCURRENT_SUBNET_QUERIES
-    }
-
-    /// Runs a discovery request for a given group of subnets.
-    fn start_subnet_query(&mut self, subnet_queries: Vec<SubnetQuery>) {
-        let mut filtered_subnets: Vec<Subnet> = Vec::new();
-
-        // find subnet queries that are still necessary
-        let filtered_subnet_queries: Vec<SubnetQuery> = subnet_queries
-            .into_iter()
-            .filter(|subnet_query| {
-                // Determine if we have sufficient peers, which may make this discovery unnecessary.
-                let peers_on_subnet = self
-                    .network_globals
-                    .peers
-                    .read()
-                    .good_peers_on_subnet(/*subnet_query.subnet*/)
-                    .count();
-
-                if peers_on_subnet >= TARGET_SUBNET_PEERS {
-                    debug!(self.log, "Discovery ignored";
-                        "reason" => "Already connected to desired peers",
-                        "connected_peers_on_subnet" => peers_on_subnet,
-                        "target_subnet_peers" => TARGET_SUBNET_PEERS,
-                    );
-                    return false;
-                }
-
-                let target_peers = TARGET_SUBNET_PEERS.saturating_sub(peers_on_subnet);
-                trace!(self.log, "Discovery query started for subnet";
-                    "subnet_query" => ?subnet_query,
-                    "connected_peers_on_subnet" => peers_on_subnet,
-                    "peers_to_find" => target_peers,
-                );
-
-                filtered_subnets.push(subnet_query.subnet.clone());
-                true
-            })
-            .collect();
-
-        // // Only start a discovery query if we have a subnet to look for.
-        // if !filtered_subnet_queries.is_empty() {
-        //     // build the subnet predicate as a combination of the eth2_fork_predicate and the subnet predicate
-        //     let subnet_predicate = subnet_predicate(filtered_subnets, &self.log);
-
-        //     debug!(
-        //         self.log,
-        //         "Starting grouped subnet query";
-        //         "subnets" => ?filtered_subnet_queries,
-        //     );
-        //     self.start_query(
-        //         QueryType::Subnet(filtered_subnet_queries),
-        //         TARGET_PEERS_FOR_GROUPED_QUERY,
-        //         subnet_predicate,
-        //     );
-        // }
     }
 
     /// Search for a specified number of new peers using the underlying discovery mechanism.
