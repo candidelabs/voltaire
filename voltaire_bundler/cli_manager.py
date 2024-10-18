@@ -10,10 +10,11 @@ from importlib.metadata import version
 
 import aiohttp
 
+from voltaire_bundler.mempool.mempool_info import DEFAULT_MEMPOOL_INFO
 from voltaire_bundler.utils.eth_client_utils import \
     send_rpc_request_to_eth_client_no_retry
 
-from .typing import Address
+from .typing import Address, MempoolId
 from .utils.import_key import (import_bundler_account,
                                public_address_from_private_key)
 
@@ -77,6 +78,8 @@ class InitData:
     reputation_whitelist: list[str]
     reputation_blacklist: list[str]
     is_eip7702: bool
+    p2p_canonical_mempool_id_07: str | None
+    p2p_canonical_mempool_id_06: str | None
 
 
 def address(ep: str):
@@ -528,6 +531,24 @@ def initialize_argument_parser() -> ArgumentParser:
         )
     )
 
+    parser.add_argument(
+        "--p2p_canonical_mempool_id_07",
+        type=str,
+        help= "Canonical mempool id for entrypoint v0.07",
+        nargs="?",
+        const=None,
+        default=None,
+    )
+
+    parser.add_argument(
+        "--p2p_canonical_mempool_id_06",
+        type=str,
+        help= "Canonical mempool id for entrypoint v0.06",
+        nargs="?",
+        const=None,
+        default=None,
+    )
+
     return parser
 
 
@@ -694,6 +715,26 @@ async def get_init_data(args: Namespace) -> InitData:
     if not args.disable_entrypoints_code_check:
         await check_valid_entrypoints(args.ethereum_node_url, args.disable_v6)
 
+    if not args.disable_p2p:
+        if args.p2p_canonical_mempool_id_07 is None:
+            if args.chain_id not in DEFAULT_MEMPOOL_INFO["0x0000000071727De22E5E9d8BAf0edAc6f37da032"]:
+                logging.warning(
+                    "p2p is disabled because p2p_canonical_mempool_id_07 "
+                    "not provided and no default value for the target chain."
+                )
+                args.disable_p2p = True
+            else:
+                args.p2p_canonical_mempool_id_07 = DEFAULT_MEMPOOL_INFO["0x0000000071727De22E5E9d8BAf0edAc6f37da032"][args.chain_id]
+        if not args.disable_v6 and args.p2p_canonical_mempool_id_06 is None:
+            if args.chain_id not in DEFAULT_MEMPOOL_INFO["0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"]:
+                logging.warning(
+                    "p2p is disabled because p2p_canonical_mempool_id_06 "
+                    "not provided and no default value for the target chain."
+                )
+                args.disable_p2p = True
+            else:
+                args.p2p_canonical_mempool_id_06 = DEFAULT_MEMPOOL_INFO["0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"][args.chain_id]
+
     ret = InitData(
         args.rpc_url,
         args.rpc_port,
@@ -733,6 +774,8 @@ async def get_init_data(args: Namespace) -> InitData:
         args.reputation_whitelist,
         args.reputation_blacklist,
         args.eip7702
+        args.p2p_canonical_mempool_id_07,
+        args.p2p_canonical_mempool_id_06,
     )
 
     if args.verbose:
