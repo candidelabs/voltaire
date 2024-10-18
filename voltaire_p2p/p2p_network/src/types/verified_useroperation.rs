@@ -3,6 +3,7 @@ use serde_derive::{Deserialize, Serialize};
 use ssz_derive::{Decode, Encode};
 use ssz_types::VariableList;
 use tree_hash_derive::TreeHash;
+use crate::types::optional_hex_var_list;
 
 use ssz_types::typenum::U1000000;
 use ethereum_types::U256;
@@ -24,7 +25,7 @@ pub const MAX_CONTRACT_SIZE: usize = 24576;
     // arbitrary::Arbitrary,
 )]
 #[ssz(struct_behaviour = "container")]
-pub struct UserOperation {
+pub struct UserOperationV06 {
     /// The account making the operation.
     pub sender: Address,
     /// Anti-replay parameter (see "Semi-abstracted Nonce Support" ).
@@ -53,10 +54,7 @@ pub struct UserOperation {
     pub signature: VariableList<u8, MaxCallDataSize>,
 }
 
-/// A Validators signed aggregate proof to publish on the `beacon_aggregate_and_proof`
-/// gossipsub topic.
-///
-/// Spec v0.12.1
+
 #[derive(
     Debug,
     Clone,
@@ -67,9 +65,78 @@ pub struct UserOperation {
     Decode,
     TreeHash,
 )]
-pub struct VerifiedUserOperation {
+pub struct VerifiedUserOperationV06 {
     /// The user operations.
-    pub user_operation: UserOperation,
+    pub user_operation: UserOperationV06,
+    /// The entrypoint contract address.
+    pub entry_point_contract: Address,
+    //// The block where the useroperations are verified.
+    pub verified_at_block_hash: U256
+}
+
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    Encode,
+    Decode,
+    // TreeHash,
+    // arbitrary::Arbitrary,
+)]
+#[ssz(struct_behaviour = "container")]
+pub struct UserOperationV07 {
+    /// The account making the operation.
+    pub sender: Address,
+    /// Anti-replay parameter (see "Semi-abstracted Nonce Support" ).
+    pub nonce: U256,
+    /// Anti-replay parameter (see "Semi-abstracted Nonce Support" ).
+    pub factory: Option<Address>,
+    /// Anti-replay parameter (see "Semi-abstracted Nonce Support" ).
+    #[serde(with = "optional_hex_var_list")]
+    pub factoryData: Option<VariableList<u8, MaxCallDataSize>>,
+    /// The data to pass to the `sender` during the main execution call.
+    #[serde(with = "ssz_types::serde_utils::hex_var_list")]
+    pub callData: VariableList<u8, MaxCallDataSize>,
+    /// The amount of gas to allocate the main execution call.
+    pub callGasLimit: U256,
+    /// The amount of gas to allocate for the verification step.
+    pub verificationGasLimit: U256,
+    /// The amount of gas to pay for to compensate the bundler for pre-verification execution, calldata and any gas overhead that can't be tracked on-chain.
+    pub preVerificationGas: U256,
+    /// Maximum fee per gas.
+    pub maxFeePerGas: U256,
+    ///  Maximum priority fee per gas.
+    pub maxPriorityFeePerGas: U256,
+    /// Anti-replay parameter (see "Semi-abstracted Nonce Support" ).
+    pub paymaster: Option<Address>,
+    /// Anti-replay parameter (see "Semi-abstracted Nonce Support" ).
+    pub paymasterVerificationGasLimit: Option<U256>,
+    /// Anti-replay parameter (see "Semi-abstracted Nonce Support" ).
+    pub paymasterPostOpGasLimit: Option<U256>,
+    /// Address of paymaster sponsoring the transaction, followed by extra data to send to the paymaster (empty for self-sponsored transaction).
+    #[serde(with = "optional_hex_var_list")]
+    pub paymasterData: Option<VariableList<u8, MaxCallDataSize>>,
+    /// Data passed into the account along with the nonce during the verification step.
+    #[serde(with = "ssz_types::serde_utils::hex_var_list")]
+    pub signature: VariableList<u8, MaxCallDataSize>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    Encode,
+    Decode,
+    // TreeHash,
+)]
+pub struct VerifiedUserOperationV07 {
+    /// The user operations.
+    pub user_operation: UserOperationV07,
     /// The entrypoint contract address.
     pub entry_point_contract: Address,
     //// The block where the useroperations are verified.

@@ -62,7 +62,8 @@ impl Encoder<RPCCodedResponse> for SSZSnappyInboundCodec {
             RPCCodedResponse::Success(resp) => match &resp {
                 RPCResponse::Status(res) => res.as_ssz_bytes(),
                 RPCResponse::PooledUserOpHashes(res) => res.as_ssz_bytes(),
-                RPCResponse::PooledUserOpsByHash(res) => res.as_ssz_bytes(),
+                RPCResponse::PooledUserOpsByHashV07(res) => res.as_ssz_bytes(),
+                RPCResponse::PooledUserOpsByHashV06(res) => res.as_ssz_bytes(),
                 RPCResponse::Pong(res) => res.data.as_ssz_bytes(),
                 RPCResponse::MetaData(res) =>
                 // Encode the correct version of the MetaData response based on the negotiated version.
@@ -400,7 +401,10 @@ fn handle_rpc_request(
         SupportedProtocol::PooledUserOpHashesV1 => Ok(Some(InboundRequest::PooledUserOpHashes(
             PooledUserOpHashesRequest::from_ssz_bytes(decoded_buffer)?,
         ))),
-        SupportedProtocol::PooledUserOpsByHashV1 => Ok(Some(InboundRequest::PooledUserOpsByHash(
+        SupportedProtocol::PooledUserOpsByHashV07 => Ok(Some(InboundRequest::PooledUserOpsByHash(
+            PooledUserOpsByHashRequest::from_ssz_bytes(decoded_buffer)?,
+        ))),
+        SupportedProtocol::PooledUserOpsByHashV06 => Ok(Some(InboundRequest::PooledUserOpsByHash(
             PooledUserOpsByHashRequest::from_ssz_bytes(decoded_buffer)?,
         ))),
         SupportedProtocol::PingV1 => Ok(Some(InboundRequest::Ping(Ping {
@@ -441,8 +445,11 @@ fn handle_rpc_response(
         SupportedProtocol::PooledUserOpHashesV1 => Ok(Some(RPCResponse::PooledUserOpHashes(
             PooledUserOpHashes::from_ssz_bytes(decoded_buffer)?,
         ))),
-        SupportedProtocol::PooledUserOpsByHashV1 => Ok(Some(RPCResponse::PooledUserOpsByHash(
-            PooledUserOpsByHash::from_ssz_bytes(decoded_buffer)?,
+        SupportedProtocol::PooledUserOpsByHashV07 => Ok(Some(RPCResponse::PooledUserOpsByHashV07(
+            PooledUserOpsByHashV07::from_ssz_bytes(decoded_buffer)?,
+        ))),
+        SupportedProtocol::PooledUserOpsByHashV06 => Ok(Some(RPCResponse::PooledUserOpsByHashV06(
+            PooledUserOpsByHashV06::from_ssz_bytes(decoded_buffer)?,
         ))),
     }
 }

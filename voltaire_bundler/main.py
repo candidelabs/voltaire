@@ -9,6 +9,7 @@ from signal import SIGINT, SIGTERM
 import uvloop
 
 from voltaire_bundler.execution_endpoint import ExecutionEndpoint
+from voltaire_bundler.mempool.mempool_info import DEFAULT_MEMPOOL_INFO
 from voltaire_bundler.metrics.metrics import run_metrics_server
 from voltaire_bundler.p2p_boot import p2p_boot
 from voltaire_bundler.rpc.health import periodic_health_check_cron_job
@@ -27,15 +28,13 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
     if os.path.exists("p2p_endpoint.ipc"):
         os.remove("p2p_endpoint.ipc")
 
-    # this release doesn't support p2p
-    init_data.disable_p2p = True
-    if False and not init_data.disable_p2p:
+    if not init_data.disable_p2p:
         p2p_process = p2p_boot(
             init_data.p2p_enr_tcp_port,
             init_data.p2p_enr_udp_port,
             init_data.p2p_target_peers_number,
             init_data.p2p_enr_address,
-            [],
+            [[init_data.p2p_canonical_mempool_id_07, init_data.p2p_canonical_mempool_id_06]],
             init_data.p2p_boot_nodes_enr,
             init_data.p2p_upnp_enabled,
             init_data.p2p_metrics_enabled,

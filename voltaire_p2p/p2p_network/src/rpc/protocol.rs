@@ -53,9 +53,13 @@ pub enum Protocol {
     #[strum(serialize = "pooled_user_op_hashes")]
     PooledUserOpHashes,
 
-    /// The `PooledUserOpsByHash` protocol name.
-    #[strum(serialize = "pooled_user_ops_by_hash")]
-    PooledUserOpsByHash,
+    /// The `PooledUserOpsByHashV07` protocol name.
+    #[strum(serialize = "pooled_user_ops_by_hashV07")]
+    PooledUserOpsByHashV07,
+
+    /// The `PooledUserOpsByHashV06` protocol name.
+    #[strum(serialize = "pooled_user_ops_by_hashV06")]
+    PooledUserOpsByHashV06,
 }
 
 /// RPC Encondings supported.
@@ -72,7 +76,8 @@ pub enum SupportedProtocol {
     PingV1,
     MetaDataV1,
     PooledUserOpHashesV1,
-    PooledUserOpsByHashV1,
+    PooledUserOpsByHashV07,
+    PooledUserOpsByHashV06,
 }
 
 impl SupportedProtocol {
@@ -83,7 +88,8 @@ impl SupportedProtocol {
             SupportedProtocol::PingV1 => "1",
             SupportedProtocol::MetaDataV1 => "1",
             SupportedProtocol::PooledUserOpHashesV1 => "1",
-            SupportedProtocol::PooledUserOpsByHashV1 => "1",
+            SupportedProtocol::PooledUserOpsByHashV07 => "1",
+            SupportedProtocol::PooledUserOpsByHashV06 => "1",
         }
     }
 
@@ -94,7 +100,8 @@ impl SupportedProtocol {
             SupportedProtocol::PingV1 => Protocol::Ping,
             SupportedProtocol::MetaDataV1 => Protocol::MetaData,
             SupportedProtocol::PooledUserOpHashesV1 => Protocol::PooledUserOpHashes,
-            SupportedProtocol::PooledUserOpsByHashV1 => Protocol::PooledUserOpsByHash,
+            SupportedProtocol::PooledUserOpsByHashV07 => Protocol::PooledUserOpsByHashV07,
+            SupportedProtocol::PooledUserOpsByHashV06 => Protocol::PooledUserOpsByHashV06,
         }
     }
 
@@ -105,7 +112,8 @@ impl SupportedProtocol {
             ProtocolId::new(Self::PingV1, Encoding::SSZSnappy),
             ProtocolId::new(Self::MetaDataV1, Encoding::SSZSnappy),
             ProtocolId::new(Self::PooledUserOpHashesV1, Encoding::SSZSnappy),
-            ProtocolId::new(Self::PooledUserOpsByHashV1, Encoding::SSZSnappy),
+            ProtocolId::new(Self::PooledUserOpsByHashV07, Encoding::SSZSnappy),
+            ProtocolId::new(Self::PooledUserOpsByHashV06, Encoding::SSZSnappy),
         ]
     }
 }
@@ -204,7 +212,11 @@ impl ProtocolId {
                 0,
                 10485761048576,
             ),
-            Protocol::PooledUserOpsByHash =>  RpcLimits::new(
+            Protocol::PooledUserOpsByHashV07 =>  RpcLimits::new(
+                0,
+                10485761048576,
+            ),
+            Protocol::PooledUserOpsByHashV06 =>  RpcLimits::new(
                 0,
                 10485761048576,
             ), // Metadata requests are empty
@@ -231,7 +243,11 @@ impl ProtocolId {
                 0,
                 1048576,
             ),
-            Protocol::PooledUserOpsByHash => RpcLimits::new(
+            Protocol::PooledUserOpsByHashV07 => RpcLimits::new(
+                0,
+                1048576,
+            ),
+            Protocol::PooledUserOpsByHashV06 => RpcLimits::new(
                 0,
                 1048576,
             ),
@@ -243,7 +259,8 @@ impl ProtocolId {
     pub fn has_context_bytes(&self) -> bool {
         match self.versioned_protocol {
             SupportedProtocol::PooledUserOpHashesV1
-            | SupportedProtocol::PooledUserOpsByHashV1
+            | SupportedProtocol::PooledUserOpsByHashV07
+            | SupportedProtocol::PooledUserOpsByHashV06
             | SupportedProtocol::StatusV1
             | SupportedProtocol::PingV1
             | SupportedProtocol::MetaDataV1
@@ -368,7 +385,8 @@ impl InboundRequest {
             InboundRequest::Ping(_) => SupportedProtocol::PingV1,
             InboundRequest::MetaData(_) => SupportedProtocol::MetaDataV1,
             InboundRequest::PooledUserOpHashes(_) => SupportedProtocol::PooledUserOpHashesV1,
-            InboundRequest::PooledUserOpsByHash(_) => SupportedProtocol::PooledUserOpsByHashV1,
+            InboundRequest::PooledUserOpsByHash(_) => SupportedProtocol::PooledUserOpsByHashV07,
+            InboundRequest::PooledUserOpsByHash(_) => SupportedProtocol::PooledUserOpsByHashV06,
         }
     }
 

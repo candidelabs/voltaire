@@ -67,7 +67,11 @@ impl OutboundRequest {
                 Encoding::SSZSnappy,
             )],
             OutboundRequest::PooledUserOpsByHash(_) => vec![ProtocolId::new(
-                SupportedProtocol::PooledUserOpsByHashV1,
+                SupportedProtocol::PooledUserOpsByHashV07,
+                Encoding::SSZSnappy,
+            )],
+            OutboundRequest::PooledUserOpsByHash(_) => vec![ProtocolId::new(
+                SupportedProtocol::PooledUserOpsByHashV06,
                 Encoding::SSZSnappy,
             )],
             OutboundRequest::Ping(_) => vec![ProtocolId::new(
@@ -100,7 +104,8 @@ impl OutboundRequest {
             OutboundRequest::Status(_) => SupportedProtocol::StatusV1,
             OutboundRequest::Goodbye(_) => SupportedProtocol::GoodbyeV1,
             OutboundRequest::PooledUserOpHashes(_) => SupportedProtocol::PooledUserOpHashesV1,
-            OutboundRequest::PooledUserOpsByHash(_) => SupportedProtocol::PooledUserOpsByHashV1,
+            OutboundRequest::PooledUserOpsByHash(_) => SupportedProtocol::PooledUserOpsByHashV07,
+            OutboundRequest::PooledUserOpsByHash(_) => SupportedProtocol::PooledUserOpsByHashV06,
             OutboundRequest::Ping(_) => SupportedProtocol::PingV1,
             OutboundRequest::MetaData(req) => SupportedProtocol::MetaDataV1,
         }

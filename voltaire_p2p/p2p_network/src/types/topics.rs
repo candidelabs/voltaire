@@ -11,8 +11,9 @@ pub const TOPIC_PREFIX: &str = "account_abstraction";
 pub const SSZ_SNAPPY_ENCODING_POSTFIX: &str = "ssz_snappy";
 pub const USER_OPS_WITH_ENTRY_POINT: &str = "user_operations";
 
-pub const BASE_CORE_TOPICS: [GossipKind; 1] = [
-    GossipKind::VerifiedUserOperation,
+pub const BASE_CORE_TOPICS: [GossipKind; 2] = [
+    GossipKind::VerifiedUserOperationV07,
+    GossipKind::VerifiedUserOperationV06,
 ];
 
 /// A gossipsub topic which encapsulates the type of messages that should be sent and received over
@@ -33,7 +34,8 @@ pub struct GossipTopic {
 #[strum(serialize_all = "snake_case")]
 pub enum GossipKind {
     /// Topic for publishing UserOperations.
-    VerifiedUserOperation,
+    VerifiedUserOperationV07,
+    VerifiedUserOperationV06,
 }
 
 impl std::fmt::Display for GossipKind {
@@ -86,7 +88,7 @@ impl GossipTopic {
                 _ => return Err(format!("Unknown encoding: {}", topic)),
             };
             let kind = match topic_parts[3] {
-                USER_OPS_WITH_ENTRY_POINT => GossipKind::VerifiedUserOperation,
+                USER_OPS_WITH_ENTRY_POINT => GossipKind::VerifiedUserOperationV07,
                 &_ => todo!()
             };
 
@@ -100,12 +102,12 @@ impl GossipTopic {
         Err(format!("Unknown topic: {}", topic))
     }
 
-    pub fn subnet_id(&self) -> Option<Subnet> {
-        match self.kind() {
-            GossipKind::VerifiedUserOperation => Some(Subnet::Mempool(self.mempool_id.clone())),
-            _ => None,
-        }
-    }
+    // pub fn subnet_id(&self) -> Option<Subnet> {
+    //     match self.kind() {
+    //         GossipKind::VerifiedUserOperation => Some(Subnet::Mempool(self.mempool_id.clone())),
+    //         _ => None,
+    //     }
+    // }
 }
 
 impl From<GossipTopic> for Topic {
@@ -128,7 +130,8 @@ impl std::fmt::Display for GossipTopic {
         };
 
         let kind = match self.kind {
-            GossipKind::VerifiedUserOperation => USER_OPS_WITH_ENTRY_POINT,//.into(),
+            GossipKind::VerifiedUserOperationV07 => USER_OPS_WITH_ENTRY_POINT,
+            GossipKind::VerifiedUserOperationV06 => USER_OPS_WITH_ENTRY_POINT,
         };
         write!(
             f,
@@ -141,17 +144,17 @@ impl std::fmt::Display for GossipTopic {
     }
 }
 
-impl From<Subnet> for GossipKind {
-    fn from(subnet_id: Subnet) -> Self {
-        match subnet_id {
-            Subnet::Mempool(s) => GossipKind::VerifiedUserOperation,
-        }
-    }
-}
+// impl From<Subnet> for GossipKind {
+//     fn from(subnet_id: Subnet) -> Self {
+//         match subnet_id {
+//             Subnet::Mempool(s) => GossipKind::VerifiedUserOperation,
+//         }
+//     }
+// }
 
-// helper functions
+// // helper functions
 
-/// Get subnet id from an attestation subnet topic hash.
-pub fn subnet_from_topic_hash(topic_hash: &TopicHash) -> Option<Subnet> {
-    GossipTopic::decode(topic_hash.as_str()).ok()?.subnet_id()
-}
+// /// Get subnet id from an attestation subnet topic hash.
+// pub fn subnet_from_topic_hash(topic_hash: &TopicHash) -> Option<Subnet> {
+//     GossipTopic::decode(topic_hash.as_str()).ok()?.subnet_id()
+// }

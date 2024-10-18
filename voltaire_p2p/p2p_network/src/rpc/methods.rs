@@ -1,6 +1,7 @@
 //! Available RPC methods types and ids.
 
-use crate::types::UserOperation;
+use crate::types::UserOperationV07;
+use crate::types::UserOperationV06;
 
 use ethereum_types::H256;
 use regex::bytes::Regex;
@@ -228,9 +229,23 @@ impl PooledUserOpHashesRequest {
 /// The STATUS request/response handshake message.
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[ssz(struct_behaviour = "transparent")]
-pub struct PooledUserOpsByHash {
+pub struct PooledUserOpsByHashV07 {
     /// The fork version of the chain we are broadcasting.
-    pub list: VariableList<UserOperation, MaxOpsPerRequest>,
+    pub list: VariableList<UserOperationV07, MaxOpsPerRequest>,
+}
+
+/// The STATUS request/response handshake message.
+#[derive(Encode, Decode, Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[ssz(struct_behaviour = "transparent")]
+pub struct PooledUserOpsByHashV06 {
+    /// The fork version of the chain we are broadcasting.
+    pub list: VariableList<UserOperationV06, MaxOpsPerRequest>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum PooledUserOpsByHash {
+    PooledUserOpsByHashV07(PooledUserOpsByHashV07),
+    PooledUserOpsByHashV06(PooledUserOpsByHashV06)
 }
 
 /// Request a number of beacon block bodies from a peer.
@@ -258,7 +273,10 @@ pub enum RPCResponse {
     PooledUserOpHashes(PooledUserOpHashes),
 
     /// A PooledUserOpsByHash response to a PooledUserOpsByHash request.
-    PooledUserOpsByHash(PooledUserOpsByHash),
+    PooledUserOpsByHashV07(PooledUserOpsByHashV07),
+
+    /// A PooledUserOpsByHash response to a PooledUserOpsByHash request.
+     PooledUserOpsByHashV06(PooledUserOpsByHashV06),
 
     /// A PONG response to a PING request.
     Pong(Ping),
@@ -335,7 +353,8 @@ impl RPCCodedResponse {
             RPCCodedResponse::Success(resp) => match resp {
                 RPCResponse::Status(_) => false,
                 RPCResponse::PooledUserOpHashes(_) => false,
-                RPCResponse::PooledUserOpsByHash(_) => false,
+                RPCResponse::PooledUserOpsByHashV07(_) => false,
+                RPCResponse::PooledUserOpsByHashV06(_) => false,
                 RPCResponse::Pong(_) => false,
                 RPCResponse::MetaData(_) => false,
             },
@@ -369,7 +388,8 @@ impl RPCResponse {
         match self {
             RPCResponse::Status(_) => Protocol::Status,
             RPCResponse::PooledUserOpHashes(_) => Protocol::PooledUserOpHashes,
-            RPCResponse::PooledUserOpsByHash(_) => Protocol::PooledUserOpsByHash,
+            RPCResponse::PooledUserOpsByHashV07(_) => Protocol::PooledUserOpsByHashV07,
+            RPCResponse::PooledUserOpsByHashV06(_) => Protocol::PooledUserOpsByHashV06,
             RPCResponse::Pong(_) => Protocol::Ping,
             RPCResponse::MetaData(_) => Protocol::MetaData,
         }
@@ -408,8 +428,11 @@ impl std::fmt::Display for RPCResponse {
             RPCResponse::PooledUserOpHashes(pooled_user_op_hashes) => {
                 write!(f, "PooledUserOpHashes: next_cursor: {}, Hashes: {:?}", std::str::from_utf8(&pooled_user_op_hashes.next_cursor.to_vec()).unwrap(), pooled_user_op_hashes.hashes)
             }
-            RPCResponse::PooledUserOpsByHash(pooled_user_ops_by_hash) => {
-                write!(f, "PooledUserOpsByHash: List: {:?}", pooled_user_ops_by_hash.list)
+            RPCResponse::PooledUserOpsByHashV07(pooled_user_ops_by_hash) => {
+                write!(f, "PooledUserOpsByHashV07: List: {:?}", pooled_user_ops_by_hash.list)
+            }
+            RPCResponse::PooledUserOpsByHashV06(pooled_user_ops_by_hash) => {
+                write!(f, "PooledUserOpsByHashV06: List: {:?}", pooled_user_ops_by_hash.list)
             }
             RPCResponse::Pong(ping) => write!(f, "Pong: {}", ping.data),
             RPCResponse::MetaData(metadata) => write!(f, "Metadata: {}", metadata.seq_number),

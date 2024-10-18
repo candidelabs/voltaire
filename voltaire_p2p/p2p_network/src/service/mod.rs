@@ -14,8 +14,7 @@ use crate::{rpc::*, NetworkConfig as Config};
 use crate::service::behaviour::BehaviourEvent;
 pub use crate::service::behaviour::Gossipsub;
 use crate::types::{
-    // fork_core_topics, 
-    subnet_from_topic_hash, GossipEncoding, GossipKind, GossipTopic,
+    GossipEncoding, GossipKind, GossipTopic,
     SnappyTransform, Subnet, SubnetDiscovery,
 };
 use crate::EnrExt;
@@ -521,8 +520,10 @@ impl<AppReqId: ReqId> Network<AppReqId> {
         let mut subscribed_topics: Vec<GossipKind> = vec![];
 
         for topic_kind in &config.topics {
-            if self.subscribe_kind(GossipKind::VerifiedUserOperation, topic_kind.to_string()) {
-                subscribed_topics.push(GossipKind::VerifiedUserOperation);
+            if self.subscribe_kind(GossipKind::VerifiedUserOperationV07, topic_kind.to_string()) {
+                subscribed_topics.push(GossipKind::VerifiedUserOperationV07);
+            }else if self.subscribe_kind(GossipKind::VerifiedUserOperationV06, topic_kind.to_string()) {
+                subscribed_topics.push(GossipKind::VerifiedUserOperationV06);
             } else {
                 warn!(self.log, "Could not subscribe to topic"; "topic" => %topic_kind);
             }
@@ -1084,7 +1085,13 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                             response,
                         })
                     },
-                    Response::PooledUserOpsByHash(_) => {
+                    Response::PooledUserOpsByHashV07(_) => {
+                        Some(NetworkEvent::ResponseReceivedFromInternal {
+                            peer_id,
+                            response,
+                        })
+                    },
+                    Response::PooledUserOpsByHashV06(_) => {
                         Some(NetworkEvent::ResponseReceivedFromInternal {
                             peer_id,
                             response,
@@ -1233,12 +1240,12 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                 }
             }
             gossipsub::Event::Unsubscribed { peer_id, topic } => {
-                if let Some(subnet_id) = subnet_from_topic_hash(&topic) {
-                    // self.network_globals
-                    //     .peers
-                    //     .write()
-                    //     .remove_subscription(&peer_id, &subnet_id);
-                }
+                // if let Some(subnet_id) = subnet_from_topic_hash(&topic) {
+                //     self.network_globals
+                //         .peers
+                //         .write()
+                //         .remove_subscription(&peer_id, &subnet_id);
+                // }
             }
             gossipsub::Event::GossipsubNotSupported { peer_id } => {
                 debug!(self.log, "Peer does not support gossipsub"; "peer_id" => %peer_id);
@@ -1383,8 +1390,11 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                     RPCResponse::PooledUserOpHashes(pooled_user_op_hashes) => {
                         self.build_response(id, peer_id, Response::PooledUserOpHashes(Some(pooled_user_op_hashes)))
                     }
-                    RPCResponse::PooledUserOpsByHash(resp) => {
-                        self.build_response(id, peer_id, Response::PooledUserOpsByHash(Some(resp)))
+                    RPCResponse::PooledUserOpsByHashV07(resp) => {
+                        self.build_response(id, peer_id, Response::PooledUserOpsByHashV07(Some(resp)))
+                    }
+                    RPCResponse::PooledUserOpsByHashV06(resp) => {
+                        self.build_response(id, peer_id, Response::PooledUserOpsByHashV06(Some(resp)))
                     }
                 }
             }

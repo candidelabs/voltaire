@@ -404,8 +404,9 @@ where
                 RPCReceived::EndOfStream(_, end) => (
                     "end_of_stream",
                     match end {
-                        ResponseTermination::PooledUserOpHashes => Protocol::PooledUserOpHashes,//Protocol::BlocksByRange,
-                        ResponseTermination::PooledUserOpsByHash => Protocol::PooledUserOpsByHash,//Protocol::BlocksByRoot,
+                        ResponseTermination::PooledUserOpHashes => Protocol::PooledUserOpHashes,
+                        ResponseTermination::PooledUserOpsByHash => Protocol::PooledUserOpsByHashV07,
+                        ResponseTermination::PooledUserOpsByHash => Protocol::PooledUserOpsByHashV06,
                     },
                 ),
             },

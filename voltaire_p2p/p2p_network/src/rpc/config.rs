@@ -159,7 +159,8 @@ impl FromStr for RateLimiterConfig {
                 Protocol::Status => status_quota = status_quota.or(quota),
                 Protocol::Goodbye => goodbye_quota = goodbye_quota.or(quota),
                 Protocol::PooledUserOpHashes => pooled_user_op_hashes = pooled_user_op_hashes.or(quota),
-                Protocol::PooledUserOpsByHash => pooled_user_ops_by_hash = pooled_user_ops_by_hash.or(quota),
+                Protocol::PooledUserOpsByHashV07 => pooled_user_ops_by_hash = pooled_user_ops_by_hash.or(quota),
+                Protocol::PooledUserOpsByHashV06 => pooled_user_ops_by_hash = pooled_user_ops_by_hash.or(quota),
                 Protocol::Ping => ping_quota = ping_quota.or(quota),
                 Protocol::MetaData => meta_data_quota = meta_data_quota.or(quota),
             }

@@ -4,7 +4,7 @@ mod pubsub;
 mod subnet;
 mod topics;
 mod verified_useroperation;
-
+mod optional_hex_var_list;
 
 #[macro_use]
 mod macros;
@@ -14,9 +14,8 @@ pub type Enr = discv5::enr::Enr<discv5::enr::CombinedKey>;
 pub use globals::NetworkGlobals;
 pub use pubsub::{PubsubMessage, SnappyTransform};
 pub use subnet::{Subnet, SubnetDiscovery};
-// pub use sync_state::{BackFillState, SyncState};
 pub use topics::{
-    subnet_from_topic_hash, GossipEncoding, GossipKind,
+    GossipEncoding, GossipKind,
     GossipTopic, 
 };
 pub use verified_useroperation::*;

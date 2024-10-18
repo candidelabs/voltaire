@@ -1,7 +1,7 @@
-use crate::main_bundler::{listen_to_main_bundler,GossibMessageToSendToMainBundler, BundlerGossibRequest, MessageTypeToBundler, MessageTypeFromBundler, broadcast_and_listen_for_response_from_main_bundler, broadcast_to_main_bundler, PooledUserOpHashesAndPeerId};
+use crate::main_bundler::{listen_to_main_bundler,GossibMessageToSendToMainBundlerV07, GossibMessageToSendToMainBundlerV06, BundlerGossibRequest, MessageTypeToBundler, MessageTypeFromBundler, broadcast_and_listen_for_response_from_main_bundler, broadcast_to_main_bundler, PooledUserOpHashesAndPeerId};
 use crate::status::status_message;
 use ethereum_types::H256;
-use p2p_voltaire_network::rpc::methods::{PooledUserOpHashesRequest, PooledUserOpsByHashRequest, PooledUserOpHashes, PooledUserOpsByHash};
+use p2p_voltaire_network::rpc::methods::{PooledUserOpHashes, PooledUserOpHashesRequest, PooledUserOpsByHash, PooledUserOpsByHashRequest, PooledUserOpsByHashV06, PooledUserOpsByHashV07};
 use p2p_voltaire_network::rpc::StatusMessage;
 use p2p_voltaire_network::{PeerId, NetworkGlobals, MessageId, NetworkEvent};
 use crate::nat::EstablishedUPnPMappings;
@@ -109,25 +109,30 @@ pub enum NetworkMessage  {
         peer_id: String,
         pooled_user_ops_by_hash_request: PooledUserOpsByHashRequest,
     },
-    PooledUserOpHashesRequestS{
+    PooledUserOpHashesRequest{
         peer_id: PeerId,
         request_id: PeerRequestId,
         pooled_user_op_hashes_request: PooledUserOpHashesRequest,
     },
-    PooledUserOpsByHashRequestS{
+    PooledUserOpsByHashRequest{
         peer_id: PeerId,
         request_id: PeerRequestId,
         pooled_user_ops_by_hash_request: PooledUserOpsByHashRequest,
     },
-    PooledUserOpHashesResponseS{
+    PooledUserOpHashesResponse{
         peer_id: PeerId,
         request_id: RequestId,
         pooled_user_op_hashes: PooledUserOpHashes,
     },
-    PooledUserOpsByHashResponseS{
+    PooledUserOpsByHashResponseV07{
         peer_id: PeerId,
         request_id: RequestId,
-        pooled_user_ops_by_hash: PooledUserOpsByHash,
+        pooled_user_ops_by_hash: PooledUserOpsByHashV07,
+    },
+    PooledUserOpsByHashResponseV06{
+        peer_id: PeerId,
+        request_id: RequestId,
+        pooled_user_ops_by_hash: PooledUserOpsByHashV06,
     },
     Status{
         peer_id: PeerId,
@@ -282,15 +287,25 @@ impl NetworkService {
                         match request{
                             Ok(result)=>{
                                 match result {
-                                    MessageTypeFromBundler::GossibMessageFromBundler(gossib_message) => {
-                                        let pubsub_message = PubsubMessage::VerifiedUserOperation(
+                                    MessageTypeFromBundler::GossibMessageFromBundlerV07(gossib_message) => {
+                                        let pubsub_message = PubsubMessage::VerifiedUserOperationV07(
                                             Box::new(gossib_message.verified_useroperation)
                                         );
                                 
                                         let _ = network_send.send(NetworkMessage::Publish { 
                                             messages: vec![pubsub_message],
                                             mempool_ids: gossib_message.topics,
-                                        });//&fixed[..]
+                                        });
+                                    },
+                                    MessageTypeFromBundler::GossibMessageFromBundlerV06(gossib_message) => {
+                                        let pubsub_message = PubsubMessage::VerifiedUserOperationV06(
+                                            Box::new(gossib_message.verified_useroperation)
+                                        );
+                                
+                                        let _ = network_send.send(NetworkMessage::Publish { 
+                                            messages: vec![pubsub_message],
+                                            mempool_ids: gossib_message.topics,
+                                        });
                                     },
                                     MessageTypeFromBundler::PooledUserOpHashesRequestFromBundler(pooled_user_op_hashes_request_message)=>{
 
@@ -428,15 +443,28 @@ impl NetworkService {
                 topic
             } => {
                 match message.clone() {
-                    PubsubMessage::VerifiedUserOperation(verified_useroperation) =>{
-                        let gossib_message = GossibMessageToSendToMainBundler {
+                    PubsubMessage::VerifiedUserOperationV07(verified_useroperation) =>{
+                        let gossib_message = GossibMessageToSendToMainBundlerV07 {
                             peer_id:source.to_string(),
                             topic: topic.to_string(),
                             verified_useroperation:*verified_useroperation.clone()
                         };
                         let message_to_send = BundlerGossibRequest {
                             request_type:"p2p_received_gossib".to_string(), 
-                            request_arguments:MessageTypeToBundler::GossibMessageToBundler(gossib_message)
+                            request_arguments:MessageTypeToBundler::GossibMessageToBundlerV07(gossib_message)
+                        };
+
+                        broadcast_to_main_bundler(message_to_send, &self.log).await;
+                    },
+                    PubsubMessage::VerifiedUserOperationV06(verified_useroperation) =>{
+                        let gossib_message = GossibMessageToSendToMainBundlerV06 {
+                            peer_id:source.to_string(),
+                            topic: topic.to_string(),
+                            verified_useroperation:*verified_useroperation.clone()
+                        };
+                        let message_to_send = BundlerGossibRequest {
+                            request_type:"p2p_received_gossib".to_string(), 
+                            request_arguments:MessageTypeToBundler::GossibMessageToBundlerV06(gossib_message)
                         };
 
                         broadcast_to_main_bundler(message_to_send, &self.log).await;
@@ -598,7 +626,7 @@ impl NetworkService {
                 self.network.send_request(
                     RequestId::FromMainBundler(id), PeerId::from_str(&peer_id).unwrap(), Request::PooledUserOpsByHash(pooled_user_ops_by_hash_request));
             },
-            NetworkMessage::PooledUserOpHashesRequestS{
+            NetworkMessage::PooledUserOpHashesRequest{
                 peer_id,
                 request_id,
                 pooled_user_op_hashes_request
@@ -615,7 +643,7 @@ impl NetworkService {
                 debug!(self.log, "Sending PooledUserOpHashes Response"; "peer" => %peer_id);
                 self.libp2p.send_response(peer_id, request_id, Response::PooledUserOpHashes(Some(deserialized_result.unwrap())));
             },
-            NetworkMessage::PooledUserOpsByHashRequestS{
+            NetworkMessage::PooledUserOpsByHashRequest{
                 peer_id,
                 request_id,
                 pooled_user_ops_by_hash_request} => {
@@ -630,9 +658,17 @@ impl NetworkService {
                 let deserialized_result:Result<PooledUserOpsByHash,serde_pickle::Error> = serde_pickle::from_slice(&response.unwrap(), Default::default());
               
                 debug!(self.log, "Sending PooledUserOpsByHash Response"; "peer" => %peer_id);
-                self.libp2p.send_response(peer_id, request_id,  Response::PooledUserOpsByHash(Some(deserialized_result.unwrap())));
+                let deserialized_result_unwrap = deserialized_result.unwrap();
+                match deserialized_result_unwrap {
+                    PooledUserOpsByHash::PooledUserOpsByHashV07(pooled_userops_by_hash_v07)=>{
+                        self.libp2p.send_response(peer_id, request_id,  Response::PooledUserOpsByHashV07(Some(pooled_userops_by_hash_v07)));
+                    },
+                    PooledUserOpsByHash::PooledUserOpsByHashV06(pooled_userops_by_hash_v06)=>{
+                        self.libp2p.send_response(peer_id, request_id,  Response::PooledUserOpsByHashV06(Some(pooled_userops_by_hash_v06)));
+                    },
+                }
             },
-            NetworkMessage::PooledUserOpHashesResponseS { peer_id, request_id: _, pooled_user_op_hashes } => {
+            NetworkMessage::PooledUserOpHashesResponse { peer_id, request_id: _, pooled_user_op_hashes } => {
                 let pooled_user_op_hashes_message = PooledUserOpHashesAndPeerId{
                     peer_id:peer_id.to_string(),
                     pooled_user_op_hashes,
@@ -645,10 +681,18 @@ impl NetworkService {
                 broadcast_to_main_bundler(message_to_send, &self.log).await;
                 
             },
-            NetworkMessage::PooledUserOpsByHashResponseS { peer_id: _, request_id: _, pooled_user_ops_by_hash } => {
+            NetworkMessage::PooledUserOpsByHashResponseV07 { peer_id: _, request_id: _, pooled_user_ops_by_hash } => {
                 let message_to_send = BundlerGossibRequest {
                     request_type:"p2p_received_pooled_user_ops_by_hash_response".to_string(), 
-                    request_arguments:MessageTypeToBundler::PooledUserOpsByHashResponseToBundler(pooled_user_ops_by_hash)
+                    request_arguments:MessageTypeToBundler::PooledUserOpsByHashResponseToBundlerV07(pooled_user_ops_by_hash)
+                };
+        
+                broadcast_to_main_bundler(message_to_send, &self.log).await;
+            },
+            NetworkMessage::PooledUserOpsByHashResponseV06 { peer_id: _, request_id: _, pooled_user_ops_by_hash } => {
+                let message_to_send = BundlerGossibRequest {
+                    request_type:"p2p_received_pooled_user_ops_by_hash_response".to_string(), 
+                    request_arguments:MessageTypeToBundler::PooledUserOpsByHashResponseToBundlerV06(pooled_user_ops_by_hash)
                 };
         
                 broadcast_to_main_bundler(message_to_send, &self.log).await;
@@ -698,8 +742,15 @@ impl NetworkService {
                 )
               
             },
-            Response::PooledUserOpsByHash(pooled_user_ops_by_hash) => { 
-                self.on_pooled_user_ops_by_hash_response(
+            Response::PooledUserOpsByHashV07(pooled_user_ops_by_hash) => { 
+                self.on_pooled_user_ops_by_hash_responseV07(
+                    peer_id, 
+                    request_id,
+                    pooled_user_ops_by_hash.unwrap()
+                )
+            },
+            Response::PooledUserOpsByHashV06(pooled_user_ops_by_hash) => { 
+                self.on_pooled_user_ops_by_hash_responseV06(
                     peer_id, 
                     request_id,
                     pooled_user_ops_by_hash.unwrap()
@@ -757,7 +808,7 @@ impl NetworkService {
         debug!(self.log, "Received PooledUserOpHashes Request"; "peer_id" => %peer_id);
 
 
-        self.network.inform_network(NetworkMessage::PooledUserOpHashesRequestS {
+        self.network.inform_network(NetworkMessage::PooledUserOpHashesRequest {
             peer_id,
             request_id,
             pooled_user_op_hashes_request,
@@ -772,7 +823,7 @@ impl NetworkService {
     ) {
         debug!(self.log, "Received PooledUserOpHashes Response"; "peer_id" => %peer_id);
 
-        self.network.inform_network(NetworkMessage::PooledUserOpHashesResponseS {
+        self.network.inform_network(NetworkMessage::PooledUserOpHashesResponse {
             peer_id,
             request_id,
             pooled_user_op_hashes,
@@ -787,22 +838,37 @@ impl NetworkService {
     ) {
         debug!(self.log, "Received PooledUserOpsByHash Request"; "peer_id" => %peer_id);
 
-        self.network.inform_network(NetworkMessage::PooledUserOpsByHashRequestS {
+        self.network.inform_network(NetworkMessage::PooledUserOpsByHashRequest {
             peer_id,
             request_id,
             pooled_user_ops_by_hash_request,
         });
     }
 
-    pub fn on_pooled_user_ops_by_hash_response(
+    pub fn on_pooled_user_ops_by_hash_responseV07(
         &mut self,
         peer_id: PeerId,
         request_id: RequestId,
-        pooled_user_ops_by_hash: PooledUserOpsByHash,
+        pooled_user_ops_by_hash: PooledUserOpsByHashV07,
     ) {
         debug!(self.log, "Received PooledUserOpsByHash Response"; "peer_id" => %peer_id);
 
-        self.network.inform_network(NetworkMessage::PooledUserOpsByHashResponseS {
+        self.network.inform_network(NetworkMessage::PooledUserOpsByHashResponseV07 {
+            peer_id,
+            request_id,
+            pooled_user_ops_by_hash,
+        });
+    }
+
+    pub fn on_pooled_user_ops_by_hash_responseV06(
+        &mut self,
+        peer_id: PeerId,
+        request_id: RequestId,
+        pooled_user_ops_by_hash: PooledUserOpsByHashV06,
+    ) {
+        debug!(self.log, "Received PooledUserOpsByHash Response"; "peer_id" => %peer_id);
+
+        self.network.inform_network(NetworkMessage::PooledUserOpsByHashResponseV06 {
             peer_id,
             request_id,
             pooled_user_ops_by_hash,
