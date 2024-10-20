@@ -582,11 +582,12 @@ class ExecutionEndpoint(Endpoint):
         entrypoint_lowercase = verified_useroperation["entry_point_contract"]
         verified_at_block_hash = verified_useroperation["verified_at_block_hash"]
 
-        #if self.reputation_manager.get_status(peer_id) == ReputationStatus.BANNED:
-        #    logging.debug(f"Dropping gossib from banned peer : {peer_id}")
-
+        # full topic format /account_abstraction/mempool_id/Name/Encoding
+        # sepolia example
+        # /account_abstraction/Qmf7P3CuhzSbpJa8LqXPwRzfPqsvoQ6RG7aXvthYTzGxb2/user_operations/ssz_snappy
         try:
-            if topic == self.local_mempool_manager_v7.canonical_mempool_id:
+            mempool_id = topic.split('/')[2]
+            if mempool_id == self.local_mempool_manager_v7.canonical_mempool_id:
                 user_operation_obj = UserOperationV7(verified_useroperation[
                     "user_operation"])
                 local_mempool = self.local_mempool_manager_v7
