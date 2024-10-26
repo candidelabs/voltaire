@@ -185,7 +185,7 @@ class BundlerManager:
             * (self.max_fee_per_gas_percentage_multiplier / 100)
             * (self.gas_price_percentage_multiplier / 100)
         )
-        block_max_fee_per_gas = hex(block_max_fee_per_gas_dec_mod)
+        block_max_fee_per_gas_hex = hex(block_max_fee_per_gas_dec_mod)
 
         block_max_priority_fee_per_gas_hex = "0x"
         if not self.is_legacy_mode:
@@ -200,6 +200,10 @@ class BundlerManager:
             block_max_priority_fee_per_gas_hex = hex(
                     block_max_priority_fee_per_gas_dec_mod)
 
+            # max priority fee per gas can't be higher than max fee per gas
+            if block_max_priority_fee_per_gas_dec_mod > block_max_fee_per_gas_dec_mod:
+                block_max_priority_fee_per_gas_hex = block_max_fee_per_gas_hex
+
         txnDict = {
             "chainId": self.chain_id,
             "from": self.bundler_address,
@@ -212,13 +216,13 @@ class BundlerManager:
         if self.is_legacy_mode:
             txnDict.update(
                 {
-                    "gasPrice": block_max_fee_per_gas,
+                    "gasPrice": block_max_fee_per_gas_hex,
                 }
             )
         else:
             txnDict.update(
                 {
-                    "maxFeePerGas": block_max_fee_per_gas,
+                    "maxFeePerGas": block_max_fee_per_gas_hex,
                     "maxPriorityFeePerGas": block_max_priority_fee_per_gas_hex,
                 }
             )

@@ -335,6 +335,10 @@ class GasManagerV7(GasManager):
                        / 100)
                 )
 
+                # max priority fee per gas can't be higher than max fee per gas
+                if block_max_priority_fee_per_gas > block_max_fee_per_gas:
+                    block_max_priority_fee_per_gas = block_max_fee_per_gas
+
                 estimated_base_fee = max(
                     block_max_fee_per_gas - block_max_priority_fee_per_gas, 1
                 )
