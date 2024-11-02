@@ -1,6 +1,4 @@
-use crate::main_bundler::{listen_to_main_bundler,GossibMessageToSendToMainBundlerV07, GossibMessageToSendToMainBundlerV06, BundlerGossibRequest, MessageTypeToBundler, MessageTypeFromBundler, broadcast_and_listen_for_response_from_main_bundler, broadcast_to_main_bundler, PooledUserOpHashesAndPeerId};
-use crate::status::status_message;
-use ethereum_types::H256;
+use crate::main_bundler::{broadcast_and_listen_for_response_from_main_bundler, broadcast_to_main_bundler, listen_to_main_bundler, BundlerGossibRequest, GossibMessageToSendToMainBundlerV06, GossibMessageToSendToMainBundlerV07, MessageTypeFromBundler, MessageTypeToBundler, PooledUserOpHashesAndPeerId, StatusMessageAndPeerId};
 use p2p_voltaire_network::rpc::methods::{PooledUserOpHashes, PooledUserOpHashesRequest, PooledUserOpsByHash, PooledUserOpsByHashRequest, PooledUserOpsByHashV06, PooledUserOpsByHashV07};
 use p2p_voltaire_network::rpc::StatusMessage;
 use p2p_voltaire_network::{PeerId, NetworkGlobals, MessageId, NetworkEvent};
@@ -416,16 +414,32 @@ impl NetworkService {
                     debug!(self.log, "Dropping request of disconnected peer"; "peer_id" => %peer_id, "request" => ?request);
                     return;
                 }
+                let request_id = id;
                 match request {
                     Request::Status(status_message) => {
-                        self.on_status_request(peer_id, id, status_message)
+                        debug!(self.log, "Received Status Request"; "peer_id" => %peer_id, &status_message);
+                        self.network.inform_network(NetworkMessage::StatusRequest{
+                            peer_id,
+                            request_id,
+                        });
                     }
-                    Request::PooledUserOpHashes(pooled_user_op_hashes_request) => {
-                        self.on_pooled_user_op_hashes_request(peer_id, id, pooled_user_op_hashes_request)
-                       
+                    Request::PooledUserOpHashes(pooled_user_op_hashes_request) => {                        
+                        debug!(self.log, "Received PooledUserOpHashes Request"; "peer_id" => %peer_id);
+                
+                        self.network.inform_network(NetworkMessage::PooledUserOpHashesRequest {
+                            peer_id,
+                            request_id,
+                            pooled_user_op_hashes_request,
+                        })
                     },
-                    Request::PooledUserOpsByHash(pooled_user_ops_by_hash) => {
-                        self.on_pooled_user_ops_by_hash_request(peer_id, id, pooled_user_ops_by_hash)
+                    Request::PooledUserOpsByHash(pooled_user_ops_by_hash_request) => {
+                        debug!(self.log, "Received PooledUserOpsByHash Request"; "peer_id" => %peer_id);
+
+                        self.network.inform_network(NetworkMessage::PooledUserOpsByHashRequest {
+                            peer_id,
+                            request_id,
+                            pooled_user_ops_by_hash_request,
+                        });
                     },
                 }
             }
@@ -586,7 +600,7 @@ impl NetworkService {
                     self.log,
                     "Sending pubsub messages";
                     "count" => messages.len(),
-                    "topics" => ?topic_kinds
+                    "topics kind" => ?topic_kinds
                 );
                 self.libp2p.publish(messages, mempool_ids);
             }
@@ -763,44 +777,61 @@ impl NetworkService {
                     "block_hash" => status_message.block_hash.to_string(),
                     "block_number" => status_message.block_number,
                 );
+                // let status_message = status_message_op.unwrap();
+
+                self.network.inform_network(NetworkMessage::StatusResponse {
+                    peer_id,
+                    request_id,
+                    status_message,
+                });
             }
-            Response::PooledUserOpHashes(pooled_user_op_hashes) => { 
-                self.on_pooled_user_op_hashes_response(
-                    peer_id, 
-                    request_id, 
-                    pooled_user_op_hashes.unwrap()
-                )
-              
-            },
-            Response::PooledUserOpsByHashV07(pooled_user_ops_by_hash) => { 
-                self.on_pooled_user_ops_by_hash_responseV07(
-                    peer_id, 
+            Response::PooledUserOpHashes(pooled_user_op_hashes_op) => { 
+                debug!(self.log, "Received PooledUserOpHashes Response"; "peer_id" => %peer_id);
+                let pooled_user_op_hashes = pooled_user_op_hashes_op.unwrap();
+                self.network.inform_network(NetworkMessage::PooledUserOpHashesResponse {
+                    peer_id,
                     request_id,
-                    pooled_user_ops_by_hash.unwrap()
-                )
+                    pooled_user_op_hashes,
+                });
             },
-            Response::PooledUserOpsByHashV06(pooled_user_ops_by_hash) => { 
-                self.on_pooled_user_ops_by_hash_responseV06(
-                    peer_id, 
+            Response::PooledUserOpsByHashV07(pooled_user_ops_by_hash_op) => { 
+                debug!(self.log, "Received PooledUserOpsByHash Response"; "peer_id" => %peer_id);
+        
+                let pooled_user_ops_by_hash = pooled_user_ops_by_hash_op.unwrap();
+                self.network.inform_network(NetworkMessage::PooledUserOpsByHashResponseV07 {
+                    peer_id,
                     request_id,
-                    pooled_user_ops_by_hash.unwrap()
-                )
+                    pooled_user_ops_by_hash,
+                });
+            },
+            Response::PooledUserOpsByHashV06(pooled_user_ops_by_hash_op) => { 
+                debug!(self.log, "Received PooledUserOpsByHash Response"; "peer_id" => %peer_id);
+                
+                let pooled_user_ops_by_hash = pooled_user_ops_by_hash_op.unwrap();
+                self.network.inform_network(NetworkMessage::PooledUserOpsByHashResponseV06 {
+                    peer_id,
+                    request_id,
+                    pooled_user_ops_by_hash,
+                    });
             },
         }
     }
 
 
-    fn send_status(&mut self, peer_id: PeerId) {
-        // let topics = self.network_globals.local_metadata.read().clone();
-        let status_message = status_message(0, H256::default(),0);
+    async fn send_status(&mut self, peer_id: PeerId) {
+        // let status_message = status_message(0, H256::default(),0);
 
-        // let supported_mempools_string:Vec<String> = status_message.supported_mempools.to_vec().iter().map(
-        //     |mempool| std::str::from_utf8(&mempool.to_vec()).unwrap().to_string()
-        // ).collect();
-        // let supported_mempools_string_joined = supported_mempools_string.join(",");
-        // debug!(self.log, "Sending Status Request"; "peer" => %peer_id, 
-        //     "supported mempools" => &supported_mempools_string_joined
-        // );
+        let message_to_send = BundlerGossibRequest {
+            request_type:"p2p_status_received".to_string(), 
+            request_arguments:MessageTypeToBundler::StatusToBundler()
+        };
+        
+        let response = broadcast_and_listen_for_response_from_main_bundler(message_to_send, &self.log).await;
+
+        let deserialized_result:Result<StatusMessage,serde_pickle::Error> = serde_pickle::from_slice(&response.unwrap(), Default::default());
+        let status_message = deserialized_result.unwrap();
+
+        debug!(self.log, "Sending Status Request"; "peer" => %peer_id);
 
         self.network
             .send_processor_request(peer_id, Request::Status(status_message));
@@ -810,99 +841,6 @@ impl NetworkService {
     /// this function notifies the sync manager of the error.
     pub fn on_rpc_error(&mut self, peer_id: PeerId, _request_id: RequestId) {
         error!(self.log, "An error occurred during an RPC request"; "peer" => peer_id.to_string());
-    }
-
-    /// Handle a `Status` request.
-    ///
-    /// Processes the `Status` from the remote peer and sends back our `Status`.
-    pub fn on_status_request(
-        &mut self,
-        peer_id: PeerId,
-        request_id: PeerRequestId,
-        status: StatusMessage,
-    ) {
-        debug!(self.log, "Received Status Request"; "peer_id" => %peer_id, &status);
-
-        self.network.inform_network(NetworkMessage::Status {
-            peer_id,
-            request_id,
-        });
-    }
-
-    pub fn on_pooled_user_op_hashes_request(
-        &mut self,
-        peer_id: PeerId,
-        request_id: PeerRequestId,
-        pooled_user_op_hashes_request: PooledUserOpHashesRequest,
-    ) {
-        debug!(self.log, "Received PooledUserOpHashes Request"; "peer_id" => %peer_id);
-
-
-        self.network.inform_network(NetworkMessage::PooledUserOpHashesRequest {
-            peer_id,
-            request_id,
-            pooled_user_op_hashes_request,
-        })
-    }
-
-    pub fn on_pooled_user_op_hashes_response(
-        &mut self,
-        peer_id: PeerId,
-        request_id: RequestId,
-        pooled_user_op_hashes: PooledUserOpHashes,
-    ) {
-        debug!(self.log, "Received PooledUserOpHashes Response"; "peer_id" => %peer_id);
-
-        self.network.inform_network(NetworkMessage::PooledUserOpHashesResponse {
-            peer_id,
-            request_id,
-            pooled_user_op_hashes,
-        });
-    }
-
-    pub fn on_pooled_user_ops_by_hash_request(
-        &mut self,
-        peer_id: PeerId,
-        request_id: PeerRequestId,
-        pooled_user_ops_by_hash_request: PooledUserOpsByHashRequest,
-    ) {
-        debug!(self.log, "Received PooledUserOpsByHash Request"; "peer_id" => %peer_id);
-
-        self.network.inform_network(NetworkMessage::PooledUserOpsByHashRequest {
-            peer_id,
-            request_id,
-            pooled_user_ops_by_hash_request,
-        });
-    }
-
-    pub fn on_pooled_user_ops_by_hash_responseV07(
-        &mut self,
-        peer_id: PeerId,
-        request_id: RequestId,
-        pooled_user_ops_by_hash: PooledUserOpsByHashV07,
-    ) {
-        debug!(self.log, "Received PooledUserOpsByHash Response"; "peer_id" => %peer_id);
-
-        self.network.inform_network(NetworkMessage::PooledUserOpsByHashResponseV07 {
-            peer_id,
-            request_id,
-            pooled_user_ops_by_hash,
-        });
-    }
-
-    pub fn on_pooled_user_ops_by_hash_responseV06(
-        &mut self,
-        peer_id: PeerId,
-        request_id: RequestId,
-        pooled_user_ops_by_hash: PooledUserOpsByHashV06,
-    ) {
-        debug!(self.log, "Received PooledUserOpsByHash Response"; "peer_id" => %peer_id);
-
-        self.network.inform_network(NetworkMessage::PooledUserOpsByHashResponseV06 {
-            peer_id,
-            request_id,
-            pooled_user_ops_by_hash,
-        });
     }
 }
 
