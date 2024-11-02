@@ -1,6 +1,6 @@
 use std::{path::Path, fs};
 
-use p2p_voltaire_network::{types::VerifiedUserOperationV07, types::VerifiedUserOperationV06, rpc::methods::{PooledUserOpHashesRequest, PooledUserOpsByHashRequest, PooledUserOpHashes,PooledUserOpsByHashV07, PooledUserOpsByHashV06}};
+use p2p_voltaire_network::{rpc::{methods::{PooledUserOpHashes, PooledUserOpHashesRequest, PooledUserOpsByHashRequest, PooledUserOpsByHashV06, PooledUserOpsByHashV07}, StatusMessage}, types::{VerifiedUserOperationV06, VerifiedUserOperationV07}};
 use tokio::{net::{UnixListener, UnixStream}, io::{AsyncWriteExt, Interest}};
 use serde::{Serialize, Deserialize};
 use slog::error;
@@ -159,6 +159,18 @@ pub struct PooledUserOpHashesAndPeerId {
 #[derive(
     Debug,
     Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+)]
+pub struct StatusMessageAndPeerId {
+    pub peer_id: String,
+    pub status_message: StatusMessage,
+}
+
+#[derive(
+    Debug,
+    Clone,
     Serialize,
     Deserialize,
 )]
@@ -171,7 +183,8 @@ pub enum MessageTypeToBundler  {
     PooledUserOpHashesResponseToBundler(PooledUserOpHashesAndPeerId),
     PooledUserOpsByHashResponseToBundlerV07(PooledUserOpsByHashV07),
     PooledUserOpsByHashResponseToBundlerV06(PooledUserOpsByHashV06),
-    Status()
+    StatusToBundler(),
+    StatusResponseToBundler(StatusMessageAndPeerId)
 }
 
 

@@ -134,9 +134,14 @@ pub enum NetworkMessage  {
         request_id: RequestId,
         pooled_user_ops_by_hash: PooledUserOpsByHashV06,
     },
-    Status{
+    StatusRequest{
         peer_id: PeerId,
         request_id: PeerRequestId,
+    },
+    StatusResponse{
+        peer_id: PeerId,
+        request_id: RequestId,
+        status_message: StatusMessage,
     },
 }
 
@@ -381,7 +386,18 @@ impl NetworkService {
         match ev {
             NetworkEvent::PeerConnectedOutgoing(peer_id) => {
                 // self.send_to_router(RouterMessage::StatusPeer(peer_id));
-                let status_message = status_message(0, H256::default(),0);
+                // let status_message = status_message(0, H256::default(),0);
+
+                let message_to_send = BundlerGossibRequest {
+                    request_type:"p2p_status_received".to_string(), 
+                    request_arguments:MessageTypeToBundler::StatusToBundler()
+                };
+                
+                let response = broadcast_and_listen_for_response_from_main_bundler(message_to_send, &self.log).await;
+        
+                let deserialized_result:Result<StatusMessage,serde_pickle::Error> = serde_pickle::from_slice(&response.unwrap(), Default::default());
+                let status_message = deserialized_result.unwrap();
+
                 self.network.send_processor_request(peer_id, Request::Status(status_message));
             }
             NetworkEvent::PeerConnectedIncoming(_) => {
@@ -434,7 +450,7 @@ impl NetworkService {
             }
             NetworkEvent::StatusPeer(peer_id) => {
                 //self.send_to_router(RouterMessage::StatusPeer(peer_id));
-                self.send_status(peer_id);
+                self.send_status(peer_id).await;
             }
             NetworkEvent::PubsubMessage {
                 id: _,
@@ -697,13 +713,13 @@ impl NetworkService {
         
                 broadcast_to_main_bundler(message_to_send, &self.log).await;
             },
-            NetworkMessage::Status{
+            NetworkMessage::StatusRequest{
                 peer_id,
                 request_id} => {
 
                 let message_to_send = BundlerGossibRequest {
                     request_type:"p2p_status_received".to_string(), 
-                    request_arguments:MessageTypeToBundler::Status()
+                    request_arguments:MessageTypeToBundler::StatusToBundler()
                 };
                 
                 let response = broadcast_and_listen_for_response_from_main_bundler(message_to_send, &self.log).await;

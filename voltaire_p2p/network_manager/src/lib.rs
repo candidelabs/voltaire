@@ -12,7 +12,6 @@ pub mod service;
 mod metrics;
 mod nat;
 
-mod status;
 pub mod main_bundler;
 
 pub type FV46 = FixedVector::<u8, U46>;
