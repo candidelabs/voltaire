@@ -167,7 +167,6 @@ impl RpcLimits {
     /// Returns true if the given length is greater than `max_rpc_size` or out of
     /// bounds for the given ssz type, returns false otherwise.
     pub fn is_out_of_bounds(&self, length: usize, max_rpc_size: usize) -> bool {
-        // println!("self max : {} self min {}", self.max, self.min);
         length > std::cmp::min(self.max, max_rpc_size) || length < self.min
     }
 }
@@ -386,7 +385,6 @@ impl InboundRequest {
             InboundRequest::MetaData(_) => SupportedProtocol::MetaDataV1,
             InboundRequest::PooledUserOpHashes(_) => SupportedProtocol::PooledUserOpHashesV1,
             InboundRequest::PooledUserOpsByHash(_) => SupportedProtocol::PooledUserOpsByHashV07,
-            InboundRequest::PooledUserOpsByHash(_) => SupportedProtocol::PooledUserOpsByHashV06,
         }
     }
 

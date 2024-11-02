@@ -102,10 +102,12 @@ impl PubsubMessage {
     pub fn decode(
         topic: &TopicHash,
         data: &[u8],
+        topic_v07: &GossipTopic,
+        topic_v06: &GossipTopic,
         // fork_context: &ForkContext,
     ) -> Result<Self, String> {
-        match GossipTopic::decode(topic.as_str()) {
-            Err(_) => Err(format!("Unknown gossipsub topic: {:?}", topic)),
+        match GossipTopic::decode(topic.as_str(), topic_v07, topic_v06) {
+            Err(err) => Err(format!("Unknown gossipsub topic: {:?}, with error: {}", topic, err)),
             Ok(gossip_topic) => {
                 // All topics are currently expected to be compressed and decompressed with snappy.
                 // This is done in the `SnappyTransform` struct.

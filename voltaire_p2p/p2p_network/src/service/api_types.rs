@@ -69,11 +69,11 @@ impl std::convert::From<Response> for RPCCodedResponse {
             },
             Response::PooledUserOpsByHashV07(r) => match r {
                 Some(b) => RPCCodedResponse::Success(RPCResponse::PooledUserOpsByHashV07(b)),
-                None => RPCCodedResponse::StreamTermination(ResponseTermination::PooledUserOpsByHash),
+                None => RPCCodedResponse::StreamTermination(ResponseTermination::PooledUserOpsByHashV07),
             },
             Response::PooledUserOpsByHashV06(r) => match r {
                 Some(b) => RPCCodedResponse::Success(RPCResponse::PooledUserOpsByHashV06(b)),
-                None => RPCCodedResponse::StreamTermination(ResponseTermination::PooledUserOpsByHash),
+                None => RPCCodedResponse::StreamTermination(ResponseTermination::PooledUserOpsByHashV06),
             },
             Response::Status(s) => RPCCodedResponse::Success(RPCResponse::Status(s)),
         }

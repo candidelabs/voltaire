@@ -291,8 +291,11 @@ pub enum ResponseTermination {
     /// PooledUserOpHashes stream termination.
     PooledUserOpHashes,
 
-    /// PooledUserOpsByHash stream termination.
-    PooledUserOpsByHash,
+    /// PooledUserOpsByHashV07 stream termination.
+    PooledUserOpsByHashV07,
+
+    /// PooledUserOpsByHashV06 stream termination.
+    PooledUserOpsByHashV06,
 }
 
 /// The structured response containing a result/code indicating success or failure

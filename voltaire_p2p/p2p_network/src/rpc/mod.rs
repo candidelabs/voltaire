@@ -405,8 +405,8 @@ where
                     "end_of_stream",
                     match end {
                         ResponseTermination::PooledUserOpHashes => Protocol::PooledUserOpHashes,
-                        ResponseTermination::PooledUserOpsByHash => Protocol::PooledUserOpsByHashV07,
-                        ResponseTermination::PooledUserOpsByHash => Protocol::PooledUserOpsByHashV06,
+                        ResponseTermination::PooledUserOpsByHashV07 => Protocol::PooledUserOpsByHashV07,
+                        ResponseTermination::PooledUserOpsByHashV06 => Protocol::PooledUserOpsByHashV06,
                     },
                 ),
             },

@@ -1,8 +1,6 @@
-use libp2p::gossipsub::{IdentTopic as Topic, TopicHash};
+use libp2p::gossipsub::IdentTopic as Topic;
 use serde_derive::{Deserialize, Serialize};
 use strum::AsRefStr;
-
-use crate::Subnet;
 
 /// The gossipsub topic names.
 // These constants form a topic name of the form /TOPIC_PREFIX/TOPIC/ENCODING_POSTFIX
@@ -41,7 +39,12 @@ pub enum GossipKind {
 impl std::fmt::Display for GossipKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            user_operation_with_entrypoint_gossib => write!(f, "user_operation_with_entrypoint{}", user_operation_with_entrypoint_gossib)
+            GossipKind::VerifiedUserOperationV07 =>{
+                write!(f, "VerifiedUserOperationV07")
+            },
+            GossipKind::VerifiedUserOperationV06 => {
+                write!(f, "VerifiedUserOperationV06")
+            }
         }
     }
 }
@@ -78,7 +81,7 @@ impl GossipTopic {
         &self.kind
     }
 
-    pub fn decode(topic: &str) -> Result<Self, String> {
+    pub fn decode(topic: &str,topic_v07: &GossipTopic, topic_v06: &GossipTopic) -> Result<Self, String> {
         let topic_parts: Vec<&str> = topic.split('/').collect();
         if topic_parts.len() == 5 && topic_parts[1] == TOPIC_PREFIX {
             let mempool_id:String = topic_parts[2].into();
@@ -87,9 +90,12 @@ impl GossipTopic {
                 SSZ_SNAPPY_ENCODING_POSTFIX => GossipEncoding::SSZSnappy,
                 _ => return Err(format!("Unknown encoding: {}", topic)),
             };
-            let kind = match topic_parts[3] {
-                USER_OPS_WITH_ENTRY_POINT => GossipKind::VerifiedUserOperationV07,
-                &_ => todo!()
+            let kind = if topic_parts[2] == topic_v06.mempool_id{
+                GossipKind::VerifiedUserOperationV06
+            } else if topic_parts[2] == topic_v07.mempool_id{
+                GossipKind::VerifiedUserOperationV07
+            }else{
+                return Err(format!("Unknown mempool id: {}", topic_parts[2]));
             };
 
             return Ok(GossipTopic {

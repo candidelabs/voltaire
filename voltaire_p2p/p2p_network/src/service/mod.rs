@@ -1167,6 +1167,10 @@ impl<AppReqId: ReqId> Network<AppReqId> {
         &mut self,
         event: gossipsub::Event,
     ) -> Option<NetworkEvent<AppReqId>> {
+        let subscriptions = self.network_globals.gossipsub_subscriptions.read().clone();
+        let mut subscriptions_iter = subscriptions.iter();
+        let topic_v06 = subscriptions_iter.next().unwrap();
+        let topic_v07 = subscriptions_iter.next().unwrap();
         match event {
             gossipsub::Event::Message {
                 propagation_source,
@@ -1175,7 +1179,7 @@ impl<AppReqId: ReqId> Network<AppReqId> {
             } => {
                 // Note: We are keeping track here of the peer that sent us the message, not the
                 // peer that originally published the message.
-                match PubsubMessage::decode(&gs_msg.topic, &gs_msg.data/*, &self.fork_context*/) {
+                match PubsubMessage::decode(&gs_msg.topic, &gs_msg.data, topic_v07, topic_v06) {
                     Err(e) => {
                         debug!(self.log, "Could not decode gossipsub message"; "topic" => ?gs_msg.topic,"error" => e);
                         //reject the message
@@ -1199,7 +1203,7 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                 }
             }
             gossipsub::Event::Subscribed { peer_id, topic } => {
-                if let Ok(topic) = GossipTopic::decode(topic.as_str()) {
+                if let Ok(topic) = GossipTopic::decode(topic.as_str(), topic_v07, topic_v06) {
                     // if let Some(subnet_id) = topic.subnet_id() {
                     //     self.network_globals
                     //         .peers
@@ -1399,14 +1403,13 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                 }
             }
             Ok(RPCReceived::EndOfStream(id, termination)) => {
+
+                let response = match termination {
+                    ResponseTermination::PooledUserOpHashes => Response::PooledUserOpHashes(None),
+                    ResponseTermination::PooledUserOpsByHashV07 => Response::PooledUserOpsByHashV07(None),
+                    ResponseTermination::PooledUserOpsByHashV06 => Response::PooledUserOpsByHashV06(None),
+                };
               
-                let response = Response::Status(
-                    StatusMessage { 
-                        chain_id: 0,
-                        block_hash: H256::default(),
-                        block_number: 0,
-                    }
-                );//TODO
                 self.build_response(id, peer_id, response)
             }
         }
