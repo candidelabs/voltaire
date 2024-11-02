@@ -783,6 +783,23 @@ class ExecutionEndpoint(Endpoint):
                 await local_mempool.add_user_operation_p2p(
                     user_operation_obj, peer_id, verified_at_block_hash
                 )
+            elif (
+                    self.local_mempool_manager_v6 is not None and
+                    mempool_id == self.local_mempool_manager_v6.canonical_mempool_id
+            ):
+                user_operation_obj = UserOperationV6(verified_useroperation[
+                    "user_operation"])
+                local_mempool = self.local_mempool_manager_v6
+                if entrypoint_lowercase != local_mempool.entrypoint_lowercase:
+                    logging.debug(
+                        "Dropping gossib from unsupported entrypoint : " +
+                        f"{entrypoint_lowercase}"
+                    )
+                    #local_mempool.reputation_manager
+                await local_mempool.add_user_operation_p2p(
+                    user_operation_obj, peer_id, verified_at_block_hash
+                )
+
             else:
                 logging.debug(f"Dropping gossib from unsupported topic : {topic}")
                 return
