@@ -177,7 +177,8 @@ class ExecutionEndpoint(Endpoint):
                         await self.bundle_manager.send_next_bundle()
                 except (ValidationException, ExecutionException) as excp:
                     logging.exception(excp.message)
-
+                except:
+                    logging.error(traceback.format_exc())
                 heartbeat_counter = heartbeat_counter + 1
                 await asyncio.sleep(heartbeat_interval)
         elif not is_debug:
@@ -186,6 +187,8 @@ class ExecutionEndpoint(Endpoint):
                     await self.bundle_manager.send_next_bundle()
                 except (ValidationException, ExecutionException) as excp:
                     logging.exception(excp.message)
+                except:
+                    logging.error(traceback.format_exc())
 
                 await asyncio.sleep(bundle_interval)
 
@@ -746,4 +749,14 @@ async def exception_handler_decorator(
             ),
             "is_error": True
         }
+    except:
+        logging.error(traceback.format_exc())
+        rpc_call_response = {
+            "payload": OtherJsonRpcErrorException(
+                OtherJsonRpcErrorCode.InternalError,
+                "Unexpected Error"
+            ),
+            "is_error": True
+        }
+
     return rpc_call_response
