@@ -866,6 +866,12 @@ class ExecutionEndpoint(Endpoint):
             "block_number": int(latest_block_number, 16),
         }
 
+    async def _event_p2p_received_status_response(
+        self, req_arguments: dict
+    ) -> None:
+        # todo
+        return
+
     async def send_pooled_user_op_hashes_request(
             self, peer_id, cursor) -> None:
         pooled_user_op_hashes_message = dict()
