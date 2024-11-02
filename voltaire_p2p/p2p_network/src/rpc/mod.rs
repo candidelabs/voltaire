@@ -13,7 +13,7 @@ use libp2p::swarm::{
 use libp2p::swarm::{FromSwarm, SubstreamProtocol, THandlerInEvent};
 use libp2p::PeerId;
 use rate_limiter::{RPCRateLimiter as RateLimiter, RateLimitedErr};
-use slog::{debug, o};
+use slog::{crit, debug, o};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -320,6 +320,7 @@ where
                         // } else {
                         //     crit!(self.log, "Request size too large to ever be processed"; "protocol" => %protocol);
                         // }
+                        crit!(self.log, "Request size too large to ever be processed"; "protocol" => %protocol);
                         // send an error code to the peer.
                         // the handler upon receiving the error code will send it back to the behaviour
                         self.send_response(
