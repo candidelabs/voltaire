@@ -713,6 +713,20 @@ impl NetworkService {
                 debug!(self.log, "Sending Status Response"; "peer" => %peer_id);
                 self.libp2p.send_response(peer_id, request_id,  Response::Status(deserialized_result.unwrap()));
             },
+            NetworkMessage::StatusResponse { peer_id, request_id:_, status_message } => {
+                let status_message_and_peer_id = StatusMessageAndPeerId{
+                    peer_id: peer_id.to_string(),
+                    status_message
+                };
+
+
+                let message_to_send = BundlerGossibRequest {
+                    request_type:"p2p_received_status_response".to_string(), 
+                    request_arguments:MessageTypeToBundler::StatusResponseToBundler(status_message_and_peer_id)
+                };
+        
+                broadcast_to_main_bundler(message_to_send, &self.log).await;
+            },
         }
     }
 
