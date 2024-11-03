@@ -1169,8 +1169,8 @@ impl<AppReqId: ReqId> Network<AppReqId> {
     ) -> Option<NetworkEvent<AppReqId>> {
         let subscriptions = self.network_globals.gossipsub_subscriptions.read().clone();
         let mut subscriptions_iter = subscriptions.iter();
-        let topic_v06 = subscriptions_iter.next().unwrap();
         let topic_v07 = subscriptions_iter.next().unwrap();
+        let topic_v06 = subscriptions_iter.next().unwrap();
         match event {
             gossipsub::Event::Message {
                 propagation_source,
