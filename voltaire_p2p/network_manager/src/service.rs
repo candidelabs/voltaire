@@ -474,6 +474,7 @@ impl NetworkService {
             } => {
                 match message.clone() {
                     PubsubMessage::VerifiedUserOperationV07(verified_useroperation) =>{
+                        debug!(self.log, "Received Pubsub VerifiedUserOperationV07"; "peer_id" => %source, "topic" => %topic);
                         let gossib_message = GossibMessageToSendToMainBundlerV07 {
                             peer_id:source.to_string(),
                             topic: topic.to_string(),
@@ -487,6 +488,7 @@ impl NetworkService {
                         broadcast_to_main_bundler(message_to_send, &self.log).await;
                     },
                     PubsubMessage::VerifiedUserOperationV06(verified_useroperation) =>{
+                        debug!(self.log, "Received Pubsub VerifiedUserOperationV06"; "peer_id" => %source, "topic" => %topic);
                         let gossib_message = GossibMessageToSendToMainBundlerV06 {
                             peer_id:source.to_string(),
                             topic: topic.to_string(),
