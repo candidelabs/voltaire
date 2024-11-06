@@ -26,7 +26,9 @@ class LocalMempoolManagerV7(LocalMempoolManager):
         is_legacy_mode: bool,
         ethereum_node_debug_trace_call_url: str,
         reputation_whitelist: list[str],
-        reputation_blacklist: list[str]
+        reputation_blacklist: list[str],
+        javascript_tracer: bool,
+        native_tracer_node_url: str
     ):
         self.validation_manager = ValidationManagerV7(
             user_operation_handler,
@@ -37,6 +39,8 @@ class LocalMempoolManagerV7(LocalMempoolManager):
             is_legacy_mode,
             enforce_gas_price_tolerance,
             ethereum_node_debug_trace_call_url,
+            javascript_tracer,
+            native_tracer_node_url
         )
         self.user_operation_handler = user_operation_handler
         self.reputation_manager = ReputationManager(

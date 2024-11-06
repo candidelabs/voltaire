@@ -34,6 +34,8 @@ class ValidationManagerV6(ValidationManager):
     is_legacy_mode: bool
     enforce_gas_price_tolerance: int
     ethereum_node_debug_trace_call_url: str
+    is_javascript_tracer: bool
+    native_tracer_node_url: str
 
     def __init__(
         self,
@@ -45,6 +47,8 @@ class ValidationManagerV6(ValidationManager):
         is_legacy_mode: bool,
         enforce_gas_price_tolerance: int,
         ethereum_node_debug_trace_call_url: str,
+        is_javascript_tracer: bool,
+        native_tracer_node_url: str
     ):
         self.user_operation_handler = user_operation_handler
         self.tracer_manager = TracerManager(ethereum_node_url, bundler_address)
@@ -66,6 +70,8 @@ class ValidationManagerV6(ValidationManager):
 
         self.entrypoint_code_override = load_bytecode(
             "EntryPointSimulationsV7.json")
+        self.is_javascript_tracer = is_javascript_tracer
+        self.native_tracer_node_url = native_tracer_node_url
 
     async def validate_user_operation(
         self,
@@ -217,6 +223,34 @@ class ValidationManagerV6(ValidationManager):
 
         return solidity_error_selector, solidity_error_params
 
+    async def get_prestate(
+        self,
+        call_data: str,
+        entrypoint: str,
+        block_number: str,
+    ):
+        params = [
+            {
+                "from": ZERO_ADDRESS,
+                "to": entrypoint,
+                "data": call_data,
+            },
+            block_number,
+            {"tracer": 'prestateTracer'}
+        ]
+        res: Any = await send_rpc_request_to_eth_client(
+            self.ethereum_node_debug_trace_call_url, "debug_traceCall", params
+        )
+        pre_state_tracer_res = res['result']
+
+        for record in pre_state_tracer_res.values():
+            if 'nonce' in record:
+                record['nonce'] = hex(record['nonce'])
+            if 'storage' in record:
+                record['state'] = record.pop('storage')
+
+        return pre_state_tracer_res
+
     async def simulate_validation_with_tracing(
         self,
         user_operation: UserOperationV6,
@@ -227,18 +261,38 @@ class ValidationManagerV6(ValidationManager):
             user_operation
         )
 
-        params = [
-            {
-                "from": ZERO_ADDRESS,
-                "to": entrypoint,
-                "data": call_data,
-            },
-            block_number,
-            {"tracer": self.bundler_collector_tracer},
-        ]
-        res: Any = await send_rpc_request_to_eth_client(
-            self.ethereum_node_debug_trace_call_url, "debug_traceCall", params
-        )
+        if self.is_javascript_tracer:
+            params = [
+                {
+                    "from": ZERO_ADDRESS,
+                    "to": entrypoint,
+                    "data": call_data,
+                },
+                block_number,
+                {"tracer": self.bundler_collector_tracer},
+            ]
+            res: Any = await send_rpc_request_to_eth_client(
+                self.ethereum_node_debug_trace_call_url, "debug_traceCall", params
+            )
+        else:
+            state_overrides = await self.get_prestate(
+                    call_data, entrypoint, block_number)
+            params = [
+                {
+                    "from": ZERO_ADDRESS,
+                    "to": entrypoint,
+                    "data": call_data,
+                },
+                'latest',
+                {
+                    "tracer": 'bundlerCollectorTracer',
+                    "stateOverrides": state_overrides
+                }
+            ]
+
+            res: Any = await send_rpc_request_to_eth_client(
+                self.native_tracer_node_url, "debug_traceCall", params
+            )
 
         if "result" in res:
             debug_data = res["result"]
