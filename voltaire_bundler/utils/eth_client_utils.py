@@ -26,7 +26,8 @@ async def send_rpc_request_to_eth_client(
     ethereum_node_url,
     method,
     params=None,
-    flashbots_signer_private_key_pair: tuple[str, str] | None = None
+    signer_private_key_pair: tuple[str, str] | None = None,
+    signature_header_key: str | None = None
 ) -> Any:
     json_request = {
         "jsonrpc": "2.0",
@@ -35,9 +36,19 @@ async def send_rpc_request_to_eth_client(
         "params": params,
     }
     headers = {"content-type": "application/json"}
-    if flashbots_signer_private_key_pair is not None:
-        signer, private_key = flashbots_signer_private_key_pair
-        headers["X-Flashbots-Signature"] = create_flashbots_signature(
+    if signer_private_key_pair is not None:
+        if signature_header_key is None:
+            logging.critical(
+                "signature_header_key can't be null "
+                "if signer_private_key_pair is not null"
+            )
+            raise ValueError(
+                "signature_header_key can't be null "
+                "if signer_private_key_pair is not null"
+            )
+
+        signer, private_key = signer_private_key_pair
+        headers[signature_header_key] = create_flashbots_signature(
             json.dumps(json_request),
             signer,
             private_key

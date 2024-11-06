@@ -32,6 +32,7 @@ __version__ = version("voltaire_bundler")
 class ConditionalRpc(Enum):
     eth = "eth"
     fastlane = "pfl"
+    optimism = "opt"
 
     def __str__(self):
         return self.value

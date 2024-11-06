@@ -233,16 +233,36 @@ class BundlerManager:
         if self.conditional_rpc is not None and merged_storage_map is not None:
             if self.conditional_rpc == ConditionalRpc.eth:
                 method = "eth_sendRawTransactionConditional"
+                result = await send_rpc_request_to_eth_client(
+                    self.ethereum_node_url,
+                    method,
+                    [
+                        "0x" + sign_store_txn.raw_transaction.hex(),
+                        {"knownAccounts": merged_storage_map}
+                    ]
+                )
+            elif self.conditional_rpc == ConditionalRpc.optimism:
+                method = "eth_sendRawTransactionConditional"
+                result = await send_rpc_request_to_eth_client(
+                    self.ethereum_node_url,
+                    method,
+                    [
+                        "0x" + sign_store_txn.raw_transaction.hex(),
+                        {"knownAccounts": merged_storage_map}
+                    ],
+                    (self.bundler_address, self.bundler_private_key),
+                    "X-Optimism-Signature"
+                )
             else:
                 method = "pfl_sendRawTransactionConditional"
-            result = await send_rpc_request_to_eth_client(
-                self.ethereum_node_url,
-                method,
-                [
-                    "0x" + sign_store_txn.raw_transaction.hex(),
-                    {"knownAccounts": merged_storage_map}
-                ]
-            )
+                result = await send_rpc_request_to_eth_client(
+                    self.ethereum_node_url,
+                    method,
+                    [
+                        "0x" + sign_store_txn.raw_transaction.hex(),
+                        {"knownAccounts": merged_storage_map}
+                    ]
+                )
         elif self.flashbots_protect_node_url is not None:
             result = await send_rpc_request_to_eth_client(
                 self.flashbots_protect_node_url,
@@ -251,7 +271,8 @@ class BundlerManager:
                     "0x" + sign_store_txn.raw_transaction.hex(),
                     {"fast": True}
                 ],
-                (self.bundler_address, self.bundler_private_key)
+                (self.bundler_address, self.bundler_private_key),
+                "X-Flashbots-Signature"
             )
         else:
             result = await send_rpc_request_to_eth_client(
