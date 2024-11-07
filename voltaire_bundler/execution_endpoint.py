@@ -78,6 +78,8 @@ class ExecutionEndpoint(Endpoint):
         reputation_whitelist: list[str],
         reputation_blacklist: list[str],
         is_eip7702: bool
+        min_stake: int,
+        min_unstake_delay: int
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_url = ethereum_node_url
@@ -107,7 +109,9 @@ class ExecutionEndpoint(Endpoint):
             is_legacy_mode,
             ethereum_node_debug_trace_call_url,
             reputation_whitelist,
-            reputation_blacklist
+            reputation_blacklist,
+            min_stake,
+            min_unstake_delay
         )
 
         self.local_mempool_manager_v7 = LocalMempoolManagerV7(
@@ -121,6 +125,9 @@ class ExecutionEndpoint(Endpoint):
             ethereum_node_debug_trace_call_url,
             reputation_whitelist,
             reputation_blacklist
+            reputation_blacklist,
+            min_stake,
+            min_unstake_delay
         )
 
         if disable_v6:
@@ -152,6 +159,9 @@ class ExecutionEndpoint(Endpoint):
                 ethereum_node_debug_trace_call_url,
                 reputation_whitelist,
                 reputation_blacklist
+                reputation_blacklist,
+                min_stake,
+                min_unstake_delay
             )
 
         self.bundle_manager = BundlerManager(

@@ -27,6 +27,9 @@ class LocalMempoolManagerV6(LocalMempoolManager):
         ethereum_node_debug_trace_call_url: str,
         reputation_whitelist: list[str],
         reputation_blacklist: list[str]
+        reputation_blacklist: list[str],
+        min_stake: int,
+        min_unstake_delay: int
     ):
         self.validation_manager = ValidationManagerV6(
             user_operation_handler,
@@ -61,3 +64,5 @@ class LocalMempoolManagerV6(LocalMempoolManager):
 
         self.paymaster_deposits_cache = dict()
         self.latest_paymaster_deposits_cache_block = 0
+        self.min_stake = min_stake
+        self.min_unstake_delay = min_unstake_delay

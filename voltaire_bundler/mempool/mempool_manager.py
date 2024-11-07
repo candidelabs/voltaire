@@ -43,9 +43,9 @@ class LocalMempoolManager():
     seen_user_operation_hashs: set[str]
     paymaster_deposits_cache: dict[str, int]
     latest_paymaster_deposits_cache_block: int
+    min_stake: int
+    min_unstake_delay: int
     MAX_OPS_PER_REQUEST = 4096
-    MIN_STAKE = 1
-    MIN_UNSTAKE_DELAY = 1
 
     def clear_user_operations(self) -> None:
         self.senders_to_senders_mempools.clear()
@@ -262,6 +262,9 @@ class LocalMempoolManager():
                     None,
                     self.MIN_STAKE,
                     self.MIN_UNSTAKE_DELAY
+                    latest_block_timestamp,
+                    self.min_stake,
+                    self.min_unstake_delay
                 )
             except ValidationException:
                 self.reputation_manager.ban_entity(peer_id)
@@ -849,7 +852,7 @@ class LocalMempoolManager():
             )
 
     def is_staked(self, stake: int, unstake_delay: int) -> bool:
-        return stake >= self.MIN_STAKE and unstake_delay >= self.MIN_UNSTAKE_DELAY
+        return stake >= self.min_stake and unstake_delay >= self.min_unstake_delay
 
     def validate_staked_entity_can_include_more_user_operations(
         self,
@@ -874,18 +877,18 @@ class LocalMempoolManager():
                 f"{entity_title} {entity} is unstaked"
             )
 
-        if stake < self.MIN_STAKE:
+        if stake < self.min_stake:
             raise ValidationException(
                 ValidationExceptionCode.InsufficientStake,
                 f"{entity_title} {entity} stake {stake} " +
-                f"is lower than minimum {self.MIN_STAKE}"
+                f"is lower than minimum {self.min_stake}"
             )
 
-        if unstake_delay < self.MIN_UNSTAKE_DELAY:
+        if unstake_delay < self.min_unstake_delay:
             raise ValidationException(
                 ValidationExceptionCode.InsufficientStake,
                 f"{entity_title} {entity} unstake delay {unstake_delay} " +
-                f"is lower than minimum {self.MIN_UNSTAKE_DELAY}"
+                f"is lower than minimum {self.min_unstake_delay}"
             )
 
     def get_max_allowed_user_operations_for_unstaked_paymasters(
