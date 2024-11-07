@@ -81,6 +81,8 @@ class InitData:
     p2p_canonical_mempool_id_06: str | None
     is_javascript_tracer: bool
     native_tracer_node_url: str
+    min_stake: int
+    min_unstake_delay: int
 
 
 def address(ep: str):
@@ -529,6 +531,20 @@ def initialize_argument_parser() -> ArgumentParser:
         default="http://0.0.0.0:8888",
     )
 
+    parser.add_argument(
+        "--min_stake",
+        type=unsigned_int,
+        help="minimum stake.",
+        default=1,
+    )
+
+    parser.add_argument(
+        "--min_unstake_delay",
+        type=unsigned_int,
+        help="minimum unstake delay.",
+        default=1,
+    )
+
     return parser
 
 
@@ -761,7 +777,9 @@ async def get_init_data(args: Namespace) -> InitData:
         args.p2p_canonical_mempool_id_07,
         args.p2p_canonical_mempool_id_06,
         args.javascript_tracer,
-        args.native_tracer_node_url
+        args.native_tracer_node_url,
+        args.min_stake,
+        args.min_unstake_delay
     )
 
     if args.verbose:

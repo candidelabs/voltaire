@@ -28,7 +28,9 @@ class LocalMempoolManagerV6(LocalMempoolManager):
         reputation_whitelist: list[str],
         reputation_blacklist: list[str],
         is_javascript_tracer: bool,
-        native_tracer_node_url: str
+        native_tracer_node_url: str,
+        min_stake: int,
+        min_unstake_delay: int
     ):
         self.validation_manager = ValidationManagerV6(
             user_operation_handler,
@@ -65,3 +67,5 @@ class LocalMempoolManagerV6(LocalMempoolManager):
 
         self.paymaster_deposits_cache = dict()
         self.latest_paymaster_deposits_cache_block = 0
+        self.min_stake = min_stake
+        self.min_unstake_delay = min_unstake_delay

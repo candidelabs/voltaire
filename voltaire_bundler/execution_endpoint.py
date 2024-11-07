@@ -71,7 +71,9 @@ class ExecutionEndpoint(Endpoint):
         reputation_whitelist: list[str],
         reputation_blacklist: list[str],
         is_javascript_tracer: bool,
-        native_tracer_node_url: str
+        native_tracer_node_url: str,
+        min_stake: int,
+        min_unstake_delay: int
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_url = ethereum_node_url
@@ -103,7 +105,9 @@ class ExecutionEndpoint(Endpoint):
             reputation_whitelist,
             reputation_blacklist,
             is_javascript_tracer,
-            native_tracer_node_url
+            native_tracer_node_url,
+            min_stake,
+            min_unstake_delay
         )
 
         if disable_v6:
@@ -136,7 +140,9 @@ class ExecutionEndpoint(Endpoint):
                 reputation_whitelist,
                 reputation_blacklist,
                 is_javascript_tracer,
-                native_tracer_node_url
+                native_tracer_node_url,
+                min_stake,
+                min_unstake_delay
             )
 
         self.bundle_manager = BundlerManager(
