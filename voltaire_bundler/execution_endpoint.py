@@ -7,7 +7,7 @@ from typing import Any, Optional
 
 from voltaire_bundler.bundle.exceptions import \
     ExecutionException, OtherJsonRpcErrorCode, OtherJsonRpcErrorException, ValidationException, ValidationExceptionCode
-from voltaire_bundler.cli_manager import ConditionalRpc
+from voltaire_bundler.cli_manager import ConditionalRpc, Tracer
 from voltaire_bundler.event_bus_manager.endpoint import Client, Endpoint
 from voltaire_bundler.typing import Address
 from voltaire_bundler.user_operation.user_operation_handler import \
@@ -51,7 +51,7 @@ class ExecutionEndpoint(Endpoint):
         bundler_private_key: str,
         bundler_address: Address,
         chain_id: int,
-        is_unsafe: bool,
+        tracer: Tracer,
         is_debug: bool,
         is_legacy_mode: bool,
         conditional_rpc: ConditionalRpc | None,
@@ -70,7 +70,6 @@ class ExecutionEndpoint(Endpoint):
         logs_number_of_ranges: int,
         reputation_whitelist: list[str],
         reputation_blacklist: list[str],
-        is_javascript_tracer: bool,
         native_tracer_node_url: str,
         min_stake: int,
         min_unstake_delay: int
@@ -98,13 +97,12 @@ class ExecutionEndpoint(Endpoint):
             ethereum_node_url,
             bundler_address,
             chain_id,
-            is_unsafe,
+            tracer,
             enforce_gas_price_tolerance,
             is_legacy_mode,
             ethereum_node_debug_trace_call_url,
             reputation_whitelist,
             reputation_blacklist,
-            is_javascript_tracer,
             native_tracer_node_url,
             min_stake,
             min_unstake_delay
@@ -133,13 +131,12 @@ class ExecutionEndpoint(Endpoint):
                 ethereum_node_url,
                 bundler_address,
                 chain_id,
-                is_unsafe,
+                tracer,
                 enforce_gas_price_tolerance,
                 is_legacy_mode,
                 ethereum_node_debug_trace_call_url,
                 reputation_whitelist,
                 reputation_blacklist,
-                is_javascript_tracer,
                 native_tracer_node_url,
                 min_stake,
                 min_unstake_delay

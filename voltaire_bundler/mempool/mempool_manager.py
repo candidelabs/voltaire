@@ -35,7 +35,6 @@ class LocalMempoolManager():
     bundler_address: str
     chain_id: int
     senders_to_senders_mempools: dict[Address, SenderMempool]
-    is_unsafe: bool
     enforce_gas_price_tolerance: int
     paymasters_and_factories_to_ops_hashes_in_mempool: dict[Address, set[str]]
     verified_useroperations_standard_mempool_gossip_queue: List[Any]

@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from voltaire_bundler.cli_manager import Tracer
+
 from ..mempool_manager import LocalMempoolManager
 from ..mempool_info import DEFAULT_MEMPOOL_INFO
 from voltaire_bundler.typing import Address, MempoolId
@@ -21,13 +23,12 @@ class LocalMempoolManagerV7(LocalMempoolManager):
         ethereum_node_url: str,
         bundler_address: str,
         chain_id: int,
-        is_unsafe: bool,
+        tracer: Tracer,
         enforce_gas_price_tolerance: int,
         is_legacy_mode: bool,
         ethereum_node_debug_trace_call_url: str,
         reputation_whitelist: list[str],
         reputation_blacklist: list[str],
-        javascript_tracer: bool,
         native_tracer_node_url: str,
         min_stake: int,
         min_unstake_delay: int
@@ -37,11 +38,10 @@ class LocalMempoolManagerV7(LocalMempoolManager):
             ethereum_node_url,
             bundler_address,
             chain_id,
-            is_unsafe,
+            tracer,
             is_legacy_mode,
             enforce_gas_price_tolerance,
             ethereum_node_debug_trace_call_url,
-            javascript_tracer,
             native_tracer_node_url
         )
         self.user_operation_handler = user_operation_handler
@@ -50,7 +50,6 @@ class LocalMempoolManagerV7(LocalMempoolManager):
         self.ethereum_node_url = ethereum_node_url
         self.bundler_address = bundler_address
         self.chain_id = chain_id
-        self.is_unsafe = is_unsafe
         self.enforce_gas_price_tolerance = enforce_gas_price_tolerance
         self.senders_to_senders_mempools = {}
         self.paymasters_and_factories_to_ops_hashes_in_mempool = {}

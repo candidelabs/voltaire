@@ -61,7 +61,7 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             init_data.bundler_pk,
             init_data.bundler_address,
             init_data.chain_id,
-            init_data.is_unsafe,
+            init_data.tracer,
             init_data.is_debug,
             init_data.is_legacy_mode,
             init_data.conditional_rpc,
@@ -80,7 +80,6 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             init_data.logs_number_of_ranges,
             init_data.reputation_whitelist,
             init_data.reputation_blacklist,
-            init_data.is_javascript_tracer,
             init_data.native_tracer_node_url,
             init_data.min_stake,
             init_data.min_unstake_delay

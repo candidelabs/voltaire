@@ -38,6 +38,15 @@ class ConditionalRpc(Enum):
         return self.value
 
 
+class Tracer(Enum):
+    unsafe = "unsafe"
+    javascript = "javascript"
+    native = "native"
+
+    def __str__(self):
+        return self.value
+
+
 @dataclass()
 class InitData:
     rpc_url: str
@@ -47,7 +56,7 @@ class InitData:
     bundler_address: Address
     chain_id: int
     is_debug: bool
-    is_unsafe: bool
+    tracer: Tracer
     is_legacy_mode: bool
     conditional_rpc: ConditionalRpc | None
     flashbots_protect_node_url: str | None
@@ -79,7 +88,6 @@ class InitData:
     reputation_blacklist: list[str]
     p2p_canonical_mempool_id_07: str | None
     p2p_canonical_mempool_id_06: str | None
-    is_javascript_tracer: bool
     native_tracer_node_url: str
     min_stake: int
     min_unstake_delay: int
@@ -205,9 +213,7 @@ def initialize_argument_parser() -> ArgumentParser:
         default=False,
     )
 
-    group2 = parser.add_mutually_exclusive_group()
-
-    group2.add_argument(
+    parser.add_argument(
         "--ethereum_node_debug_trace_call_url",
         type=str,
         help=(
@@ -219,15 +225,14 @@ def initialize_argument_parser() -> ArgumentParser:
         default=None,
     )
 
-    group2.add_argument(
-        "--unsafe",
-        help=(
-            "UNSAFE mode: no storage or opcode checks - "
-            "when debug_traceCall is not available"
-        ),
+    parser.add_argument(
+        "--tracer",
+        help="set which tracer to use, default to javascript",
         nargs="?",
-        const=True,
-        default=False,
+        type=Tracer,
+        const=Tracer.javascript,
+        default=Tracer.javascript,
+        choices=list(Tracer)
     )
 
     parser.add_argument(
@@ -513,16 +518,7 @@ def initialize_argument_parser() -> ArgumentParser:
         default=None,
     )
 
-    group4 = parser.add_mutually_exclusive_group()
-    group4.add_argument(
-        "--javascript_tracer",
-        type=bool,
-        help="use the javascript tracer instead of the native tracer",
-        nargs="?",
-        const=True,
-        default=False,
-    )
-    group4.add_argument(
+    parser.add_argument(
         "--native_tracer_node_url",
         type=str,
         help="Eth Client JSON-RPC Url - defaults to http://0.0.0.0:8888",
@@ -680,7 +676,7 @@ async def get_init_data(args: Namespace) -> InitData:
             )
             sys.exit(1)
 
-    if args.unsafe:
+    if args.tracer == Tracer.unsafe:
         if args.conditional_rpc is not None:
             logging.critical(
                 "sendRawTransactionalConditional can't work with unsafe mode."
@@ -692,26 +688,25 @@ async def get_init_data(args: Namespace) -> InitData:
                 "javascript_tracer can't be enabled with unsafe"
             )
             sys.exit(1)
-    else:
-        if not args.javascript_tracer:
-            try:
-                trace_call_res = await send_rpc_request_to_eth_client(
-                    args.native_tracer_node_url,
-                    "debug_traceCall",
-                    [{}, 'latest', {"tracer": "bundlerCollectorTracer"}],
-                )
-                if "result" not in trace_call_res:
-                    logging.critical(
-                        "Native tracer doesn't support bundlerCollectorTracer")
-                    sys.exit(1)
-            except aiohttp.client_exceptions.ClientConnectorError:
+    elif args.tracer == "native":
+        try:
+            trace_call_res = await send_rpc_request_to_eth_client(
+                args.native_tracer_node_url,
+                "debug_traceCall",
+                [{}, 'latest', {"tracer": "bundlerCollectorTracer"}],
+            )
+            if "result" not in trace_call_res:
                 logging.critical(
-                    f"Connection refused for Eth node {args.native_tracer_node_url}")
+                    "Native tracer doesn't support bundlerCollectorTracer")
                 sys.exit(1)
-            except Exception:
-                logging.critical(
-                    f"Error when connecting to Eth node {args.native_tracer_node_url}")
-                sys.exit(1)
+        except aiohttp.client_exceptions.ClientConnectorError:
+            logging.critical(
+                f"Connection refused for Eth node {args.native_tracer_node_url}")
+            sys.exit(1)
+        except Exception:
+            logging.critical(
+                f"Error when connecting to Eth node {args.native_tracer_node_url}")
+            sys.exit(1)
 
     if not args.debug:
         await check_valid_entrypoints(args.ethereum_node_url, args.disable_v6)
@@ -744,7 +739,7 @@ async def get_init_data(args: Namespace) -> InitData:
         bundler_address,
         args.chain_id,
         args.debug,
-        args.unsafe,
+        args.tracer,
         args.legacy_mode,
         args.conditional_rpc,
         args.flashbots_protect_node_url,
@@ -776,7 +771,6 @@ async def get_init_data(args: Namespace) -> InitData:
         args.reputation_blacklist,
         args.p2p_canonical_mempool_id_07,
         args.p2p_canonical_mempool_id_06,
-        args.javascript_tracer,
         args.native_tracer_node_url,
         args.min_stake,
         args.min_unstake_delay

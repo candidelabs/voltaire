@@ -4,6 +4,7 @@ from eth_abi import decode, encode
 import voltaire_bundler
 from voltaire_bundler.bundle.exceptions import \
     ValidationException, ValidationExceptionCode
+from voltaire_bundler.cli_manager import Tracer
 from voltaire_bundler.user_operation.user_operation_handler import decode_failed_op_event, decode_failed_op_with_revert_event
 from voltaire_bundler.user_operation.v7.user_operation_v7 import UserOperationV7
 from voltaire_bundler.user_operation.v7.user_operation_handler_v7 import \
@@ -28,11 +29,10 @@ class ValidationManagerV7(ValidationManager):
     bundler_address: str
     chain_id: int
     bundler_collector_tracer: str
-    is_unsafe: bool
+    tracer: Tracer
     is_legacy_mode: bool
     enforce_gas_price_tolerance: int
     ethereum_node_debug_trace_call_url: str
-    is_javascript_tracer: bool
     native_tracer_node_url: str
 
     def __init__(
@@ -41,11 +41,10 @@ class ValidationManagerV7(ValidationManager):
         ethereum_node_url: str,
         bundler_address: str,
         chain_id: int,
-        is_unsafe: bool,
+        tracer: Tracer,
         is_legacy_mode: bool,
         enforce_gas_price_tolerance: int,
         ethereum_node_debug_trace_call_url: str,
-        is_javascript_tracer: bool,
         native_tracer_node_url: str
     ):
         self.user_operation_handler = user_operation_handler
@@ -53,7 +52,7 @@ class ValidationManagerV7(ValidationManager):
         self.ethereum_node_url = ethereum_node_url
         self.bundler_address = bundler_address
         self.chain_id = chain_id
-        self.is_unsafe = is_unsafe
+        self.tracer = tracer
         self.is_legacy_mode = is_legacy_mode
         self.enforce_gas_price_tolerance = enforce_gas_price_tolerance
         self.ethereum_node_debug_trace_call_url = ethereum_node_debug_trace_call_url
@@ -67,7 +66,6 @@ class ValidationManagerV7(ValidationManager):
 
         self.entrypoint_code_override = load_bytecode(
             "EntryPointSimulationsV7.json")
-        self.is_javascript_tracer = is_javascript_tracer
         self.native_tracer_node_url = native_tracer_node_url
 
     async def validate_user_operation(
@@ -88,7 +86,7 @@ class ValidationManagerV7(ValidationManager):
         dict[str, str | dict[str, str]] | None
     ]:
         debug_data: Any = None
-        if self.is_unsafe:
+        if self.tracer == Tracer.unsafe:
             validation_result = await self.simulate_validation_without_tracing(
                 user_operation, entrypoint
             )
@@ -114,7 +112,7 @@ class ValidationManagerV7(ValidationManager):
             user_operation.to_list(), entrypoint, self.chain_id
         )
 
-        if self.is_unsafe:
+        if self.tracer == Tracer.unsafe:
             addresses_called = None
             storage_map = None
         else:
@@ -269,7 +267,7 @@ class ValidationManagerV7(ValidationManager):
     ) -> tuple[str, str]:
         call_data = ValidationManagerV7.encode_simulate_validation_calldata(
             user_operation)
-        if self.is_javascript_tracer:
+        if self.tracer == Tracer.javascript:
             params = [
                 {
                     "from": ZERO_ADDRESS,
