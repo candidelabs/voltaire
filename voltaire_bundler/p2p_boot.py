@@ -22,6 +22,8 @@ def p2p_boot(
         str(p2p_enr_udp_port),
         "--target-peers",
         str(p2p_target_peers_number),
+        "--port",
+        str(p2p_enr_udp_port),
     ]
     if p2p_enr_address is not None:
         p2p_cmd.append("--enr-address")
