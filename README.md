@@ -5,10 +5,10 @@
 <!-- PROJECT LOGO -->
 
 <div align="center">
-  <img src="https://github.com/candidelabs/voltaire/assets/7014833/603d130d-62ce-458e-b2f6-31597b5279ab">
+  <img src="https://github.com/user-attachments/assets/8b28b10f-495a-4cf7-8ec8-43c4cf684db8">
   <p>
     <b>
-      Modular and lighting-fast Python Bundler for Ethereum EIP-4337 Account Abstraction
+      Modular and lighting-fast Python-Rust Bundler for Ethereum EIP-4337 Account Abstraction
     </b>
    </p>
 </div>
@@ -119,5 +119,5 @@ None of this would have been possible without the following teams and organizati
 
 * <a href='https://eips.ethereum.org/EIPS/eip-4337'>EIP-4337: Account Abstraction via Entry Point Contract specification </a>
 * <a href='https://github.com/eth-infinitism/bundler'>eth-infinitism/bundler</a>
-* Voltaire is funded exclusively by [The Ethereum Foundation](https://ethereum.foundation/)
 * <a href='https://github.com/sigp/lighthouse'>Lighthouse: Ethereum consensus client</a>
+* [The Ethereum Foundation](https://ethereum.foundation/) throught the Ecosystem Support Grants Program (ESP).
