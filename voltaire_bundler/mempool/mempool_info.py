@@ -12,10 +12,10 @@ DEFAULT_MEMPOOL_INFO = {
     #dummy v0.07 mempool id's for now
     "0x0000000071727De22E5E9d8BAf0edAc6f37da032": {
         1337: "Qmf7P3CuhzSbpJa8LqXPwRzfPqsvoQ6RG7aXvthYTzGxb1",  # dev
-        1: "QmVEt8BqyX7mbPhMNkmhnxL7fLxcXxsReMQcjYMBSHBfy1",  # ethereum
+        1: "Qma9Fv7qSahePTd5ACCFG8Jsd3qJqtFUqGmmGKoVqriajp",  # ethereum
         5: "QmTmj4cizhWpEFCCqk5dP67yws7R2PPgCtb2bd2RgVPCb1",  # goerli
-        10: "QmPkygym9oarrdiTeGBFQqbJcjpv4yHLLXrqQYGqKiXs71",  # optimism
-        42161: "QmSpr2Q6cMfZ2CvXecH843KtvnG3tzvxZVy1jKphYKd6t1",  # arbitrum
+        10: "QmcBcc4nxdGiKyM6RC7fZAUtsYNaAYqfzf9wfNxYmdT9Fc",  # optimism
+        42161: "QmXH8oBNx1EjxYkSWpk8DMcyJgMxCk8Dujz1PswQGdGFyK",  # arbitrum
         80001: "QmcFZKUX9qoo3StwVycJTAhwdiqbEjcwNvQVK246p3z1r1",  # mumbai
         11155111: "QmdDwVFoEEcgv5qnaTB8ncnXGMnqrhnA5nYpRr4ouWe4A1",  # sepolia
         421614: "QmVwhF77aVNzRUkMJNLDkeF9BtQMHLnfDY5ePpZ81uKLz1",  # arbitrum sepolia
