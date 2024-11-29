@@ -37,8 +37,6 @@ class BundlerManager:
     flashbots_protect_node_url: str | None
     max_fee_per_gas_percentage_multiplier: int
     max_priority_fee_per_gas_percentage_multiplier: int
-    user_operations_to_send_v6: list[UserOperationV6] | None
-    user_operations_to_send_v7: list[UserOperationV7]
     gas_price_percentage_multiplier: int
 
     def __init__(
@@ -70,37 +68,9 @@ class BundlerManager:
         self.max_priority_fee_per_gas_percentage_multiplier = (
             max_priority_fee_per_gas_percentage_multiplier
         )
-        self.user_operations_to_send_v7 = []
-        if self.local_mempool_manager_v6 is None:
-            self.user_operations_to_send_v6 = None
-        else:
-            self.user_operations_to_send_v6 = []
         self.gas_price_percentage_multiplier = 100
 
     async def send_next_bundle(self) -> None:
-        await self.update_send_queue()
-
-        user_operations_to_send_v7 = self.user_operations_to_send_v7
-        self.user_operations_to_send_v7 = []
-        tasks_arr = [
-            self.send_bundle(
-                user_operations_to_send_v7,
-                self.local_mempool_manager_v7
-            )
-        ]
-        if self.user_operations_to_send_v6 is not None:
-            assert self.local_mempool_manager_v6 is not None
-            user_operations_to_send_v6 = self.user_operations_to_send_v6
-            self.user_operations_to_send_v6 = []
-            tasks_arr.append(
-                self.send_bundle(
-                    user_operations_to_send_v6,
-                    self.local_mempool_manager_v6
-                )
-            )
-        await asyncio.gather(*tasks_arr)
-
-    async def update_send_queue(self) -> None:
         tasks_arr = [
             self.local_mempool_manager_v7.get_user_operations_to_bundle(
                 self.conditional_rpc is not None
@@ -114,11 +84,26 @@ class BundlerManager:
             )
         tasks = await asyncio.gather(*tasks_arr)
 
-        self.user_operations_to_send_v7 += cast(list[UserOperationV7], tasks[0])
+        bundle_to_send_v7 = cast(list[UserOperationV7], tasks[0])
+        bundle_to_send_v6 = None
         if self.local_mempool_manager_v6 is not None:
-            if self.user_operations_to_send_v6 is None:
-                self.user_operations_to_send_v6 = []
-            self.user_operations_to_send_v6 += cast(list[UserOperationV6], tasks[1])
+            bundle_to_send_v6 = cast(list[UserOperationV6], tasks[1])
+
+        tasks_arr = [
+            self.send_bundle(
+                bundle_to_send_v7,
+                self.local_mempool_manager_v7
+            )
+        ]
+        if bundle_to_send_v6 is not None:
+            assert self.local_mempool_manager_v6 is not None
+            tasks_arr.append(
+                    self.send_bundle(
+                        bundle_to_send_v6,
+                        self.local_mempool_manager_v6
+                    )
+            )
+        await asyncio.gather(*tasks_arr)
 
     async def send_bundle(
         self,
