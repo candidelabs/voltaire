@@ -44,6 +44,7 @@ class LocalMempoolManager():
     latest_paymaster_deposits_cache_block: int
     min_stake: int
     min_unstake_delay: int
+    max_bundle_gas_limit: int
     MAX_OPS_PER_REQUEST = 4096
 
     def clear_user_operations(self) -> None:

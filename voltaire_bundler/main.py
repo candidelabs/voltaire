@@ -82,7 +82,8 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             init_data.reputation_blacklist,
             init_data.native_tracer_node_url,
             init_data.min_stake,
-            init_data.min_unstake_delay
+            init_data.min_unstake_delay,
+            init_data.max_bundle_gas_limit
         )
         task_group.create_task(execution_endpoint.start_execution_endpoint())
 

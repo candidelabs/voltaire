@@ -31,7 +31,8 @@ class LocalMempoolManagerV7(LocalMempoolManager):
         reputation_blacklist: list[str],
         native_tracer_node_url: str,
         min_stake: int,
-        min_unstake_delay: int
+        min_unstake_delay: int,
+        max_bundle_gas_limit: int
     ):
         self.validation_manager = ValidationManagerV7(
             user_operation_handler,
@@ -68,3 +69,4 @@ class LocalMempoolManagerV7(LocalMempoolManager):
         self.latest_paymaster_deposits_cache_block = 0
         self.min_stake = min_stake
         self.min_unstake_delay = min_unstake_delay
+        self.max_bundle_gas_limit = max_bundle_gas_limit

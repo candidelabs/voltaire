@@ -91,6 +91,7 @@ class InitData:
     native_tracer_node_url: str
     min_stake: int
     min_unstake_delay: int
+    max_bundle_gas_limit: int
 
 
 def address(ep: str):
@@ -541,6 +542,17 @@ def initialize_argument_parser() -> ArgumentParser:
         default=1,
     )
 
+    parser.add_argument(
+        "--max_bundle_gas_limit",
+        type=int,
+        help=(
+            "Limit for maximum bundle gas cost."
+        ),
+        nargs="?",
+        const=15_000_000,
+        default=15_000_000,
+    )
+
     return parser
 
 
@@ -773,7 +785,8 @@ async def get_init_data(args: Namespace) -> InitData:
         args.p2p_canonical_mempool_id_06,
         args.native_tracer_node_url,
         args.min_stake,
-        args.min_unstake_delay
+        args.min_unstake_delay,
+        args.max_bundle_gas_limit
     )
 
     if args.verbose:
