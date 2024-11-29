@@ -46,6 +46,7 @@ class LocalMempoolManager():
     min_unstake_delay: int
     max_bundle_gas_limit: int
     MAX_OPS_PER_REQUEST = 4096
+    ENTRYPOINT_GAS_OVERHEAD = 6_000
 
     def clear_user_operations(self) -> None:
         self.senders_to_senders_mempools.clear()
@@ -63,6 +64,15 @@ class LocalMempoolManager():
             user_operation.factory_address_lowercase,
             user_operation.paymaster_address_lowercase,
         )
+        if (
+            user_operation.max_gas + self.ENTRYPOINT_GAS_OVERHEAD
+        ) > self.max_bundle_gas_limit:
+            raise ValidationException(
+                ValidationExceptionCode.SimulateValidation,
+                f"useroperation max gas cost is {hex(user_operation.max_gas)} "
+                f"exceeds max bundle gas limit {hex(self.max_bundle_gas_limit)}",
+            )
+
         await asyncio.gather(
             self.user_operation_handler.gas_manager.verify_preverification_gas_and_verification_gas_limit(
                 user_operation,
@@ -169,6 +179,13 @@ class LocalMempoolManager():
                 user_operation.factory_address_lowercase,
                 user_operation.paymaster_address_lowercase,
             )
+            if user_operation.max_gas > self.max_bundle_gas_limit:
+                raise ValidationException(
+                    ValidationExceptionCode.SimulateValidation,
+                    f"useroperation max gas cost is {hex(user_operation.max_gas)} "
+                    f"which exceeds {hex(self.max_bundle_gas_limit)}",
+                )
+
             await self.user_operation_handler.gas_manager.verify_preverification_gas_and_verification_gas_limit(
                 user_operation,
                 self.entrypoint,
@@ -294,6 +311,7 @@ class LocalMempoolManager():
     ) -> list[UserOperation]:
         bundle = []
         senders_lowercase = self.senders_to_senders_mempools.keys()
+        sum_of_userops_max_gas = 0
         for sender_address_lowercase in list(self.senders_to_senders_mempools):
             sender_mempool = self.senders_to_senders_mempools[sender_address_lowercase]
             if len(sender_mempool.user_operation_hashs_to_verified_user_operation) > 0:
@@ -306,7 +324,17 @@ class LocalMempoolManager():
                 latest_block_number, _, _, latest_block_timestamp, _ = (
                     await get_latest_block_info(self.ethereum_node_url)
                 )
-
+                if (
+                    sum_of_userops_max_gas +
+                    user_operation.max_gas +
+                    self.ENTRYPOINT_GAS_OVERHEAD
+                ) > self.max_bundle_gas_limit:
+                    logging.debug(
+                        "user operation skipped for bundling because "
+                        f"bundle gas cost exceeded {self.max_bundle_gas_limit}."
+                        "user_operation_hash: " + user_operation_hash
+                    )
+                    continue
                 try:
                     (
                         _, _, _, _, _,
@@ -383,6 +411,7 @@ class LocalMempoolManager():
                     continue
 
                 bundle.append(user_operation)
+                sum_of_userops_max_gas += (user_operation.max_gas + self.ENTRYPOINT_GAS_OVERHEAD)
                 del sender_mempool.user_operation_hashs_to_verified_user_operation[
                     user_operation_hash]
                 self._remove_hash_from_entities_ops_hashes_in_mempool(

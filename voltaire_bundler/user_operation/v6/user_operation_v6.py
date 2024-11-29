@@ -28,6 +28,7 @@ class UserOperationV6(UserOperation):
     paymaster_address_lowercase: Address | None
     valid_mempools_ids: list[MempoolId]
     user_operation_hash: str
+    max_gas: int
     jsonRequestDict: InitVar[dict[str, Address | int | bytes]]
 
     def __init__(self, jsonRequestDict) -> None:
@@ -76,6 +77,8 @@ class UserOperationV6(UserOperation):
         self.validated_at_block_hex = None
 
         self._set_factory_and_paymaster_address()
+
+        self.max_gas = self.get_max_gas()
 
     @staticmethod
     def verify_fields_exist(
@@ -153,16 +156,18 @@ class UserOperationV6(UserOperation):
             max_cost += 2 * self.verification_gas_limit
         return max_cost * self.max_fee_per_gas
 
-    def get_required_prefund(self) -> int:
-        max_cost = (
+    def get_max_gas(self) -> int:
+        max_gas = (
             self.pre_verification_gas +
             self.verification_gas_limit +
             self.call_gas_limit
         )
         if self.paymaster_address_lowercase is not None:
-            max_cost += 2 * self.verification_gas_limit
+            max_gas += 2 * self.verification_gas_limit
+        return max_gas
 
-        return max_cost * self.max_fee_per_gas
+    def get_required_prefund(self) -> int:
+        return self.get_max_gas() * self.max_fee_per_gas
 
     def _set_factory_and_paymaster_address(self) -> None:
         if len(self.init_code) > 20:
