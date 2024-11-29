@@ -29,7 +29,7 @@ class UserOperation(ABC):
         pass
 
     @abstractmethod
-    def get_max_cost(self) -> int:
+    def get_required_prefund(self) -> int:
         pass
 
 

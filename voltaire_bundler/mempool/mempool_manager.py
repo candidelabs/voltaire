@@ -660,14 +660,14 @@ class LocalMempoolManager():
         else:
             remaining_deposit = await self.get_paymaster_deposit(
                 paymaster, block_number_hex)
-            user_op_max_cost = user_operation.get_max_cost()
+            user_op_required_prefund = user_operation.get_required_prefund()
 
-        remaining_deposit -= user_op_max_cost
+        remaining_deposit -= user_op_required_prefund
         for sender_address in list(self.senders_to_senders_mempools):
             sender = self.senders_to_senders_mempools[sender_address]
             for verified_user_operation in sender.user_operation_hashs_to_verified_user_operation.values():
-                user_op_max_cost = verified_user_operation.user_operation.get_max_cost()
-                remaining_deposit -= user_op_max_cost
+                user_op_required_prefund = verified_user_operation.user_operation.get_required_prefund()
+                remaining_deposit -= user_op_required_prefund
                 if remaining_deposit < 0:
                     raise ValidationException(
                         ValidationExceptionCode.PaymasterDepositTooLow,

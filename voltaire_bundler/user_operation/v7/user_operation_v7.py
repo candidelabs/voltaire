@@ -256,7 +256,7 @@ class UserOperationV7(UserOperation):
             max_cost += self.paymaster_verification_gas_limit
         return max_cost * self.max_fee_per_gas
 
-    def get_max_cost(self) -> int:
+    def get_required_prefund(self) -> int:
         max_cost = (
             self.pre_verification_gas +
             self.verification_gas_limit +
