@@ -56,7 +56,13 @@ class LocalMempoolManager():
         self,
         user_operation: UserOperation,
     ) -> tuple[str, str, List[MempoolId]]:
-        latest_block_number, _, _, latest_block_timestamp, latest_block_hash = (
+        (
+            latest_block_number,
+            latest_block_basefee,
+            _,
+            latest_block_timestamp,
+            latest_block_hash
+        ) = (
             await get_latest_block_info(self.ethereum_node_url)
         )
         self._verify_banned_and_throttled_entities(
@@ -77,6 +83,8 @@ class LocalMempoolManager():
             self.user_operation_handler.gas_manager.verify_preverification_gas_and_verification_gas_limit(
                 user_operation,
                 self.entrypoint,
+                latest_block_number,
+                latest_block_basefee
             ),
             self.user_operation_handler.gas_manager.verify_gas_fees_and_get_price(
                 user_operation, self.enforce_gas_price_tolerance
@@ -173,6 +181,16 @@ class LocalMempoolManager():
         peer_id: str,
         verified_at_block_hash: str
     ) -> None | str:
+        (
+            latest_block_number,
+            latest_block_basefee,
+            _,
+            latest_block_timestamp,
+            latest_block_hash
+        ) = (
+            await get_latest_block_info(self.ethereum_node_url)
+        )
+
         try:
             self._verify_banned_and_throttled_entities(
                 Address(user_operation.sender_address.lower()),
@@ -189,17 +207,15 @@ class LocalMempoolManager():
             await self.user_operation_handler.gas_manager.verify_preverification_gas_and_verification_gas_limit(
                 user_operation,
                 self.entrypoint,
+                latest_block_number,
+                latest_block_basefee,
             )
-            gas_price_hex = await self.user_operation_handler.gas_manager.verify_gas_fees_and_get_price(
+            await self.user_operation_handler.gas_manager.verify_gas_fees_and_get_price(
                 user_operation, self.enforce_gas_price_tolerance
             )
             user_operation.validated_at_block_hex = verified_at_block_hash
         except ValidationException:
             return "No"
-
-        latest_block_number, _, _, latest_block_timestamp, latest_block_hash = (
-            await get_latest_block_info(self.ethereum_node_url)
-        )
 
         try:
             (
