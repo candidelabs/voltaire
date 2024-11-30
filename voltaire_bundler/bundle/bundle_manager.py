@@ -1,10 +1,9 @@
 import asyncio
 import logging
 import math
-from typing import Any, cast
+from typing import cast
 
 from eth_account import Account
-from eth_abi import encode
 
 from voltaire_bundler.cli_manager import ConditionalRpc
 from voltaire_bundler.user_operation.models import \
@@ -18,6 +17,8 @@ from voltaire_bundler.user_operation.user_operation_handler import \
 from voltaire_bundler.user_operation.v6.user_operation_v6 import UserOperationV6
 from voltaire_bundler.user_operation.v7.user_operation_v7 import UserOperationV7
 
+from voltaire_bundler.utils.encode import \
+    encode_handleops_calldata_v6, encode_handleops_calldata_v7
 from voltaire_bundler.utils.eth_client_utils import \
     send_rpc_request_to_eth_client
 
@@ -393,12 +394,12 @@ class BundlerManager:
             user_operations_list.append(user_operation.to_list())
 
         if len(user_operations_list[0]) == 9:
-            call_data = BundlerManager.encode_handleops_calldata_v7(
+            call_data = encode_handleops_calldata_v7(
                 user_operations_list, self.bundler_address
             )
             mempool_manager = self.local_mempool_manager_v7
         else:
-            call_data = BundlerManager.encode_handleops_calldata_v6(
+            call_data = encode_handleops_calldata_v6(
                 user_operations_list, self.bundler_address
             )
             assert self.local_mempool_manager_v6 is not None
@@ -595,34 +596,3 @@ class BundlerManager:
                 merged_storage_map[
                     user_operation.sender_address] = root_hash_result["result"]["storageHash"]
         return call_data, call_gas_limit, merged_storage_map
-
-    @staticmethod
-    def encode_handleops_calldata_v6(
-        user_operations_list: list[list[Any]], bundler_address: str
-    ) -> str:
-        function_selector = "0x1fad948c"  # handleOps
-        params = encode(
-            [
-                "(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)[]",
-                "address",
-            ],
-            [user_operations_list, bundler_address],
-        )
-
-        call_data = function_selector + params.hex()
-        return call_data
-
-    @staticmethod
-    def encode_handleops_calldata_v7(
-            user_operations_list: list[list[Any]], bundler_address: str) -> str:
-        function_selector = "0x765e827f"  # handleOps
-        params = encode(
-            [
-                "(address,uint256,bytes,bytes,bytes32,uint256,bytes32,bytes,bytes)[]",
-                "address",
-            ],
-            [user_operations_list, bundler_address],
-        )
-
-        call_data = function_selector + params.hex()
-        return call_data
