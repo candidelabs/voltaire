@@ -172,8 +172,8 @@ class UserOperationHandler(ABC):
         decode_result = decode(data_abi, bytes.fromhex(data[2:]))
         nonce = decode_result[0]
         success = decode_result[1]
-        actualGasCost = decode_result[2]
-        actualGasUsed = decode_result[3]
+        actualGasCost = hex(decode_result[2])
+        actualGasUsed = hex(decode_result[3])
 
         return (
             log_object,

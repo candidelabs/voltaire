@@ -116,7 +116,7 @@ class UserOperationReceiptInfo:
     paymaster: str
     nonce: int
     success: bool
-    actualGasCost: int
-    actualGasUsed: int
+    actualGasCost: str
+    actualGasUsed: str
     logs: Log
     receipt: ReceiptInfo
