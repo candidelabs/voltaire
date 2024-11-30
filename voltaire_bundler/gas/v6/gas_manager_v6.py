@@ -1,6 +1,7 @@
 import logging
 import math
 from typing import Any
+from typing import cast
 
 from eth_abi import decode, encode
 
@@ -284,7 +285,7 @@ class GasManagerV6(GasManager):
         user_operation_list[6] = 21000
 
         # set a dummy signature only if the user didn't supply any
-        if len(user_operation_list[10]) < 65:
+        if len(cast(bytes, user_operation_list[10])) < 65:
             user_operation_list[10] = (
                 b"\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01"  # signature
             )
