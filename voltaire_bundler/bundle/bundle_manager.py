@@ -318,7 +318,9 @@ class BundlerManager:
                         await self.send_bundle(user_operations, mempool_manager)
                     else:
                         logging.error(
-                            "Failed to send bundle. Dropping all user operations"
+                            "Failed to send bundle after increasing "
+                            "gas_price_percentage_multiplier to more than 200."
+                            "Dropping all user operations"
                             + str(result["error"])
                         )
                 # ErrAccountLimitExceeded is returned if a transaction would
