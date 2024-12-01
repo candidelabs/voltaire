@@ -85,7 +85,8 @@ class GasManagerV7(GasManager):
         )
 
         if input_verification_gas_limit == 0:
-            result_verification_gas_limit = estimated_verification_gas_limit
+            # 2100 buffer overhead
+            result_verification_gas_limit = estimated_verification_gas_limit + 2100
         else:
             result_verification_gas_limit = input_verification_gas_limit
 
@@ -101,7 +102,7 @@ class GasManagerV7(GasManager):
             result_preverification_gas = await self.get_preverification_gas(
                 user_operation,
                 entrypoint,
-            )
+            ) + 1000  # 1000 buffer overhead
         else:
             result_preverification_gas = user_operation.pre_verification_gas
 
@@ -286,8 +287,6 @@ class GasManagerV7(GasManager):
 
     def calc_base_preverification_gas(self, user_operation: UserOperationV7) -> int:
         user_operation_list = user_operation.to_list()
-
-        user_operation_list[5] = 21000
 
         # set a dummy signature only if the user didn't supply any
         if len(cast(bytes, user_operation_list[8])) < 65:
