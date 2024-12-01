@@ -150,13 +150,14 @@ class BundlerManager:
         try:
             tasks = await asyncio.gather(*tasks_arr)
         except ExecutionException as err:
-            logging.error(f"Sending bundle failed with erro: {err.message}") 
+            logging.error(f"Sending bundle failed with erro: {err.message}")
             return
 
         call_data, gas_estimation_hex, merged_storage_map = tasks[0]
 
         if call_data is None or gas_estimation_hex is None:
-            logging.error(f"Sending bundle failed. failed call data or gas estimation.") 
+            logging.error(
+                "Sending bundle failed. failed call data or gas estimation.")
             return
 
         gas_estimation_hex = hex(math.ceil(
@@ -277,7 +278,10 @@ class BundlerManager:
                 # ErrInvalidSender is returned if the transaction
                 # contains an invalid signature.
                 elif "invalid sender" in result["error"]["message"]:
-                    pass  # todo
+                    logging.critical(
+                        f"Bundle failed because: {result["error"]["message"]}"
+                    )
+                    return
                 # ErrUnderpriced is returned if a transaction's gas price
                 # is below the minimum configured for the transaction pool.
                 elif "transaction underpriced" in result["error"]["message"]:
@@ -320,21 +324,37 @@ class BundlerManager:
                 # ErrAccountLimitExceeded is returned if a transaction would
                 # exceed the number allowed by a pool for a single account.
                 elif "account limit exceeded" in result["error"]["message"]:
-                    pass  # todo
+                    logging.critical(
+                        f"Bundle failed because: {result["error"]["message"]}"
+                    )
+                    await asyncio.sleep(1)
+                    await self.send_bundle(user_operations, mempool_manager)
                 # ErrGasLimit is returned if a transaction's requested gas
                 # limit exceeds the maximum allowance of the current block.
                 elif "exceeds block gas limit" in result["error"]["message"]:
-                    pass  # todo
+                    logging.error(
+                        f"Bundle failed because: {result["error"]["message"]}"
+                    )
+                    user_operations_len = len(user_operations)
+                    half_len = math.ceil(user_operations_len/2)
+                    await self.send_bundle(
+                        user_operations[0:half_len], mempool_manager)
+                    await self.send_bundle(
+                        user_operations[half_len:], mempool_manager)
                 # ErrNegativeValue is a sanity error to ensure no one is able
                 # to specify a transaction with a negative value.
                 elif "negative value" in result["error"]["message"]:
-                    pass  # todo
+                    logging.critical(
+                        f"Bundle failed because: {result["error"]["message"]}"
+                    )
                 # ErrOversizedData is returned if the input data of
                 # a transaction is greater than some meaningful limit a user
                 # might use. This is not a consensus error making
                 # the transaction invalid, rather a DOS protection.
                 elif "oversized data" in result["error"]["message"]:
-                    pass  # todo
+                    logging.critical(
+                        f"Bundle failed because: {result["error"]["message"]}"
+                    )
                 # ErrFutureReplacePending is returned if a future transaction
                 # replaces a pending one. Future transactions should only
                 # be able to replace other future transactions.
@@ -342,7 +362,9 @@ class BundlerManager:
                     "future transaction tries to replace pending"
                     in result["error"]["message"]
                 ):
-                    pass  # todo
+                    logging.critical(
+                        f"Bundle failed because: {result["error"]["message"]}"
+                    )
                 else:
                     logging.error(
                         "Failed to send bundle. Dropping all user operations"
