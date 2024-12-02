@@ -198,7 +198,7 @@ class GasManager(ABC, Generic[UserOperationType]):
 
         # currently most bundles contains a singler useroperations
         # so l1 fees is calculated for the full handleops transaction
-        if hasattr(user_operation, 'paymasterAndData'):
+        if len(user_operations_list[0]) == 11:
             handleops_calldata = encode_handleops_calldata_v6(
                 user_operations_list, ZERO_ADDRESS
             )
