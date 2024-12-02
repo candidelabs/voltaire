@@ -31,10 +31,9 @@ def p2p_boot(
         for topic in functools.reduce(lambda a, b: a + b, p2p_mempools_ids):
             p2p_cmd.append(topic)
 
-    if len(p2p_boot_nodes_enr) > 0:
+    if p2p_boot_nodes_enr is not None:
         p2p_cmd.append("--boot-nodes")
-        for enr in p2p_boot_nodes_enr:
-            p2p_cmd.append(enr)
+        p2p_cmd.append(p2p_boot_nodes_enr)
     if not p2p_upnp_enabled:
         p2p_cmd.append("--disable-upnp")
     if p2p_metrics_enabled:
