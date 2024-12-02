@@ -260,8 +260,8 @@ class UserOperationV7(UserOperation):
         return max_cost * self.max_fee_per_gas
 
     def get_max_gas(self) -> int:
+        # todo: add calldata gas cost
         max_gas = (
-            self.pre_verification_gas +
             self.verification_gas_limit +
             self.call_gas_limit
         )
@@ -273,7 +273,17 @@ class UserOperationV7(UserOperation):
         return max_gas
 
     def get_required_prefund(self) -> int:
-        return self.get_max_gas() * self.max_fee_per_gas
+        gas = (
+            self.pre_verification_gas +
+            self.verification_gas_limit +
+            self.call_gas_limit
+        )
+        if self.paymaster_verification_gas_limit is not None:
+            gas += self.paymaster_verification_gas_limit
+        if self.paymaster_post_op_gas_limit is not None:
+            gas += self.paymaster_post_op_gas_limit
+
+        return gas * self.max_fee_per_gas
 
     def _set_factory_and_paymaster_address(self) -> None:
         if self.factory is not None and len(self.factory) >= 20:
