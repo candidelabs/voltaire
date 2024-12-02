@@ -397,10 +397,12 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--p2p_boot_nodes_enr",
-        nargs="+",
         type=str,
         default=_get_env_or_default("VOLTAIRE_P2P_BOOT_NODES_ENR", None, list),
-        help="P2P - List of nodes Enr to initially connect to.",
+        help=(
+            "P2P - One or more comma-delimited base64-encoded ENR's to "
+            "bootstrap the p2p network. Multiaddr is also supported."
+        ),
     )
 
     parser.add_argument(
