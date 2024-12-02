@@ -697,11 +697,6 @@ async def get_init_data(args: Namespace) -> InitData:
             )
             sys.exit(1)
 
-        if args.javascript_tracer:
-            logging.critical(
-                "javascript_tracer can't be enabled with unsafe"
-            )
-            sys.exit(1)
     elif args.tracer == "native":
         try:
             trace_call_res = await send_rpc_request_to_eth_client(
