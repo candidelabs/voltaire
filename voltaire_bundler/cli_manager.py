@@ -692,7 +692,8 @@ async def get_init_data(args: Namespace) -> InitData:
     if args.tracer == Tracer.unsafe:
         if args.conditional_rpc is not None:
             logging.critical(
-                "sendRawTransactionalConditional can't work with unsafe mode."
+                "conditional_rpc sendRawTransactionalConditional "
+                "can't work with unsafe mode."
             )
             sys.exit(1)
 
