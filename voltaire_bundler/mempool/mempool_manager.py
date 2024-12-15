@@ -58,7 +58,7 @@ class LocalMempoolManager():
     ) -> tuple[str, str, List[MempoolId]]:
         (
             latest_block_number,
-            latest_block_basefee,
+            _,
             _,
             latest_block_timestamp,
             latest_block_hash
@@ -84,7 +84,6 @@ class LocalMempoolManager():
                 user_operation,
                 self.entrypoint,
                 latest_block_number,
-                latest_block_basefee
             ),
             self.user_operation_handler.gas_manager.verify_gas_fees_and_get_price(
                 user_operation, self.enforce_gas_price_tolerance
@@ -183,7 +182,7 @@ class LocalMempoolManager():
     ) -> None | str:
         (
             latest_block_number,
-            latest_block_basefee,
+            _,
             _,
             latest_block_timestamp,
             latest_block_hash

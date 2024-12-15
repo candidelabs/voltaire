@@ -118,14 +118,12 @@ class GasManager(ABC, Generic[UserOperationType]):
         self,
         user_operation: UserOperationType,
         entrypoint: str,
-        latest_block_number_hex: str,
-        latest_block_basefee: int,
+        latest_block_number_hex: str = "latest",
     ) -> None:
         expected_preverification_gas = await self.get_preverification_gas(
             user_operation,
             entrypoint,
-            latest_block_number_hex,
-            latest_block_basefee
+            latest_block_number_hex
         )
 
         if user_operation.pre_verification_gas < expected_preverification_gas:
@@ -146,8 +144,7 @@ class GasManager(ABC, Generic[UserOperationType]):
         self,
         user_operation: UserOperationType,
         entrypoint: str,
-        latest_block_number_hex: str | None = None,
-        latest_block_basefee: int | None = None,
+        latest_block_number_hex: str = "latest",
         preverification_gas_percentage_coefficient: int = 100,
         preverification_gas_addition_constant: int = 0,
     ) -> int:
@@ -163,12 +160,8 @@ class GasManager(ABC, Generic[UserOperationType]):
             self.chain_id == 8453 or  # base
             self.chain_id == 480  # world chain
         ):
-            if latest_block_number_hex is None or latest_block_basefee is None:
-                (
-                    latest_block_number_hex, latest_block_basefee, _, _, _
-                ) = await get_latest_block_info(self.ethereum_node_url)
             l1_gas = await self.calc_l1_gas_estimate_optimism(
-                user_operation, latest_block_number_hex, latest_block_basefee
+                user_operation, latest_block_number_hex
             )
         # arbitrum One or arbitrum sepolia
         if self.chain_id == 42161 or self.chain_id == 421614:
@@ -191,18 +184,36 @@ class GasManager(ABC, Generic[UserOperationType]):
     async def calc_l1_gas_estimate_optimism(
         self, user_operation: UserOperationType,
         block_number_hex: str,
-        latest_block_base_fee: int
     ) -> int:
 
         user_operations_list = [user_operation.to_list()]
 
         # currently most bundles contains a singler useroperations
         # so l1 fees is calculated for the full handleops transaction
-        if len(user_operations_list[0]) == 11:
+        user_op = user_operations_list[0]
+        if len(user_op) == 11:
+            # set random values for gas limits and gas prices for accurate gas estimation
+            if user_op[4] == 0:
+                user_op[4] = 0xb8621d
+            if user_op[5] == 0:
+                user_op[5] = 0x51448d
+            if user_op[6] == 0:
+                user_op[6] = 0x8d2755
+            if user_op[7] == 0:
+                user_op[7] = 0x4f91cb
+            if user_op[8] == 0:
+                user_op[8] = 0x76e216
             handleops_calldata = encode_handleops_calldata_v6(
                 user_operations_list, ZERO_ADDRESS
             )
         else:
+            # set random values for gas limits and gas prices for accurate gas estimation
+            if user_op[4] == (0).to_bytes(32):
+                user_op[4] = (0xb8621d).to_bytes(16) + (0x51448d).to_bytes(16)
+            if user_op[5] == 0:
+                user_op[5] = 0x8d2755
+            if user_op[6] == (0).to_bytes(32):
+                user_op[6] = (0x4f91cb).to_bytes(16) + (0x76e216).to_bytes(16)
             handleops_calldata = encode_handleops_calldata_v7(
                 user_operations_list, ZERO_ADDRESS
             )
@@ -228,19 +239,20 @@ class GasManager(ABC, Generic[UserOperationType]):
             block_number_hex,
         ]
 
-        result = await send_rpc_request_to_eth_client(
+        eth_call_op = send_rpc_request_to_eth_client(
             self.ethereum_node_url, "eth_call", params
         )
+        block_max_fee_per_gas_op = send_rpc_request_to_eth_client(
+            self.ethereum_node_url, "eth_gasPrice"
+        )
+        tasks_arr = [eth_call_op, block_max_fee_per_gas_op]
+        tasks: Any = await asyncio.gather(*tasks_arr)
+        result = tasks[0]
+        block_max_fee_per_gas_hex = tasks[1]['result']
+        block_max_fee_per_gas = int(block_max_fee_per_gas_hex, 16)
 
         l1_fee = decode(["uint256"], bytes.fromhex(result["result"][2:]))[0]
-
-        l2_gas_price = min(
-            user_operation.max_fee_per_gas,
-            user_operation.max_priority_fee_per_gas + latest_block_base_fee
-        )
-        l2_gas_price = max(1, l2_gas_price)  # in case l2_gas_price = 0
-
-        gas_estimate_for_l1 = math.ceil(l1_fee / l2_gas_price)
+        gas_estimate_for_l1 = math.ceil(l1_fee / block_max_fee_per_gas)
 
         return gas_estimate_for_l1
 
