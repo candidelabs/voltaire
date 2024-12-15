@@ -255,7 +255,8 @@ class GasManager(ABC, Generic[UserOperationType]):
 
         user_operations_list = [user_operation.to_list()]
 
-        if hasattr(user_operation, 'paymasterAndData'):
+        user_op = user_operations_list[0]
+        if len(user_op) == 11:
             handleops_calldata = encode_handleops_calldata_v6(
                 user_operations_list, ZERO_ADDRESS
             )
