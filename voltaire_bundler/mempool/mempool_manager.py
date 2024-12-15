@@ -204,15 +204,17 @@ class LocalMempoolManager():
                     f"which exceeds {hex(self.max_bundle_gas_limit)}",
                 )
 
-            await self.user_operation_handler.gas_manager.verify_preverification_gas_and_verification_gas_limit(
-                user_operation,
-                self.entrypoint,
-                latest_block_number,
-                latest_block_basefee,
+            await asyncio.gather(
+                self.user_operation_handler.gas_manager.verify_preverification_gas_and_verification_gas_limit(
+                    user_operation,
+                    self.entrypoint,
+                    latest_block_number,
+                ),
+                self.user_operation_handler.gas_manager.verify_gas_fees_and_get_price(
+                    user_operation, self.enforce_gas_price_tolerance
+                )
             )
-            await self.user_operation_handler.gas_manager.verify_gas_fees_and_get_price(
-                user_operation, self.enforce_gas_price_tolerance
-            )
+
             user_operation.validated_at_block_hex = verified_at_block_hash
         except ValidationException:
             return "No"
