@@ -136,8 +136,11 @@ class UserOperationHandlerV7(UserOperationHandler):
 
         if user_operation_list[2] != b'':
             user_operation_json["factory"] = to_checksum_address(
-                    user_operation_list[2][16:])
-            user_operation_json["factory_data"] = "0x" + user_operation_list[2][:16].hex()
+                    user_operation_list[2][:20])
+            if len(user_operation_list[2]) > 20:
+                user_operation_json["factory_data"] = "0x" + user_operation_list[2][20:].hex()
+            else:
+                user_operation_json["factory_data"] = "0x"
 
         if user_operation_list[7] != b'':
             user_operation_json["paymaster"] = to_checksum_address(
