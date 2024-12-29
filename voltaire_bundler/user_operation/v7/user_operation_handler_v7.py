@@ -3,6 +3,7 @@ from functools import reduce
 from eth_utils import to_checksum_address
 
 from eth_abi import decode
+from voltaire_bundler.bundle.exceptions import UserOpFoundException
 from voltaire_bundler.typing import Address
 from voltaire_bundler.user_operation.user_operation_handler import UserOperationHandler
 from voltaire_bundler.mempool.sender_mempool import \
@@ -112,7 +113,7 @@ class UserOperationHandlerV7(UserOperationHandler):
                     "blockHash": None,
                     "transactionHash": None,
                 }
-                return user_operation_by_hash_json
+                raise UserOpFoundException(user_operation_by_hash_json)
             else:
                 return None
         (
@@ -160,7 +161,7 @@ class UserOperationHandlerV7(UserOperationHandler):
             "blockHash": block_hash,
             "transactionHash": transaction_hash,
         }
-        return user_operation_by_hash_json
+        raise UserOpFoundException(user_operation_by_hash_json)
 
 
 def decode_handle_op_input(handle_op_input) -> list[list]:

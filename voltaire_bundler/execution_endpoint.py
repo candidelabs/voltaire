@@ -6,7 +6,8 @@ import os
 from typing import Any, Optional
 
 from voltaire_bundler.bundle.exceptions import \
-    ExecutionException, OtherJsonRpcErrorCode, OtherJsonRpcErrorException, ValidationException, ValidationExceptionCode
+    ExecutionException, OtherJsonRpcErrorCode, OtherJsonRpcErrorException, \
+    UserOpFoundException, ValidationException, ValidationExceptionCode
 from voltaire_bundler.cli_manager import ConditionalRpc
 from voltaire_bundler.event_bus_manager.endpoint import Client, Endpoint
 from voltaire_bundler.typing import Address
@@ -361,33 +362,42 @@ class ExecutionEndpoint(Endpoint):
                 ValidationExceptionCode.InvalidFields,
                 "Missing/invalid userOpHash",
             )
-
+        user_operation_by_hash_json_ops = []
         if (self.local_mempool_manager_v6 is not None and
                 self.user_operation_handler_v6 is not None):
             senders_mempools = (
                 self.local_mempool_manager_v6.senders_to_senders_mempools.values()
             )
-            user_operation_by_hash_json = (
-                await self.user_operation_handler_v6.get_user_operation_by_hash_rpc(
+            user_operation_by_hash_json_ops.append(asyncio.create_task(
+                self.user_operation_handler_v6.get_user_operation_by_hash_rpc(
                     user_operation_hash,
                     LocalMempoolManagerV6.entrypoint,
                     senders_mempools,
-                )
+                ))
             )
-            if user_operation_by_hash_json is not None:
-                return user_operation_by_hash_json
 
         senders_mempools = (
             self.local_mempool_manager_v7.senders_to_senders_mempools.values()
         )
-        user_operation_by_hash_json = (
-            await self.user_operation_handler_v7.get_user_operation_by_hash_rpc(
+        user_operation_by_hash_json_ops.append(asyncio.create_task(
+            self.user_operation_handler_v7.get_user_operation_by_hash_rpc(
                 user_operation_hash,
                 LocalMempoolManagerV7.entrypoint,
                 senders_mempools,
-            )
+            ))
         )
-        return user_operation_by_hash_json
+        done, _ = await asyncio.wait(
+            user_operation_by_hash_json_ops,
+            return_when=asyncio.FIRST_EXCEPTION
+        )
+
+        for res in done:
+            excep = res.exception()
+            if isinstance(excep, UserOpFoundException):
+                return excep.user_op_by_hash_result
+            elif excep is not None:
+                raise excep
+        return None
 
     async def _event_rpc_getUserOperationReceipt(
             self, req_arguments: list) -> dict | None:

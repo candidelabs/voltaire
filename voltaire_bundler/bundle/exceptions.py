@@ -44,3 +44,8 @@ class OtherJsonRpcErrorException(Exception):
 @dataclass
 class MethodNotFoundException(Exception):
     exception_code: ExecutionExceptionCode
+
+
+@dataclass
+class UserOpFoundException(Exception):
+    user_op_by_hash_result: dict
