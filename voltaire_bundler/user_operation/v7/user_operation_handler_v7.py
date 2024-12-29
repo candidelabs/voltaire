@@ -138,18 +138,20 @@ class UserOperationHandlerV7(UserOperationHandler):
             user_operation_json["factory"] = to_checksum_address(
                     user_operation_list[2][:20])
             if len(user_operation_list[2]) > 20:
-                user_operation_json["factory_data"] = "0x" + user_operation_list[2][20:].hex()
+                user_operation_json["factoryData"] = (
+                    "0x" + user_operation_list[2][20:].hex())
             else:
-                user_operation_json["factory_data"] = "0x"
+                user_operation_json["factoryData"] = "0x"
 
         if user_operation_list[7] != b'':
             user_operation_json["paymaster"] = to_checksum_address(
                     user_operation_list[7][:20])
-            user_operation_json["paymaster_verification_gas_limit"] = hex(
+            user_operation_json["paymasterVerificationGasLimit"] = hex(
                     int(user_operation_list[7][20:36].hex(), 16))
-            user_operation_json["paymaster_post_op_gas_limit"] = hex(
+            user_operation_json["paymasterPostOpGasLimit"] = hex(
                     int(user_operation_list[7][36:52].hex(), 16))
-            user_operation_json["paymaster_data"] = "0x" + user_operation_list[7][52:].hex()
+            user_operation_json["paymasterData"] = (
+                "0x" + user_operation_list[7][52:].hex())
 
         user_operation_by_hash_json = {
             "userOperation": user_operation_json,
