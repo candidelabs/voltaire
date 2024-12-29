@@ -104,7 +104,7 @@ class UserOperationHandlerV6(UserOperationHandler):
                 user_operation_by_hash_json = {
                     "userOperation": user_operation_hashs_to_verified_user_operation[
                         user_operation_hash
-                    ].user_operation,
+                    ].user_operation.get_user_operation_json(),
                     "entryPoint": entrypoint,
                     "blockNumber": None,
                     "blockHash": None,
