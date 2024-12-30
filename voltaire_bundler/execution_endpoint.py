@@ -393,9 +393,12 @@ class ExecutionEndpoint(Endpoint):
 
         for res in done:
             excep = res.exception()
+            # UserOpFoundException raised means a successful result was returned
             if isinstance(excep, UserOpFoundException):
+                # there can only be one successful result, so return the first result
                 return excep.user_op_by_hash_result
             elif excep is not None:
+                # reraise the exception if it is not UserOpFoundException
                 raise excep
         return None
 
@@ -430,9 +433,12 @@ class ExecutionEndpoint(Endpoint):
 
         for res in done:
             excep = res.exception()
+            # UserOpReceiptFoundException raised means a successful result was returned
             if isinstance(excep, UserOpReceiptFoundException):
+                # there can only be one successful result, so return the first result
                 return excep.user_op_receipt_result
             elif excep is not None:
+                # reraise the exception if it is not UserOpReceiptFoundException
                 raise excep
         return None
 

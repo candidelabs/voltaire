@@ -46,11 +46,15 @@ class MethodNotFoundException(Exception):
     exception_code: ExecutionExceptionCode
 
 
+# This exception to use with asyncio.wait() to return a successful result with for
+# eth_getUserOperationByHash
 @dataclass
 class UserOpFoundException(Exception):
     user_op_by_hash_result: dict
 
 
+# This exception to use with asyncio.wait() to return a successful result with for
+# eth_getUserOperationReceipt
 @dataclass
 class UserOpReceiptFoundException(Exception):
     user_op_receipt_result: dict
