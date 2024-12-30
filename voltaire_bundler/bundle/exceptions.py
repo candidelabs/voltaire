@@ -49,3 +49,8 @@ class MethodNotFoundException(Exception):
 @dataclass
 class UserOpFoundException(Exception):
     user_op_by_hash_result: dict
+
+
+@dataclass
+class UserOpReceiptFoundException(Exception):
+    user_op_receipt_result: dict

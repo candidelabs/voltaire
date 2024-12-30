@@ -3,6 +3,7 @@ from functools import cache
 import logging
 
 from eth_abi import encode, decode
+from voltaire_bundler.bundle.exceptions import UserOpReceiptFoundException
 from voltaire_bundler.typing import Address
 from voltaire_bundler.utils.eth_client_utils import \
         get_latest_block_info, send_rpc_request_to_eth_client
@@ -118,8 +119,7 @@ class UserOperationHandler(ABC):
             "logs": user_operation_receipt_info.logs,
             "receipt": receipt_info_json,
         }
-
-        return user_operation_receipt_rpc_json
+        raise UserOpReceiptFoundException(user_operation_receipt_rpc_json)
 
     async def get_user_operation_event_log_info(
         self, user_operation_hash: str, entrypoint: str

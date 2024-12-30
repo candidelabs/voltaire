@@ -7,7 +7,7 @@ from typing import Any, Optional
 
 from voltaire_bundler.bundle.exceptions import \
     ExecutionException, OtherJsonRpcErrorCode, OtherJsonRpcErrorException, \
-    UserOpFoundException, ValidationException, ValidationExceptionCode
+    UserOpFoundException, UserOpReceiptFoundException, ValidationException, ValidationExceptionCode
 from voltaire_bundler.cli_manager import ConditionalRpc
 from voltaire_bundler.event_bus_manager.endpoint import Client, Endpoint
 from voltaire_bundler.typing import Address
@@ -408,23 +408,33 @@ class ExecutionEndpoint(Endpoint):
                 ValidationExceptionCode.InvalidFields,
                 "Missing/invalid userOpHash",
             )
+        user_operation_receipt_info_json_ops = []
         if self.user_operation_handler_v6 is not None:
-            user_operation_receipt_info_json = (
-                    await self.user_operation_handler_v6.get_user_operation_receipt_rpc(
+            user_operation_receipt_info_json_ops.append(asyncio.create_task(
+                    self.user_operation_handler_v6.get_user_operation_receipt_rpc(
                         user_operation_hash,
                         LocalMempoolManagerV6.entrypoint,
-                    )
+                    ))
                 )
-            if user_operation_receipt_info_json is not None:
-                return user_operation_receipt_info_json
 
-        user_operation_receipt_info_json = (
-                await self.user_operation_handler_v7.get_user_operation_receipt_rpc(
-                    user_operation_hash,
-                    LocalMempoolManagerV7.entrypoint,
-                )
-            )
-        return user_operation_receipt_info_json
+        user_operation_receipt_info_json_ops.append(asyncio.create_task(
+            self.user_operation_handler_v7.get_user_operation_receipt_rpc(
+                user_operation_hash,
+                LocalMempoolManagerV7.entrypoint,
+            ))
+        )
+        done, _ = await asyncio.wait(
+            user_operation_receipt_info_json_ops,
+            return_when=asyncio.FIRST_EXCEPTION
+        )
+
+        for res in done:
+            excep = res.exception()
+            if isinstance(excep, UserOpReceiptFoundException):
+                return excep.user_op_receipt_result
+            elif excep is not None:
+                raise excep
+        return None
 
     async def _event_debug_bundler_sendBundleNow(self, _) -> str:
         await self.bundle_manager.send_next_bundle()
