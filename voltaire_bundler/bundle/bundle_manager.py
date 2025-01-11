@@ -14,7 +14,8 @@ from voltaire_bundler.mempool.v6.mempool_manager_v6 import LocalMempoolManagerV6
 from voltaire_bundler.mempool.v7.mempool_manager_v7 import LocalMempoolManagerV7
 from voltaire_bundler.typing import Address
 from voltaire_bundler.user_operation.user_operation_handler import \
-        decode_failed_op_event, decode_failed_op_with_revert_event, get_deposit_info
+        decode_failed_op_event, decode_failed_op_with_revert_event, \
+        get_deposit_info, get_user_operation_logs_for_block_range
 from voltaire_bundler.user_operation.v6.user_operation_v6 import UserOperationV6
 from voltaire_bundler.user_operation.v7.user_operation_v7 import UserOperationV7
 
@@ -442,7 +443,11 @@ class BundlerManager:
                     raise ValueError(
                         "useroperation without validated_at_block_hex")
 
-                logs_res = await mempool_manager.user_operation_handler.get_logs(
+                logs_res = await get_user_operation_logs_for_block_range(
+                    # not using the ethereum_node_eth_get_logs_url as the
+                    # block range can't be large and to role out the possibility
+                    # that the logs node is slightly behind/out of sync
+                    self.ethereum_node_url,
                     user_operation.user_operation_hash,
                     entrypoint,
                     earliest_block,
@@ -451,7 +456,7 @@ class BundlerManager:
 
                 # if there is a UserOperationEvent for the user_operation_hash,
                 # that means userop was already executed
-                if "result" in logs_res and len(logs_res["result"]) > 0:
+                if logs_res is not None:
                     logging.warning(
                         "Dropping user operation that was already executed from bundle."
                         f"useroperation: {user_operation}"
