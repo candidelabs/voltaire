@@ -32,6 +32,9 @@ from .mempool.v6.mempool_manager_v6 import LocalMempoolManagerV6
 from .mempool.v7.mempool_manager_v7 import LocalMempoolManagerV7
 from .mempool.reputation_manager import ReputationManager
 
+user_operation_by_hash_cache: dict[str, dict] = {}
+user_operation_receipt_cache: dict[str, dict] = {}
+
 
 class ExecutionEndpoint(Endpoint):
     ethereum_node_url: str
@@ -356,12 +359,16 @@ class ExecutionEndpoint(Endpoint):
 
     async def _event_rpc_getUserOperationByHash(
             self, req_arguments: list) -> dict | None:
+        global user_operation_by_hash_cache
         user_operation_hash = req_arguments[0]
         if not is_user_operation_hash(user_operation_hash):
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
                 "Missing/invalid userOpHash",
             )
+        if user_operation_hash in user_operation_by_hash_cache:
+            return user_operation_by_hash_cache[user_operation_hash]
+
         user_operation_by_hash_json_ops = []
         if (self.local_mempool_manager_v6 is not None and
                 self.user_operation_handler_v6 is not None):
@@ -395,6 +402,12 @@ class ExecutionEndpoint(Endpoint):
             excep = res.exception()
             # UserOpFoundException raised means a successful result was returned
             if isinstance(excep, UserOpFoundException):
+                # clear cache if bigger than 10_000
+                if len(user_operation_by_hash_cache) > 10_000:
+                    user_operation_by_hash_cache = {}
+                user_operation_by_hash_cache[
+                    user_operation_hash] = excep.user_op_by_hash_result
+
                 # there can only be one successful result, so return the first result
                 return excep.user_op_by_hash_result
             elif excep is not None:
@@ -404,6 +417,7 @@ class ExecutionEndpoint(Endpoint):
 
     async def _event_rpc_getUserOperationReceipt(
             self, req_arguments: list) -> dict | None:
+        global user_operation_receipt_cache
         user_operation_hash = req_arguments[0]
 
         if not is_user_operation_hash(user_operation_hash):
@@ -411,6 +425,9 @@ class ExecutionEndpoint(Endpoint):
                 ValidationExceptionCode.InvalidFields,
                 "Missing/invalid userOpHash",
             )
+        if user_operation_hash in user_operation_receipt_cache:
+            return user_operation_receipt_cache[user_operation_hash]
+
         user_operation_receipt_info_json_ops = []
         if self.user_operation_handler_v6 is not None:
             user_operation_receipt_info_json_ops.append(asyncio.create_task(
@@ -435,6 +452,12 @@ class ExecutionEndpoint(Endpoint):
             excep = res.exception()
             # UserOpReceiptFoundException raised means a successful result was returned
             if isinstance(excep, UserOpReceiptFoundException):
+                # clear cache if bigger than 10_000
+                if len(user_operation_receipt_cache) > 10_000:
+                    user_operation_receipt_cache = {}
+                user_operation_receipt_cache[
+                    user_operation_hash] = excep.user_op_receipt_result
+
                 # there can only be one successful result, so return the first result
                 return excep.user_op_receipt_result
             elif excep is not None:
