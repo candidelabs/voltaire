@@ -17,6 +17,7 @@ import asyncio
 import inspect
 import logging
 import pickle
+import sys
 from dataclasses import field
 from functools import partial
 from typing import Any, Awaitable, Callable, Dict, Optional
@@ -25,7 +26,45 @@ RequestEvent = Dict[str, Any]
 ResponseEvent = Dict[str, Any]
 ResponseFunction = Callable[[Any], Awaitable[ResponseEvent]]
 PartialResponseFunction = partial[Awaitable[ResponseEvent]]
+DEFAULT_LIMIT = 2 ** 16
 
+async def _start_pipe_server(client_connected_cb, *, path,
+                            loop=None, limit=DEFAULT_LIMIT):
+    """Start listening for connection using Win32 named pipes."""
+
+    loop = loop or asyncio.get_event_loop()
+
+    def factory():
+        reader = asyncio.StreamReader(limit=limit, loop=loop)
+        protocol = asyncio.StreamReaderProtocol(
+            reader, client_connected_cb, loop=loop
+        )
+        return protocol
+
+    # NOTE: has no "wait_closed()" coroutine method.
+    server, *_ = await loop.start_serving_pipe(factory, address=path)
+    return server
+
+
+async def _open_pipe_connection(path: Any, *, loop=None,
+                               limit=DEFAULT_LIMIT, **kwds):
+    """Connect to a server using a Win32 named pipe."""
+
+    loop = loop or asyncio.get_event_loop()
+
+    reader = asyncio.StreamReader(limit=limit, loop=loop)
+    protocol = asyncio.StreamReaderProtocol(reader, loop=loop)
+    transport, _ = await loop.create_pipe_connection(
+        lambda: protocol, path, **kwds
+    )
+    writer = asyncio.StreamWriter(transport, protocol, reader, loop)
+    return reader, writer
+
+# Alias UNIX socket / Win32 named pipe functions to platform-agnostic names.
+if sys.platform == 'win32':
+    open_ipc_connection = _open_pipe_connection
+else:
+    open_ipc_connection = asyncio.open_unix_connection
 
 class Endpoint:
     """This is a class representation of an Endpoint that can receive request
@@ -51,17 +90,52 @@ class Endpoint:
         self.event_names = []
         self.response_functions_list = []
 
-    async def start_server(self, filepath: str) -> None:
-        """
-        Starts the Enpoint server to listen to requests on an IPC socket
-        It creates the .ipc file if it doesn't exist
-        """
-        logging.info("Starting " + self.id)
-        # filepath = self.id + ".ipc"
+    async def _serve_until(self, cancel, filepath: str, ready=None):
+        """IPC server."""
+        server = await asyncio.wait_for(
+            _start_pipe_server(self._handle_request_cb, path=filepath),
+            timeout=5.0
+        )
+        try:
+            ready.set_result(None)
+            await cancel
+        finally:
+            server.close()
+            if hasattr(server, 'wait_closed'):
+                await server.wait_closed()
+            else:
+                server.close()
+
+    async def _start_server(self, filepath: str):
         server = await asyncio.start_unix_server(
                 self._handle_request_cb, filepath)
         async with server:
             await server.serve_forever()
+
+    async def _start_server_win32(self, filepath: str):
+        loop = asyncio.get_event_loop()
+        cancel = asyncio.Future()
+        path = rf'\\.\pipe\{filepath.replace('.ipc', '')}'
+        ready = asyncio.Future()
+        server = loop.create_task(self._serve_until(
+            cancel=cancel, filepath=path, ready=ready
+        ))
+        try:
+            await ready
+            await cancel
+        finally:
+            await server
+
+    async def start_server(self, filepath: str) -> None:
+        """
+        Starts the Endpoint server to listen to requests on an IPC socket
+        It creates the .ipc file if it doesn't exist
+        """
+        logging.info("Starting " + self.id)
+        if sys.platform == 'win32':
+            await self._start_server_win32(filepath)
+        else:
+            await self._start_server(filepath)
 
     def add_event_and_response_function(
         self,
@@ -157,8 +231,11 @@ class Client:
         This function establish a Unix socket connection to an Endpoint
         and sends a RequestEvents and waits for a ResponseEvent.
         """
-        filepath = self.server_id + ".ipc"
-        reader, writer = await asyncio.open_unix_connection(filepath)
+        if sys.platform == 'win32':
+            path = rf'\\.\pipe\{self.server_id}'
+        else:
+            path = self.server_id + ".ipc"
+        reader, writer = await open_ipc_connection(path)
 
         await _broadcast(request_event, writer)
         response_event: ResponseEvent = await _listen(reader)
@@ -170,10 +247,13 @@ class Client:
         This function establish a Unix socket connection to an Endpoint and
         sends a RequestEvents and waits for a ResponseEvent.
         """
-        # filepath = self.server_id + ".ipc"
-        filepath = "p2p_endpoint.ipc"
+        if sys.platform == 'win32':
+            path = r'\\.\pipe\p2p_endpoint'
+        else:
+            path = "p2p_endpoint.ipc"
+
         try:
-            _, writer = await asyncio.open_unix_connection(filepath)
+            _, writer = await open_ipc_connection(path)
         except ConnectionRefusedError:
             return
 

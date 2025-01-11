@@ -1,6 +1,7 @@
 keystore
 *__pycache__
 .vscode
+.idea
 *.ipc
 **/.env
 **/.aws
