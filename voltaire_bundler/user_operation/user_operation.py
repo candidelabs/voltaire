@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 import re
 from voltaire_bundler.bundle.exceptions import \
         ValidationException, ValidationExceptionCode
@@ -17,6 +18,9 @@ class UserOperation(ABC):
     code_hash: str | None
     storage_map: dict[str, str | dict[str, str]] | None
     validated_at_block_hex: str | None
+    attempted_bundle_transaction_hash: str | None
+    last_attempted_bundle_date: datetime | None
+    number_of_bundle_attempts: int
 
     @abstractmethod
     def get_user_operation_json(

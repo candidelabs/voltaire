@@ -288,8 +288,8 @@ class LocalMempoolManager():
 
     async def get_user_operations_to_bundle(
         self, is_conditional_rpc: bool
-    ) -> list[UserOperation]:
-        bundle = []
+    ) -> dict[str, UserOperation]:
+        bundle = {}
         senders_lowercase = [x.lower() for x in self.senders_to_senders_mempools.keys()]
         for sender_address in list(self.senders_to_senders_mempools):
             sender_mempool = self.senders_to_senders_mempools[sender_address]
@@ -379,7 +379,7 @@ class LocalMempoolManager():
                     )
                     continue
 
-                bundle.append(user_operation)
+                bundle[user_operation_hash] = user_operation
                 del sender_mempool.user_operation_hashs_to_verified_user_operation[
                     user_operation_hash]
                 self._remove_hash_from_entities_ops_hashes_in_mempool(

@@ -117,16 +117,14 @@ class UserOperationV7(UserOperation):
             "signature", jsonRequestDict["signature"])
 
         self.code_hash = None
-
         self.storage_map = None
-
         self.valid_mempools_ids = []
-
         self.user_operation_hash = ""
-
         self.validated_at_block_hex = None
-
         self._set_factory_and_paymaster_address()
+        self.attempted_bundle_transaction_hash = None
+        self.last_attempted_bundle_date = None
+        self.number_of_bundle_attempts = 0
 
     @staticmethod
     def verify_fields_exist_and_fill_optional(
