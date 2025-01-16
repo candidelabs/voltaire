@@ -401,8 +401,6 @@ class BundlerManager:
         user_operations_logs = await asyncio.gather(*logs_res_ops)
 
         user_operations_hashes_to_remove_from_monitoring = []
-        print(list(self.user_operations_to_monitor.values()))
-        print(user_operations_logs)
         for user_operation, user_operation_log in zip(
             list(self.user_operations_to_monitor.values()), user_operations_logs
         ):
