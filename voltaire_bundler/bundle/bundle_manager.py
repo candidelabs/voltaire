@@ -567,7 +567,7 @@ class BundlerManager:
                 if logs_res is not None:
                     logging.warning(
                         "Dropping user operation that was already executed from bundle."
-                        f"useroperation: {user_operation}"
+                        f"useroperation: {user_operation.user_operation_hash}"
                     )
                     del user_operations[operation_index]
 
