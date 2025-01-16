@@ -405,8 +405,9 @@ class ExecutionEndpoint(Endpoint):
                 # clear cache if bigger than 10_000
                 if len(user_operation_by_hash_cache) > 10_000:
                     user_operation_by_hash_cache = {}
-                user_operation_by_hash_cache[
-                    user_operation_hash] = excep.user_op_by_hash_result
+                if excep.user_op_by_hash_result["blockNumber"] is not None:
+                    user_operation_by_hash_cache[
+                        user_operation_hash] = excep.user_op_by_hash_result
 
                 # there can only be one successful result, so return the first result
                 return excep.user_op_by_hash_result
