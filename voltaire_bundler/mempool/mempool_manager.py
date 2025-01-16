@@ -63,15 +63,18 @@ class LocalMempoolManager():
             user_operation.factory_address_lowercase,
             user_operation.paymaster_address_lowercase,
         )
-        await asyncio.gather(
-            self.user_operation_handler.gas_manager.verify_preverification_gas_and_verification_gas_limit(
-                user_operation,
-                self.entrypoint,
-            ),
-            self.user_operation_handler.gas_manager.verify_gas_fees_and_get_price(
-                user_operation, self.enforce_gas_price_tolerance
+
+        # don't check for gas limits and gas prices if previously added to mempool
+        if user_operation.last_attempted_bundle_date is None:
+            await asyncio.gather(
+                self.user_operation_handler.gas_manager.verify_preverification_gas_and_verification_gas_limit(
+                    user_operation,
+                    self.entrypoint,
+                ),
+                self.user_operation_handler.gas_manager.verify_gas_fees_and_get_price(
+                    user_operation, self.enforce_gas_price_tolerance
+                )
             )
-        )
 
         (
             sender_stake_info,
