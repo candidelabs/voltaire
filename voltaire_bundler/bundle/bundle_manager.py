@@ -428,7 +428,7 @@ class BundlerManager:
                 )
                 user_operations_hashes_to_remove_from_monitoring.append(
                     user_operation.user_operation_hash)
-            elif time_diff_sec > 2:
+            elif time_diff_sec > 5:
                 logging.info(
                     f"user operation: {user_operation.user_operation_hash} "
                     "was not included onchain yet after bundle attempt no."
