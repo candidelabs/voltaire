@@ -414,6 +414,30 @@ class ExecutionEndpoint(Endpoint):
             elif excep is not None:
                 # reraise the exception if it is not UserOpFoundException
                 raise excep
+
+        # if not found, check monitoring system
+        # for the period between a user op leaves the local mempool to be bundled
+        # and inclusion onchain
+        if user_operation_hash in self.bundle_manager.user_operations_to_monitor:
+            user_op = self.bundle_manager.user_operations_to_monitor[
+                user_operation_hash
+            ]
+            if (
+                isinstance(user_op, UserOperationV6) and
+                self.local_mempool_manager_v6 is not None
+            ):
+                entrypoint = self.local_mempool_manager_v6.entrypoint
+            else:
+                entrypoint = self.local_mempool_manager_v7.entrypoint
+            user_operation_by_hash_json = {
+                "userOperation": user_op.get_user_operation_json(),
+                "entryPoint": entrypoint,
+                "blockNumber": None,
+                "blockHash": None,
+                "transactionHash": user_op.attempted_bundle_transaction_hash,
+            }
+            return user_operation_by_hash_json
+
         return None
 
     async def _event_rpc_getUserOperationReceipt(
