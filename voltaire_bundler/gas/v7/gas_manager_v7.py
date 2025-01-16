@@ -85,7 +85,8 @@ class GasManagerV7(GasManager):
         )
 
         if input_verification_gas_limit == 0:
-            result_verification_gas_limit = estimated_verification_gas_limit
+            # 10_000 buffer overhead
+            result_verification_gas_limit = estimated_verification_gas_limit + 10_000
         else:
             result_verification_gas_limit = input_verification_gas_limit
 
@@ -101,7 +102,7 @@ class GasManagerV7(GasManager):
             result_preverification_gas = await self.get_preverification_gas(
                 user_operation,
                 entrypoint,
-            )
+            ) + 1000  # 1000 buffer overhead
         else:
             result_preverification_gas = user_operation.pre_verification_gas
 
