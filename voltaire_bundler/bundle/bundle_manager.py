@@ -107,7 +107,7 @@ class BundlerManager:
 
     async def update_send_queue_and_monitor_queue(self) -> None:
         tasks_arr = [
-            self.remove_included_user_operations_from_monitoring(),
+            self.remove_included_and_readd_to_mempool_userops_monitoring(),
             self.local_mempool_manager_v7.get_user_operations_to_bundle(
                 self.conditional_rpc is not None
             )
@@ -376,7 +376,7 @@ class BundlerManager:
                     user_operation.paymaster_address_lowercase,
                 )
 
-    async def remove_included_user_operations_from_monitoring(self) -> None:
+    async def remove_included_and_readd_to_mempool_userops_monitoring(self) -> None:
         logs_res_ops = []
         for user_operation_hash, user_operation in self.user_operations_to_monitor.items():
             if isinstance(user_operation, UserOperationV6):
