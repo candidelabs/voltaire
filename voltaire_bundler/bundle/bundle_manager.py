@@ -11,7 +11,7 @@ from eth_abi import encode
 from voltaire_bundler.cli_manager import ConditionalRpc
 from voltaire_bundler.user_operation.models import \
     FailedOp, FailedOpWithRevert
-from voltaire_bundler.bundle.exceptions import ExecutionException
+from voltaire_bundler.bundle.exceptions import ExecutionException, ValidationException
 from voltaire_bundler.mempool.v6.mempool_manager_v6 import LocalMempoolManagerV6
 from voltaire_bundler.mempool.v7.mempool_manager_v7 import LocalMempoolManagerV7
 from voltaire_bundler.typing import Address
@@ -433,18 +433,25 @@ class BundlerManager:
                     f"{user_operation.number_of_bundle_attempts} "
                     "-readding it to the mempool"
                 )
-                if (
-                    isinstance(user_operation, UserOperationV6) and
-                    self.local_mempool_manager_v6 is not None
-                ):
-                    await self.local_mempool_manager_v6.add_user_operation(
-                        user_operation)
-                else:
-                    await self.local_mempool_manager_v7.add_user_operation(
-                        user_operation)
-                user_operations_hashes_to_remove_from_monitoring.append(
-                    user_operation.user_operation_hash)
+                try:
+                    user_operations_hashes_to_remove_from_monitoring.append(
+                        user_operation.user_operation_hash)
 
+                    if (
+                        isinstance(user_operation, UserOperationV6) and
+                        self.local_mempool_manager_v6 is not None
+                    ):
+                        await self.local_mempool_manager_v6.add_user_operation(
+                            user_operation)
+                    else:
+                        await self.local_mempool_manager_v7.add_user_operation(
+                            user_operation)
+                except (ValidationException, ExecutionException, ValueError) as exp:
+                    logging.info(
+                        "failed readding to the mempool "
+                        f"user operation: {user_operation.user_operation_hash} "
+                        f" - cause : {str(exp)} "
+                    )
         for user_operation_hash in user_operations_hashes_to_remove_from_monitoring:
             del self.user_operations_to_monitor[user_operation_hash]
 
