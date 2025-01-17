@@ -2,7 +2,6 @@ import asyncio
 import logging
 import os
 import sys
-from argparse import ArgumentParser
 from functools import partial
 from signal import SIGINT, SIGTERM
 
@@ -14,14 +13,12 @@ from voltaire_bundler.p2p_boot import p2p_boot
 from voltaire_bundler.rpc.health import periodic_health_check_cron_job
 from voltaire_bundler.utils.SignalHaltError import immediate_exit
 
-from .cli_manager import get_init_data, initialize_argument_parser
+from .cli_manager import parse_args
 from .rpc.rpc_http_server import run_rpc_http_server
 
 
 async def main(cmd_args=sys.argv[1:], loop=None) -> None:
-    argument_parser: ArgumentParser = initialize_argument_parser()
-    parsed_args = argument_parser.parse_args(cmd_args)
-    init_data = await get_init_data(parsed_args)
+    init_data = await parse_args(cmd_args)
     if loop is None:
         loop = asyncio.get_running_loop()
     if os.path.exists("p2p_endpoint.ipc"):
