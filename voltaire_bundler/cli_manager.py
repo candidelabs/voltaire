@@ -280,11 +280,11 @@ def initialize_argument_parser() -> ArgumentParser:
         type=int,
         help=(
             "set the bundle interval in seconds for the auto bundle mode - "
-            "set to zero for manual mode"
+            "set to zero for manual mode - defaults to 2 seconds"
         ),
         nargs="?",
         const=1,
-        default=_get_env_or_default("VOLTAIRE_BUNDLE_INTERVAL", 1, int),
+        default=_get_env_or_default("VOLTAIRE_BUNDLE_INTERVAL", 2, int),
     )
 
     parser.add_argument(
