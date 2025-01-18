@@ -593,8 +593,8 @@ async def parse_args(cmd_args: [str]) -> InitData:
 def init_logging(args: Namespace):
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING,
-        format="%(asctime)s %(levelname)s %(message)s",
-        datefmt="%b %d %H:%M:%S.%03d",
+        format="%(asctime)s.%(msecs)03d %(levelname)s %(message)s",
+        datefmt="%b %d %H:%M:%S",
     )
 
     logging.getLogger("Voltaire")
