@@ -1,3 +1,4 @@
+import os
 from enum import Enum
 import logging
 import re
@@ -98,6 +99,17 @@ def url_no_port(ep: str):
         raise ArgumentTypeError(f"Wrong url format : {ep}")
     return ep
 
+def _get_env_or_default(env_var, default, value_type):
+    """
+    Helper function to get the value from an environment variable or return the default value.
+    Supports single values or lists (for nargs="+" arguments).
+    """
+    value = os.getenv(env_var, None)
+    if value is not None:
+        if value_type == list:
+            return value.split(",")
+        return value_type(value)
+    return default
 
 def initialize_argument_parser() -> ArgumentParser:
     parser = ArgumentParser(
@@ -109,13 +121,14 @@ def initialize_argument_parser() -> ArgumentParser:
         ),
     )
 
-    group = parser.add_mutually_exclusive_group(required=True)
+    group = parser.add_mutually_exclusive_group(required=False)
 
     group.add_argument(
         "--bundler_secret",
         type=str,
         help="Bundler private key",
         nargs="?",
+        default=_get_env_or_default("VOLTAIRE_BUNDLER_SECRET", None, str),
     )
 
     group.add_argument(
@@ -126,6 +139,7 @@ def initialize_argument_parser() -> ArgumentParser:
             "defaults to first file in keystore folder"
         ),
         nargs="?",
+        default=_get_env_or_default("VOLTAIRE_KEYSTORE_FILE_PATH", None, str),
     )
 
     parser.add_argument(
@@ -134,7 +148,7 @@ def initialize_argument_parser() -> ArgumentParser:
         help="Bundler Keystore file password - defaults to no password",
         nargs="?",
         const="",
-        default="",
+        default=_get_env_or_default("VOLTAIRE_KEYSTORE_FILE_PASSWORD", "", str),
     )
 
     parser.add_argument(
@@ -143,7 +157,7 @@ def initialize_argument_parser() -> ArgumentParser:
         help="RPC serve url - defaults to localhost",
         nargs="?",
         const="127.0.0.1",
-        default="127.0.0.1",
+        default=_get_env_or_default("VOLTAIRE_RPC_URL", "127.0.0.1", str),
     )
 
     parser.add_argument(
@@ -152,7 +166,7 @@ def initialize_argument_parser() -> ArgumentParser:
         help="rpc cors allowed domain - defaults to *",
         nargs="?",
         const="*",
-        default="*",
+        default=_get_env_or_default("VOLTAIRE_RPC_CORS_DOMAIN", "*", str),
     )
 
     parser.add_argument(
@@ -161,7 +175,7 @@ def initialize_argument_parser() -> ArgumentParser:
         help="RPC serve port - defaults to 3000",
         nargs="?",
         const=3000,
-        default=3000,
+        default=_get_env_or_default("VOLTAIRE_RPC_PORT", 3000, unsigned_int),
     )
 
     parser.add_argument(
@@ -170,7 +184,7 @@ def initialize_argument_parser() -> ArgumentParser:
         help="Eth Client JSON-RPC Url - defaults to http://0.0.0.0:8545",
         nargs="?",
         const="http://0.0.0.0:8545",
-        default="http://0.0.0.0:8545",
+        default=_get_env_or_default("VOLTAIRE_ETHEREUM_NODE_URL", "http://0.0.0.0:8545", str),
     )
 
     parser.add_argument(
@@ -178,7 +192,7 @@ def initialize_argument_parser() -> ArgumentParser:
         type=unsigned_int,
         help="chain id",
         nargs="?",
-        default=1337,
+        default=_get_env_or_default("VOLTAIRE_CHAIN_ID", 1337, unsigned_int),
     )
 
     parser.add_argument(
@@ -186,7 +200,7 @@ def initialize_argument_parser() -> ArgumentParser:
         help="show debug log",
         nargs="?",
         const=True,
-        default=False,
+        default=_get_env_or_default("VOLTAIRE_VERBOSE", False, lambda v: v.lower() == "true"),
     )
 
     parser.add_argument(
@@ -194,7 +208,7 @@ def initialize_argument_parser() -> ArgumentParser:
         help="expose _debug rpc namespace for testing",
         nargs="?",
         const=True,
-        default=False,
+        default=_get_env_or_default("VOLTAIRE_DEBUG", False, lambda v: v.lower() == "true"),
     )
 
     group2 = parser.add_mutually_exclusive_group()
@@ -208,7 +222,7 @@ def initialize_argument_parser() -> ArgumentParser:
         ),
         nargs="?",
         const=None,
-        default=None,
+        default=_get_env_or_default("VOLTAIRE_ETHEREUM_NODE_DEBUG_TRACE_CALL_URL", None, str),
     )
 
     group2.add_argument(
@@ -219,7 +233,7 @@ def initialize_argument_parser() -> ArgumentParser:
         ),
         nargs="?",
         const=True,
-        default=False,
+        default=_get_env_or_default("VOLTAIRE_UNSAFE", False, lambda v: v.lower() == "true"),
     )
 
     parser.add_argument(
@@ -231,15 +245,15 @@ def initialize_argument_parser() -> ArgumentParser:
         ),
         nargs="?",
         const=None,
-        default=None,
+        default=_get_env_or_default("VOLTAIRE_ETHEREUM_NODE_ETH_GET_LOGS_URL", None, str),
     )
 
     parser.add_argument(
         "--legacy_mode",
-        help="for netwroks that doesn't support EIP-1559",
+        help="for networks that doesn't support EIP-1559",
         nargs="?",
         const=True,
-        default=False,
+        default=_get_env_or_default("VOLTAIRE_LEGACY_MODE", False, str),
     )
 
     group3 = parser.add_mutually_exclusive_group()
@@ -249,7 +263,7 @@ def initialize_argument_parser() -> ArgumentParser:
         nargs="?",
         type=ConditionalRpc,
         const=ConditionalRpc.eth,
-        default=None,
+        default=_get_env_or_default("VOLTAIRE_CONDITIONAL_RPC", None, str),
         choices=list(ConditionalRpc)
     )
 
@@ -258,7 +272,7 @@ def initialize_argument_parser() -> ArgumentParser:
         type=str,
         help="Flashbots JSON-RPC Url",
         nargs="?",
-        default=None,
+        default=_get_env_or_default("VOLTAIRE_FLASHBOTS_PROTECT_NODE_URL", None, str),
     )
 
     parser.add_argument(
@@ -270,7 +284,7 @@ def initialize_argument_parser() -> ArgumentParser:
         ),
         nargs="?",
         const=1,
-        default=1,
+        default=_get_env_or_default("VOLTAIRE_BUNDLE_INTERVAL", 1, int),
     )
 
     parser.add_argument(
@@ -283,7 +297,7 @@ def initialize_argument_parser() -> ArgumentParser:
         ),
         nargs="?",
         const=110,
-        default=110,
+        default=_get_env_or_default("VOLTAIRE_MAX_FEE_PER_GAS_PERCENTAGE_MULTIPLIER", 110, unsigned_int),
     )
 
     parser.add_argument(
@@ -296,7 +310,7 @@ def initialize_argument_parser() -> ArgumentParser:
         ),
         nargs="?",
         const=110,
-        default=110,
+        default=_get_env_or_default("VOLTAIRE_MAX_PRIORITY_FEE_PER_GAS_PERCENTAGE_MULTIPLIER", 110, unsigned_int),
     )
 
     parser.add_argument(
@@ -311,7 +325,7 @@ def initialize_argument_parser() -> ArgumentParser:
         ),
         nargs="?",
         const=10,
-        default=10,
+        default=_get_env_or_default("VOLTAIRE_ENFORCE_GAS_PRICE_TOLERANCE", 10, unsigned_int),
     )
 
     parser.add_argument(
@@ -320,7 +334,7 @@ def initialize_argument_parser() -> ArgumentParser:
         help="enable metrics collection",
         nargs="?",
         const=True,
-        default=False,
+        default=_get_env_or_default("VOLTAIRE_METRICS", False, lambda v: v.lower() == "true"),
     )
 
     parser.add_argument(
@@ -335,7 +349,7 @@ def initialize_argument_parser() -> ArgumentParser:
         help="disable support for entrypoint v0.06",
         nargs="?",
         const=True,
-        default=False,
+        default=_get_env_or_default("VOLTAIRE_DISABLE_V6", False, lambda v: v.lower() == "true"),
     )
 
     parser.add_argument(
@@ -345,6 +359,7 @@ def initialize_argument_parser() -> ArgumentParser:
             "P2P - The address to broadcast to peers about which address"
             " the bundler is listening on."
         ),
+        default=_get_env_or_default("VOLTAIRE_P2P_ENR_ADDRESS", None, str),
     )
 
     parser.add_argument(
@@ -354,7 +369,7 @@ def initialize_argument_parser() -> ArgumentParser:
             "P2P - The tcp ipv4 port to broadcast to peers in order to reach "
             "back for discovery."
         ),
-        default=9000,
+        default=_get_env_or_default("VOLTAIRE_P2P_ENR_TCP_PORT", 9000, unsigned_int),
     )
 
     parser.add_argument(
@@ -364,21 +379,21 @@ def initialize_argument_parser() -> ArgumentParser:
             "P2P - The udp ipv4 port to broadcast to peers in order to reach "
             "back for discovery."
         ),
-        default=9000,
+        default=_get_env_or_default("VOLTAIRE_P2P_ENR_UDP_PORT", 9000, unsigned_int),
     )
 
     parser.add_argument(
         "--p2p_target_peers_number",
         type=unsigned_int,
         help="P2P - Target number of connected peers.",
-        default=16,
+        default=_get_env_or_default("VOLTAIRE_P2P_TARGET_PEERS_NUMBER", 16, unsigned_int),
     )
 
     parser.add_argument(
         "--p2p_boot_nodes_enr",
         nargs="+",
         type=str,
-        default=[],
+        default=_get_env_or_default("VOLTAIRE_P2P_BOOT_NODES_ENR", None, list),
         help="P2P - List of nodes Enr to initially connect to.",
     )
 
@@ -387,7 +402,7 @@ def initialize_argument_parser() -> ArgumentParser:
         help="Attempt to construct external port mappings with UPnP.",
         nargs="?",
         const=True,
-        default=False,
+        default=_get_env_or_default("VOLTAIRE_P2P_UPNP_ENABLED", False, lambda v: v.lower() == "true"),
     )
 
     parser.add_argument(
@@ -395,7 +410,7 @@ def initialize_argument_parser() -> ArgumentParser:
         help="Whether metrics are enabled.",
         nargs="?",
         const=True,
-        default=False,
+        default=_get_env_or_default("VOLTAIRE_P2P_METRICS_ENABLED", False, lambda v: v.lower() == "true"),
     )
 
     parser.add_argument(
@@ -404,7 +419,7 @@ def initialize_argument_parser() -> ArgumentParser:
         help="disable p2p",
         nargs="?",
         const=True,
-        default=False,
+        default=_get_env_or_default("VOLTAIRE_DISABLE_P2P", False, lambda v: v.lower() == "true"),
     )
 
     parser.add_argument(
@@ -413,7 +428,7 @@ def initialize_argument_parser() -> ArgumentParser:
         help="Maximimum allowed verification gas",
         nargs="?",
         const=10_000_000,
-        default=10_000_000,
+        default=_get_env_or_default("VOLTAIRE_MAX_VERIFICATION_GAS", 10_000_000, int),
     )
 
     parser.add_argument(
@@ -422,7 +437,7 @@ def initialize_argument_parser() -> ArgumentParser:
         help="Maximimum allowed calldata gas",
         nargs="?",
         const=30_000_000,
-        default=30_000_000,
+        default=_get_env_or_default("VOLTAIRE_MAX_CALL_DATA_GAS", 30_000_000, int),
     )
 
     parser.add_argument(
@@ -434,7 +449,7 @@ def initialize_argument_parser() -> ArgumentParser:
         ),
         nargs="?",
         const=1_000_000_000_000_000_000,
-        default=1_000_000_000_000_000_000,
+        default=_get_env_or_default("VOLTAIRE_MIN_BUNDLER_BALANCE", 1_000_000_000_000_000_000, int),
     )
 
     parser.add_argument(
@@ -446,7 +461,7 @@ def initialize_argument_parser() -> ArgumentParser:
         ),
         nargs="?",
         const=0,
-        default=0,
+        default=_get_env_or_default("VOLTAIRE_LOGS_INCREMENTAL_RANGE", 0, int),
     )
 
     parser.add_argument(
@@ -458,7 +473,7 @@ def initialize_argument_parser() -> ArgumentParser:
         ),
         nargs="?",
         const=10,
-        default=10,
+        default=_get_env_or_default("VOLTAIRE_LOGS_NUMBER_OF_RANGES", 10, int),
     )
 
     parser.add_argument(
@@ -470,7 +485,7 @@ def initialize_argument_parser() -> ArgumentParser:
         ),
         nargs="?",
         const=600,
-        default=600,
+        default=_get_env_or_default("VOLTAIRE_HEALTH_CHECK_INTERVAL", 600, int),
     )
 
     parser.add_argument(
@@ -478,6 +493,7 @@ def initialize_argument_parser() -> ArgumentParser:
         help="Entities that will not be banned or throttled.",
         type=str,
         nargs="+",
+        default=_get_env_or_default("VOLTAIRE_REPUTATION_WHITELIST", None, list),
     )
 
     parser.add_argument(
@@ -485,10 +501,26 @@ def initialize_argument_parser() -> ArgumentParser:
         help="Entities that are always banned.",
         type=str,
         nargs="+",
+        default=_get_env_or_default("VOLTAIRE_REPUTATION_BLACKLIST", None, list),
     )
 
     return parser
 
+async def parse_args(cmd_args: [str]) -> InitData:
+    argument_parser: ArgumentParser = initialize_argument_parser()
+    args = argument_parser.parse_args(cmd_args)
+    # Required mutually exclusive arguments
+    if not args.bundler_secret and not args.keystore_file_path:
+        argument_parser.error("You must specify either --bundler_secret or --keystore_file_path, or set VOLTAIRE_BUNDLER_SECRET or VOLTAIRE_KEYSTORE_FILE_PATH environment variables.")
+    if args.bundler_secret and args.keystore_file_path:
+        argument_parser.error("You can only specify either --bundler_secret or --keystore_file_path but not both at the same time")
+    # Non-required mutually exclusive arguments
+    if args.conditional_rpc and args.flashbots_protect_node_url:
+        argument_parser.error("You can only specify either --conditional_rpc or --flashbots_protect_node_url but not both at the same time")
+    if args.ethereum_node_debug_trace_call_url and args.unsafe:
+        argument_parser.error("You can only specify either --ethereum_node_debug_trace_call_url or --unsafe but not both at the same time")
+    init_data = await get_init_data(args)
+    return init_data
 
 def init_logging(args: Namespace):
     logging.basicConfig(
