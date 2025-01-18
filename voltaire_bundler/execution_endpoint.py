@@ -6,7 +6,8 @@ import os
 from typing import Any, Optional
 
 from voltaire_bundler.bundle.exceptions import \
-    ExecutionException, OtherJsonRpcErrorCode, OtherJsonRpcErrorException, ValidationException, ValidationExceptionCode
+    ExecutionException, OtherJsonRpcErrorCode, OtherJsonRpcErrorException, \
+    UserOpFoundException, UserOpReceiptFoundException, ValidationException, ValidationExceptionCode
 from voltaire_bundler.cli_manager import ConditionalRpc, Tracer
 from voltaire_bundler.event_bus_manager.endpoint import Client, Endpoint
 from voltaire_bundler.typing import Address
@@ -30,6 +31,9 @@ from .bundle.bundle_manager import BundlerManager
 from .mempool.v6.mempool_manager_v6 import LocalMempoolManagerV6
 from .mempool.v7.mempool_manager_v7 import LocalMempoolManagerV7
 from .mempool.reputation_manager import ReputationManager
+
+user_operation_by_hash_cache: dict[str, dict] = {}
+user_operation_receipt_cache: dict[str, dict] = {}
 
 
 class ExecutionEndpoint(Endpoint):
@@ -367,42 +371,90 @@ class ExecutionEndpoint(Endpoint):
 
     async def _event_rpc_getUserOperationByHash(
             self, req_arguments: list) -> dict | None:
+        global user_operation_by_hash_cache
         user_operation_hash = req_arguments[0]
         if not is_user_operation_hash(user_operation_hash):
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
                 "Missing/invalid userOpHash",
             )
+        if user_operation_hash in user_operation_by_hash_cache:
+            return user_operation_by_hash_cache[user_operation_hash]
 
+        user_operation_by_hash_json_ops = []
         if (self.local_mempool_manager_v6 is not None and
                 self.user_operation_handler_v6 is not None):
             senders_mempools = (
                 self.local_mempool_manager_v6.senders_to_senders_mempools.values()
             )
-            user_operation_by_hash_json = (
-                await self.user_operation_handler_v6.get_user_operation_by_hash_rpc(
+            user_operation_by_hash_json_ops.append(asyncio.create_task(
+                self.user_operation_handler_v6.get_user_operation_by_hash_rpc(
                     user_operation_hash,
                     LocalMempoolManagerV6.entrypoint,
                     senders_mempools,
-                )
+                ))
             )
-            if user_operation_by_hash_json is not None:
-                return user_operation_by_hash_json
 
         senders_mempools = (
             self.local_mempool_manager_v7.senders_to_senders_mempools.values()
         )
-        user_operation_by_hash_json = (
-            await self.user_operation_handler_v7.get_user_operation_by_hash_rpc(
+        user_operation_by_hash_json_ops.append(asyncio.create_task(
+            self.user_operation_handler_v7.get_user_operation_by_hash_rpc(
                 user_operation_hash,
                 LocalMempoolManagerV7.entrypoint,
                 senders_mempools,
-            )
+            ))
         )
-        return user_operation_by_hash_json
+        done, _ = await asyncio.wait(
+            user_operation_by_hash_json_ops,
+            return_when=asyncio.FIRST_EXCEPTION
+        )
+
+        for res in done:
+            excep = res.exception()
+            # UserOpFoundException raised means a successful result was returned
+            if isinstance(excep, UserOpFoundException):
+                # clear cache if bigger than 10_000
+                if len(user_operation_by_hash_cache) > 10_000:
+                    user_operation_by_hash_cache = {}
+                if excep.user_op_by_hash_result["blockNumber"] is not None:
+                    user_operation_by_hash_cache[
+                        user_operation_hash] = excep.user_op_by_hash_result
+
+                # there can only be one successful result, so return the first result
+                return excep.user_op_by_hash_result
+            elif excep is not None:
+                # reraise the exception if it is not UserOpFoundException
+                raise excep
+
+        # if not found, check monitoring system
+        # for the period between a user op leaves the local mempool to be bundled
+        # and inclusion onchain
+        if user_operation_hash in self.bundle_manager.user_operations_to_monitor:
+            user_op = self.bundle_manager.user_operations_to_monitor[
+                user_operation_hash
+            ]
+            if (
+                isinstance(user_op, UserOperationV6) and
+                self.local_mempool_manager_v6 is not None
+            ):
+                entrypoint = self.local_mempool_manager_v6.entrypoint
+            else:
+                entrypoint = self.local_mempool_manager_v7.entrypoint
+            user_operation_by_hash_json = {
+                "userOperation": user_op.get_user_operation_json(),
+                "entryPoint": entrypoint,
+                "blockNumber": None,
+                "blockHash": None,
+                "transactionHash": user_op.attempted_bundle_transaction_hash,
+            }
+            return user_operation_by_hash_json
+
+        return None
 
     async def _event_rpc_getUserOperationReceipt(
             self, req_arguments: list) -> dict | None:
+        global user_operation_receipt_cache
         user_operation_hash = req_arguments[0]
 
         if not is_user_operation_hash(user_operation_hash):
@@ -410,23 +462,45 @@ class ExecutionEndpoint(Endpoint):
                 ValidationExceptionCode.InvalidFields,
                 "Missing/invalid userOpHash",
             )
+        if user_operation_hash in user_operation_receipt_cache:
+            return user_operation_receipt_cache[user_operation_hash]
+
+        user_operation_receipt_info_json_ops = []
         if self.user_operation_handler_v6 is not None:
-            user_operation_receipt_info_json = (
-                    await self.user_operation_handler_v6.get_user_operation_receipt_rpc(
+            user_operation_receipt_info_json_ops.append(asyncio.create_task(
+                    self.user_operation_handler_v6.get_user_operation_receipt_rpc(
                         user_operation_hash,
                         LocalMempoolManagerV6.entrypoint,
-                    )
+                    ))
                 )
-            if user_operation_receipt_info_json is not None:
-                return user_operation_receipt_info_json
 
-        user_operation_receipt_info_json = (
-                await self.user_operation_handler_v7.get_user_operation_receipt_rpc(
-                    user_operation_hash,
-                    LocalMempoolManagerV7.entrypoint,
-                )
-            )
-        return user_operation_receipt_info_json
+        user_operation_receipt_info_json_ops.append(asyncio.create_task(
+            self.user_operation_handler_v7.get_user_operation_receipt_rpc(
+                user_operation_hash,
+                LocalMempoolManagerV7.entrypoint,
+            ))
+        )
+        done, _ = await asyncio.wait(
+            user_operation_receipt_info_json_ops,
+            return_when=asyncio.FIRST_EXCEPTION
+        )
+
+        for res in done:
+            excep = res.exception()
+            # UserOpReceiptFoundException raised means a successful result was returned
+            if isinstance(excep, UserOpReceiptFoundException):
+                # clear cache if bigger than 10_000
+                if len(user_operation_receipt_cache) > 10_000:
+                    user_operation_receipt_cache = {}
+                user_operation_receipt_cache[
+                    user_operation_hash] = excep.user_op_receipt_result
+
+                # there can only be one successful result, so return the first result
+                return excep.user_op_receipt_result
+            elif excep is not None:
+                # reraise the exception if it is not UserOpReceiptFoundException
+                raise excep
+        return None
 
     async def _event_debug_bundler_sendBundleNow(self, _) -> str:
         await self.bundle_manager.send_next_bundle()

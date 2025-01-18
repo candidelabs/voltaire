@@ -1,12 +1,9 @@
-from functools import reduce
-
 from eth_utils import to_checksum_address
 
 from eth_abi import decode
+from voltaire_bundler.bundle.exceptions import UserOpFoundException
 from voltaire_bundler.typing import Address
-from voltaire_bundler.user_operation.user_operation_handler import UserOperationHandler
-from voltaire_bundler.mempool.sender_mempool import \
-    VerifiedUserOperation
+from voltaire_bundler.user_operation.user_operation_handler import UserOperationHandler, get_transaction_by_hash
 from ...gas.v7.gas_manager_v7 import GasManagerV7
 
 
@@ -66,8 +63,12 @@ class UserOperationHandlerV7(UserOperationHandler):
         assert userOpHash == user_operation_hash
 
         transaction_hash = log_object.transactionHash
-        transaction = await self.get_transaction_by_hash(transaction_hash)
-
+        transaction = await get_transaction_by_hash(
+            self.ethereum_node_url,
+            transaction_hash
+        )
+        if transaction is None:
+            raise ValueError(f"Can't find transaction by hash:{transaction_hash}")
         block_hash = transaction["blockHash"]
         block_number = transaction["blockNumber"]
         transaction_input = transaction["input"]
@@ -92,29 +93,15 @@ class UserOperationHandlerV7(UserOperationHandler):
             user_operation_hash, entrypoint
         )
         if user_operation_by_hash is None:
-            user_operation_hashs_to_verified_user_operation: dict[str, VerifiedUserOperation] = reduce(
-                lambda a, b: a | b,
-                (
-                    map(
-                        lambda sender_mempool: sender_mempool.user_operation_hashs_to_verified_user_operation,
-                        senders_mempools,
-                    )
-                ),
-                dict(),
+            user_operation_by_hash_json = self.get_user_operation_by_hash_from_local_mempool(
+                user_operation_hash,
+                entrypoint,
+                senders_mempools
             )
-            if user_operation_hash in user_operation_hashs_to_verified_user_operation:
-                user_operation_by_hash_json = {
-                    "userOperation": user_operation_hashs_to_verified_user_operation[
-                        user_operation_hash
-                    ].user_operation,
-                    "entryPoint": entrypoint,
-                    "blockNumber": None,
-                    "blockHash": None,
-                    "transactionHash": None,
-                }
-                return user_operation_by_hash_json
-            else:
+            if user_operation_by_hash_json is None:
                 return None
+            else:
+                raise UserOpFoundException(user_operation_by_hash_json)
         (
             user_operation_list,
             block_number,
@@ -136,17 +123,22 @@ class UserOperationHandlerV7(UserOperationHandler):
 
         if user_operation_list[2] != b'':
             user_operation_json["factory"] = to_checksum_address(
-                    user_operation_list[2][16:])
-            user_operation_json["factory_data"] = "0x" + user_operation_list[2][:16].hex()
+                    user_operation_list[2][:20])
+            if len(user_operation_list[2]) > 20:
+                user_operation_json["factoryData"] = (
+                    "0x" + user_operation_list[2][20:].hex())
+            else:
+                user_operation_json["factoryData"] = "0x"
 
         if user_operation_list[7] != b'':
             user_operation_json["paymaster"] = to_checksum_address(
                     user_operation_list[7][:20])
-            user_operation_json["paymaster_verification_gas_limit"] = hex(
+            user_operation_json["paymasterVerificationGasLimit"] = hex(
                     int(user_operation_list[7][20:36].hex(), 16))
-            user_operation_json["paymaster_post_op_gas_limit"] = hex(
+            user_operation_json["paymasterPostOpGasLimit"] = hex(
                     int(user_operation_list[7][36:52].hex(), 16))
-            user_operation_json["paymaster_data"] = "0x" + user_operation_list[7][52:].hex()
+            user_operation_json["paymasterData"] = (
+                "0x" + user_operation_list[7][52:].hex())
 
         user_operation_by_hash_json = {
             "userOperation": user_operation_json,
@@ -155,7 +147,7 @@ class UserOperationHandlerV7(UserOperationHandler):
             "blockHash": block_hash,
             "transactionHash": transaction_hash,
         }
-        return user_operation_by_hash_json
+        raise UserOpFoundException(user_operation_by_hash_json)
 
 
 def decode_handle_op_input(handle_op_input) -> list[list]:

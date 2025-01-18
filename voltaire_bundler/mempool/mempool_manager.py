@@ -79,16 +79,17 @@ class LocalMempoolManager():
                 f"exceeds max bundle gas limit {hex(self.max_bundle_gas_limit)}",
             )
 
-        await asyncio.gather(
-            self.user_operation_handler.gas_manager.verify_preverification_gas_and_verification_gas_limit(
-                user_operation,
-                self.entrypoint,
-                latest_block_number,
-            ),
-            self.user_operation_handler.gas_manager.verify_gas_fees_and_get_price(
-                user_operation, self.enforce_gas_price_tolerance
+        # don't check for gas limits and gas prices if previously added to mempool
+        if user_operation.last_attempted_bundle_date is None:
+            await asyncio.gather(
+                self.user_operation_handler.gas_manager.verify_preverification_gas_and_verification_gas_limit(
+                    user_operation,
+                    self.entrypoint,
+                ),
+                self.user_operation_handler.gas_manager.verify_gas_fees_and_get_price(
+                    user_operation, self.enforce_gas_price_tolerance
+                )
             )
-        )
 
         (
             sender_stake_info,
@@ -325,9 +326,9 @@ class LocalMempoolManager():
 
     async def get_user_operations_to_bundle(
         self, is_conditional_rpc: bool
-    ) -> list[UserOperation]:
-        bundle = []
-        senders_lowercase = self.senders_to_senders_mempools.keys()
+    ) -> dict[str, UserOperation]:
+        bundle = {}
+        senders_lowercase = [x.lower() for x in self.senders_to_senders_mempools.keys()]
         sum_of_userops_max_gas = 0
         for sender_address_lowercase in list(self.senders_to_senders_mempools):
             sender_mempool = self.senders_to_senders_mempools[sender_address_lowercase]
@@ -427,8 +428,8 @@ class LocalMempoolManager():
                     )
                     continue
 
-                bundle.append(user_operation)
                 sum_of_userops_max_gas += (user_operation.max_gas + self.ENTRYPOINT_GAS_OVERHEAD)
+                bundle[user_operation_hash] = user_operation
                 del sender_mempool.user_operation_hashs_to_verified_user_operation[
                     user_operation_hash]
                 self._remove_hash_from_entities_ops_hashes_in_mempool(

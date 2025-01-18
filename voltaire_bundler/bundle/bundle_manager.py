@@ -1,4 +1,6 @@
 import asyncio
+import copy
+from datetime import datetime
 import logging
 import math
 from typing import cast
@@ -8,12 +10,13 @@ from eth_account import Account
 from voltaire_bundler.cli_manager import ConditionalRpc
 from voltaire_bundler.user_operation.models import \
     FailedOp, FailedOpWithRevert
-from voltaire_bundler.bundle.exceptions import ExecutionException
+from voltaire_bundler.bundle.exceptions import ExecutionException, ValidationException
 from voltaire_bundler.mempool.v6.mempool_manager_v6 import LocalMempoolManagerV6
 from voltaire_bundler.mempool.v7.mempool_manager_v7 import LocalMempoolManagerV7
 from voltaire_bundler.typing import Address
 from voltaire_bundler.user_operation.user_operation_handler import \
-        decode_failed_op_event, decode_failed_op_with_revert_event, get_deposit_info
+        decode_failed_op_event, decode_failed_op_with_revert_event, \
+        get_deposit_info, get_user_operation_logs_for_block_range
 from voltaire_bundler.user_operation.v6.user_operation_v6 import UserOperationV6
 from voltaire_bundler.user_operation.v7.user_operation_v7 import UserOperationV7
 
@@ -38,6 +41,9 @@ class BundlerManager:
     flashbots_protect_node_url: str | None
     max_fee_per_gas_percentage_multiplier: int
     max_priority_fee_per_gas_percentage_multiplier: int
+    user_operations_to_send_v6: dict[str, UserOperationV6] | None
+    user_operations_to_send_v7: dict[str, UserOperationV7]
+    user_operations_to_monitor: dict[str, UserOperationV6 | UserOperationV7]
     gas_price_percentage_multiplier: int
 
     def __init__(
@@ -69,10 +75,40 @@ class BundlerManager:
         self.max_priority_fee_per_gas_percentage_multiplier = (
             max_priority_fee_per_gas_percentage_multiplier
         )
+        self.user_operations_to_send_v7 = {}
+        self.user_operations_to_monitor = {}
+        if self.local_mempool_manager_v6 is None:
+            self.user_operations_to_send_v6 = None
+        else:
+            self.user_operations_to_send_v6 = {}
         self.gas_price_percentage_multiplier = 100
 
     async def send_next_bundle(self) -> None:
+        await self.update_send_queue_and_monitor_queue()
+
+        user_operations_to_send_v7 = self.user_operations_to_send_v7
+        self.user_operations_to_send_v7 = {}
         tasks_arr = [
+            self.send_bundle(
+                list(user_operations_to_send_v7.values()),
+                self.local_mempool_manager_v7
+            )
+        ]
+        if self.user_operations_to_send_v6 is not None:
+            assert self.local_mempool_manager_v6 is not None
+            user_operations_to_send_v6 = self.user_operations_to_send_v6
+            self.user_operations_to_send_v6 = {}
+            tasks_arr.append(
+                self.send_bundle(
+                    list(user_operations_to_send_v6.values()),
+                    self.local_mempool_manager_v6
+                )
+            )
+        await asyncio.gather(*tasks_arr)
+
+    async def update_send_queue_and_monitor_queue(self) -> None:
+        tasks_arr = [
+            self.remove_included_and_readd_to_mempool_userops_monitoring(),
             self.local_mempool_manager_v7.get_user_operations_to_bundle(
                 self.conditional_rpc is not None
             )
@@ -85,26 +121,16 @@ class BundlerManager:
             )
         tasks = await asyncio.gather(*tasks_arr)
 
-        bundle_to_send_v7 = cast(list[UserOperationV7], tasks[0])
-        bundle_to_send_v6 = None
+        user_operations_to_bundle_v7 = cast(dict[str, UserOperationV7], tasks[1])
+        self.user_operations_to_send_v7 |= user_operations_to_bundle_v7
+        self.user_operations_to_monitor |= copy.deepcopy(user_operations_to_bundle_v7)
         if self.local_mempool_manager_v6 is not None:
-            bundle_to_send_v6 = cast(list[UserOperationV6], tasks[1])
-
-        tasks_arr = [
-            self.send_bundle(
-                bundle_to_send_v7,
-                self.local_mempool_manager_v7
-            )
-        ]
-        if bundle_to_send_v6 is not None:
-            assert self.local_mempool_manager_v6 is not None
-            tasks_arr.append(
-                    self.send_bundle(
-                        bundle_to_send_v6,
-                        self.local_mempool_manager_v6
-                    )
-            )
-        await asyncio.gather(*tasks_arr)
+            if self.user_operations_to_send_v6 is None:
+                self.user_operations_to_send_v6 = {}
+            user_operations_to_bundle_v6 = cast(dict[str, UserOperationV6], tasks[2])
+            self.user_operations_to_send_v6 |= user_operations_to_bundle_v6
+            self.user_operations_to_monitor |= copy.deepcopy(
+                user_operations_to_bundle_v6)
 
     async def send_bundle(
         self,
@@ -380,9 +406,13 @@ class BundlerManager:
         else:
             transaction_hash = result["result"]
             logging.info(
-                    "Bundle was sent with transaction hash : " + transaction_hash)
+                "Bundle was sent with transaction hash : " + transaction_hash)
             self.gas_price_percentage_multiplier = 100
 
+            self.update_monitor_status(
+                user_operations,
+                transaction_hash,
+            )
             # todo : check if bundle was included on chain
             for user_operation in user_operations:
                 BundlerManager.update_included_status(
@@ -390,6 +420,105 @@ class BundlerManager:
                     user_operation.sender_address,
                     user_operation.factory_address_lowercase,
                     user_operation.paymaster_address_lowercase,
+                )
+
+    async def remove_included_and_readd_to_mempool_userops_monitoring(self) -> None:
+        logs_res_ops = []
+        for user_operation_hash, user_operation in self.user_operations_to_monitor.items():
+            if isinstance(user_operation, UserOperationV6):
+                assert self.local_mempool_manager_v6 is not None
+                entrypoint = self.local_mempool_manager_v6.entrypoint
+            else:
+                entrypoint = self.local_mempool_manager_v7.entrypoint
+
+            assert user_operation.validated_at_block_hex is not None
+            earliest_block = user_operation.validated_at_block_hex
+            logs_res_op = get_user_operation_logs_for_block_range(
+                # not using the ethereum_node_eth_get_logs_url as the
+                # block range can't be large and to role out the possibility
+                # that the logs node is slightly behind/out of sync
+                self.ethereum_node_url,
+                user_operation_hash,
+                entrypoint,
+                earliest_block,
+                "latest"
+            )
+            logs_res_ops.append(logs_res_op)
+        user_operations_logs = await asyncio.gather(*logs_res_ops)
+
+        user_operations_hashes_to_remove_from_monitoring = []
+        for user_operation, user_operation_log in zip(
+            list(self.user_operations_to_monitor.values()), user_operations_logs
+        ):
+            if user_operation.last_attempted_bundle_date is not None:
+                time_diff_sec = (
+                    datetime.now() - user_operation.last_attempted_bundle_date
+                ).total_seconds()
+            else:
+                time_diff_sec = 0
+            if user_operation_log is not None:
+                logging.info(
+                    f"user operation: {user_operation.user_operation_hash} "
+                    "was included onchain after bundle attempt no."
+                    f"{user_operation.number_of_bundle_attempts} "
+                )
+                user_operations_hashes_to_remove_from_monitoring.append(
+                    user_operation.user_operation_hash)
+            elif user_operation.number_of_bundle_attempts > 5:
+                logging.warning(
+                    f"user operation: {user_operation.user_operation_hash} "
+                    "was not included onchain yet after 5 bundle attempts"
+                    "-drooping the userop from the monitoring system"
+                )
+                user_operations_hashes_to_remove_from_monitoring.append(
+                    user_operation.user_operation_hash)
+            elif time_diff_sec > 5:
+                logging.info(
+                    f"user operation: {user_operation.user_operation_hash} "
+                    "was not included onchain yet after bundle attempt no."
+                    f"{user_operation.number_of_bundle_attempts} "
+                    "-readding it to the mempool"
+                )
+                try:
+                    user_operations_hashes_to_remove_from_monitoring.append(
+                        user_operation.user_operation_hash)
+
+                    if (
+                        isinstance(user_operation, UserOperationV6) and
+                        self.local_mempool_manager_v6 is not None
+                    ):
+                        await self.local_mempool_manager_v6.add_user_operation(
+                            user_operation)
+                    else:
+                        await self.local_mempool_manager_v7.add_user_operation(
+                            user_operation)
+                except (ValidationException, ExecutionException, ValueError) as exp:
+                    logging.info(
+                        "failed readding to the mempool "
+                        f"user operation: {user_operation.user_operation_hash} "
+                        f" - cause : {str(exp)} "
+                    )
+        for user_operation_hash in user_operations_hashes_to_remove_from_monitoring:
+            del self.user_operations_to_monitor[user_operation_hash]
+
+    def update_monitor_status(
+        self,
+        user_operations: list[UserOperationV7] | list[UserOperationV6],
+        transaction_hash: str,
+    ) -> None:
+        for user_operation in user_operations:
+            user_operation_hash = user_operation.user_operation_hash
+            if user_operation_hash in self.user_operations_to_monitor:
+                user_operation_to_monitor = self.user_operations_to_monitor[
+                    user_operation_hash
+                ]
+                user_operation_to_monitor.attempted_bundle_transaction_hash = transaction_hash
+                user_operation_to_monitor.last_attempted_bundle_date = datetime.now()
+                user_operation_to_monitor.number_of_bundle_attempts += 1
+            else:
+                logging.error(
+                    f"can't find user operation hash: {user_operation_hash} in "
+                    "monitoring list"
                 )
 
     @staticmethod
@@ -473,7 +602,11 @@ class BundlerManager:
                     raise ValueError(
                         "useroperation without validated_at_block_hex")
 
-                logs_res = await mempool_manager.user_operation_handler.get_logs(
+                logs_res = await get_user_operation_logs_for_block_range(
+                    # not using the ethereum_node_eth_get_logs_url as the
+                    # block range can't be large and to role out the possibility
+                    # that the logs node is slightly behind/out of sync
+                    self.ethereum_node_url,
                     user_operation.user_operation_hash,
                     entrypoint,
                     earliest_block,
@@ -482,10 +615,10 @@ class BundlerManager:
 
                 # if there is a UserOperationEvent for the user_operation_hash,
                 # that means userop was already executed
-                if "result" in logs_res and len(logs_res["result"]) > 0:
+                if logs_res is not None:
                     logging.warning(
                         "Dropping user operation that was already executed from bundle."
-                        f"useroperation: {user_operation}"
+                        f"useroperation: {user_operation.user_operation_hash}"
                     )
                     del user_operations[operation_index]
 

@@ -1,8 +1,11 @@
 from abc import ABC
 from functools import cache
 import logging
+from functools import reduce
 
 from eth_abi import encode, decode
+from voltaire_bundler.bundle.exceptions import UserOpReceiptFoundException
+from voltaire_bundler.mempool.sender_mempool import VerifiedUserOperation
 from voltaire_bundler.typing import Address
 from voltaire_bundler.utils.eth_client_utils import \
         get_latest_block_info, send_rpc_request_to_eth_client
@@ -118,8 +121,7 @@ class UserOperationHandler(ABC):
             "logs": user_operation_receipt_info.logs,
             "receipt": receipt_info_json,
         }
-
-        return user_operation_receipt_rpc_json
+        raise UserOpReceiptFoundException(user_operation_receipt_rpc_json)
 
     async def get_user_operation_event_log_info(
         self, user_operation_hash: str, entrypoint: str
@@ -201,60 +203,51 @@ class UserOperationHandler(ABC):
                 latest_block = earliest_block + logs_incremental_range
                 if latest_block <= earliest_block:
                     break
-                res = await self.get_logs(
+                res = await get_user_operation_logs_for_block_range(
+                    self.ethereum_node_eth_get_logs_url,
                     user_operation_hash,
                     entrypoint,
                     hex(earliest_block),
                     hex(latest_block)
                 )
-                if "result" in res and len(res["result"]) > 0:
-                    return res['result']
+                if res is not None:
+                    return res
             return None
         else:
-            res = await self.get_logs(
+            return await get_user_operation_logs_for_block_range(
+                self.ethereum_node_eth_get_logs_url,
                 user_operation_hash,
                 entrypoint,
                 "earliest",
                 "latest"
             )
-            if "result" in res and len(res["result"]) > 0:
-                return res['result']
-            else:
-                return None
 
-    async def get_logs(
+    def get_user_operation_by_hash_from_local_mempool(
         self,
         user_operation_hash: str,
         entrypoint: str,
-        from_block_hex: str,
-        to_block_hex: str,
-    ):
-        USER_OPERATIOM_EVENT_DISCRIPTOR = (
-            "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
+        senders_mempools,
+    ) -> dict | None:
+        user_operation_hashs_to_verified_user_operation: dict[
+            str, VerifiedUserOperation
+        ] = reduce(lambda a, b: a | b, map(
+                lambda sender_mempool: sender_mempool.user_operation_hashs_to_verified_user_operation,
+                senders_mempools),
+            dict(),
         )
-
-        params = [
-            {
-                "address": entrypoint,
-                "topics": [
-                    USER_OPERATIOM_EVENT_DISCRIPTOR,
-                    user_operation_hash,
-                ],
-                "fromBlock": from_block_hex,
-                "toBlock": to_block_hex,
+        if user_operation_hash in user_operation_hashs_to_verified_user_operation:
+            user_operation_by_hash_json = {
+                "userOperation": user_operation_hashs_to_verified_user_operation[
+                    user_operation_hash
+                ].user_operation.get_user_operation_json(),
+                "entryPoint": entrypoint,
+                "blockNumber": None,
+                "blockHash": None,
+                "transactionHash": None,
             }
-        ]
-        res = await send_rpc_request_to_eth_client(
-            self.ethereum_node_eth_get_logs_url, "eth_getLogs", params
-        )
-        return res
-
-    async def get_transaction_by_hash(self, transaction_hash) -> dict:
-        params = [transaction_hash]
-        res: Any = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_getTransactionByHash", params
-        )
-        return res["result"]
+            return user_operation_by_hash_json
+        else:
+            return None
 
 
 async def get_deposit_info(
@@ -289,6 +282,74 @@ async def get_deposit_info(
             raise ValueError(f"balanceOf eth_call failed - {error}")
         else:
             raise ValueError("balanceOf eth_call failed")
+
+user_operation_logs_cache: dict[str, dict[str, dict]] = {
+    "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789": {},
+    "0x0000000071727de22e5e9d8baf0edac6f37da032": {},
+}
+
+
+async def get_user_operation_logs_for_block_range(
+    ethereum_node_eth_get_logs_url: str,
+    user_operation_hash: str,
+    entrypoint: str,
+    from_block_hex: str,
+    to_block_hex: str,
+) -> dict | None:
+    global user_operation_logs_cache
+    logs_cache = user_operation_logs_cache[entrypoint.lower()]
+    if user_operation_hash in logs_cache:
+        return logs_cache[user_operation_hash]
+    USER_OPERATIOM_EVENT_DISCRIPTOR = (
+        "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
+    )
+
+    params = [
+        {
+            "address": entrypoint,
+            "topics": [
+                USER_OPERATIOM_EVENT_DISCRIPTOR,
+                user_operation_hash,
+            ],
+            "fromBlock": from_block_hex,
+            "toBlock": to_block_hex,
+        }
+    ]
+    res = await send_rpc_request_to_eth_client(
+        ethereum_node_eth_get_logs_url, "eth_getLogs", params
+    )
+    if "result" in res and len(res["result"]) > 0:
+        # clear cache if bigger than 10_000
+        if len(logs_cache) > 10_000:
+            logs_cache = {}
+        logs_cache[user_operation_hash] = res['result']
+        return res['result']
+    else:
+        return None
+
+
+transactions_cache: dict[str, dict] = {}
+
+
+async def get_transaction_by_hash(
+    ethereum_node_url: str,
+    transaction_hash
+) -> dict | None:
+    global transactions_cache
+    if transaction_hash in transactions_cache:
+        return transactions_cache[transaction_hash]
+    params = [transaction_hash]
+    res: Any = await send_rpc_request_to_eth_client(
+        ethereum_node_url, "eth_getTransactionByHash", params
+    )
+    if "result" in res:
+        # clear cache if bigger than 10_000
+        if len(transactions_cache) > 10_000:
+            transactions_cache = {}
+        transactions_cache[transaction_hash] = res['result']
+        return res["result"]
+    else:
+        return None
 
 
 @cache

@@ -84,8 +84,8 @@ class GasManagerV6(GasManager):
         )
 
         if input_verification_gas_limit == 0:
-            # 2100 buffer overhead
-            result_verification_gas_limit = estimated_verification_gas_limit + 2100
+            # 10_000 buffer overhead
+            result_verification_gas_limit = estimated_verification_gas_limit + 10_000
         else:
             result_verification_gas_limit = input_verification_gas_limit
 
