@@ -34,7 +34,7 @@ class UserOperationV6(UserOperation):
         if len(jsonRequestDict) != 11:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
-                "Invalide UserOperation",
+                "Invalid UserOperation",
             )
         self.verify_fields_exist(jsonRequestDict)
 

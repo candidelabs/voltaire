@@ -52,8 +52,8 @@ async def send_rpc_request_to_eth_client(
                 resp = await response.read()
                 return json.loads(resp)
             except json.decoder.JSONDecodeError:
-                logging.critical("Invalide json response from eth client")
-                raise ValueError("Invalide json response from eth client")
+                logging.critical("Invalid json response from eth client")
+                raise ValueError("Invalid json response from eth client")
 
 
 async def get_latest_block_info(

@@ -255,7 +255,7 @@ class ExecutionEndpoint(Endpoint):
             if not isinstance(state_override_set_dict, dict):
                 raise ValidationException(
                     ValidationExceptionCode.InvalidFields,
-                    "Invalide state override set",
+                    "Invalid state override set",
                 )
 
         input_entrypoint: Address = req_arguments[1]
