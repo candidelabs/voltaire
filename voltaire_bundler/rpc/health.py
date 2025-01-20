@@ -105,13 +105,13 @@ async def check_live_ethereum_rpc(
             [],
         )
         if "result" not in chain_id_hex:
-            return False, f"Invalide Eth node {ethereum_node_url}"
+            return False, f"Invalid Eth node {ethereum_node_url}"
         else:
             if chain_id_hex["result"] == target_chain_id_hex.lower():
                 return True, "eth_chainId successful"
             else:
                 return False, (
-                    f"Invalide chain id {chain_id_hex["result"]} returned by " +
+                    f"Invalid chain id {chain_id_hex["result"]} returned by " +
                     f"{ethereum_node_url}"
                 )
 

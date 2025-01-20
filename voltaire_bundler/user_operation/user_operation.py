@@ -45,7 +45,7 @@ def verify_and_get_address(field_name: str, value: Address | None) -> Address:
     else:
         raise ValidationException(
             ValidationExceptionCode.InvalidFields,
-            f"Invalide address value : {value} in field {field_name}",
+            f"Invalid address value : {value} in field {field_name}",
         )
 
 
@@ -53,7 +53,7 @@ def verify_and_get_uint(field_name: str, value: str | None) -> int:
     if value is None:
         raise ValidationException(
             ValidationExceptionCode.InvalidFields,
-            f"Invalide uint hex value in field {field_name}",
+            f"Invalid uint hex value in field {field_name}",
         )
 
     if value == "0x":
@@ -64,12 +64,12 @@ def verify_and_get_uint(field_name: str, value: str | None) -> int:
         except ValueError:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
-                f"Invalide uint hex value : {value} in field {field_name}",
+                f"Invalid uint hex value : {value} in field {field_name}",
             )
     else:
         raise ValidationException(
             ValidationExceptionCode.InvalidFields,
-            f"Invalide uint hex value : {value} in field {field_name}",
+            f"Invalid uint hex value : {value} in field {field_name}",
         )
 
 
@@ -77,7 +77,7 @@ def verify_and_get_bytes(field_name: str, value: str | None) -> bytes:
     if value is None:
         raise ValidationException(
             ValidationExceptionCode.InvalidFields,
-            f"Invalide bytes hex value in field {field_name}",
+            f"Invalid bytes hex value in field {field_name}",
         )
 
     if isinstance(value, str) and value[:2] == "0x":
@@ -86,12 +86,12 @@ def verify_and_get_bytes(field_name: str, value: str | None) -> bytes:
         except ValueError:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
-                f"Invalide bytes hex value : {value} in field {field_name}",
+                f"Invalid bytes hex value : {value} in field {field_name}",
             )
     else:
         raise ValidationException(
             ValidationExceptionCode.InvalidFields,
-            f"Invalide bytes hex value : {value} in field {field_name}",
+            f"Invalid bytes hex value : {value} in field {field_name}",
         )
 
 

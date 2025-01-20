@@ -347,7 +347,7 @@ class ValidationManagerV7(ValidationManager):
         else:
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
-                "Invalide Validation result from debug_traceCall",
+                "Invalid Validation result from debug_traceCall",
             )
 
     @staticmethod

@@ -40,7 +40,7 @@ class UserOperationV7(UserOperation):
         if len(jsonRequestDict) != 15:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
-                "Invalide UserOperation",
+                "Invalid UserOperation",
             )
 
         self.sender_address = verify_and_get_address(
@@ -59,7 +59,7 @@ class UserOperationV7(UserOperation):
         else:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
-                'Invalide UserOperation, '
+                'Invalid UserOperation, '
                 '"factoryData" has to be null if "factory" is null',
             )
 
@@ -109,7 +109,7 @@ class UserOperationV7(UserOperation):
         else:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
-                "Invalide UserOperation, "
+                "Invalid UserOperation, "
                 '"paymasterVerificationGasLimit", "paymasterPostOpGasLimit" '
                 'and "paymasterData" have to be null if "paymaster" is null',
             )

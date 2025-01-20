@@ -639,7 +639,7 @@ async def check_valid_ethereum_rpc_and_get_chain_id(ethereum_node_url) -> str:
             [],
         )
         if "result" not in chain_id_hex:
-            logging.critical(f"Invalide Eth node {ethereum_node_url}")
+            logging.critical(f"Invalid Eth node {ethereum_node_url}")
             sys.exit(1)
         else:
             return chain_id_hex["result"]
@@ -685,7 +685,7 @@ async def get_init_data(args: Namespace) -> InitData:
 
     if hex(args.chain_id) != ethereum_node_chain_id_hex.lower():
         logging.critical(
-            f"Invalide chain id {args.chain_id} with Eth node {args.ethereum_node_url}"
+            f"Invalid chain id {args.chain_id} with Eth node {args.ethereum_node_url}"
         )
         sys.exit(1)
 
