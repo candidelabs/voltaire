@@ -20,8 +20,8 @@ class UserOperation(ABC):
     validated_at_block_hex: str | None
     max_gas: int
     attempted_bundle_transaction_hash: str | None
-    last_attempted_bundle_date: datetime | None
-    number_of_bundle_attempts: int
+    last_add_to_mempool_date: datetime | None
+    number_of_add_to_mempool_attempts: int
 
     @abstractmethod
     def get_user_operation_json(
