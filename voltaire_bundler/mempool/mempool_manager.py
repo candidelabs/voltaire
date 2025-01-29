@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 import logging
 import math
 from functools import cache
@@ -55,6 +56,8 @@ class LocalMempoolManager():
         self,
         user_operation: UserOperation,
     ) -> tuple[str, str, List[MempoolId]]:
+        user_operation.last_add_to_mempool_date = datetime.now()
+        user_operation.number_of_add_to_mempool_attempts += 1
         latest_block_number, _, _, latest_block_timestamp, latest_block_hash = (
             await get_latest_block_info(self.ethereum_node_url)
         )
@@ -65,7 +68,7 @@ class LocalMempoolManager():
         )
 
         # don't check for gas limits and gas prices if previously added to mempool
-        if user_operation.last_attempted_bundle_date is None:
+        if user_operation.number_of_add_to_mempool_attempts == 1:
             await asyncio.gather(
                 self.user_operation_handler.gas_manager.verify_preverification_gas_and_verification_gas_limit(
                     user_operation,

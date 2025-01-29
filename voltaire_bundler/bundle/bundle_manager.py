@@ -363,7 +363,7 @@ class BundlerManager:
                 "Bundle was sent with transaction hash : " + transaction_hash)
             self.gas_price_percentage_multiplier = 100
 
-            self.update_monitor_status(
+            self.update_monitor_status_transation_hash(
                 user_operations,
                 transaction_hash,
             )
@@ -404,24 +404,22 @@ class BundlerManager:
         for user_operation, user_operation_log in zip(
             list(self.user_operations_to_monitor.values()), user_operations_logs
         ):
-            if user_operation.last_attempted_bundle_date is not None:
-                time_diff_sec = (
-                    datetime.now() - user_operation.last_attempted_bundle_date
-                ).total_seconds()
-            else:
-                time_diff_sec = 0
+            assert user_operation.last_add_to_mempool_date is not None
+            time_diff_sec = (
+                datetime.now() - user_operation.last_add_to_mempool_date
+            ).total_seconds()
             if user_operation_log is not None:
                 logging.info(
                     f"user operation: {user_operation.user_operation_hash} "
-                    "was included onchain after bundle attempt no."
-                    f"{user_operation.number_of_bundle_attempts} "
+                    "was included onchain after adding to mempool for"
+                    f"{user_operation.number_of_add_to_mempool_attempts} times"
                 )
                 user_operations_hashes_to_remove_from_monitoring.append(
                     user_operation.user_operation_hash)
-            elif user_operation.number_of_bundle_attempts > 5:
+            elif user_operation.number_of_add_to_mempool_attempts > 5:
                 logging.warning(
                     f"user operation: {user_operation.user_operation_hash} "
-                    "was not included onchain yet after 5 bundle attempts"
+                    "was not included onchain yet after readding to mempool 5 times"
                     "-drooping the userop from the monitoring system"
                 )
                 user_operations_hashes_to_remove_from_monitoring.append(
@@ -429,14 +427,13 @@ class BundlerManager:
             elif time_diff_sec > 5:
                 logging.info(
                     f"user operation: {user_operation.user_operation_hash} "
-                    "was not included onchain yet after bundle attempt no."
-                    f"{user_operation.number_of_bundle_attempts} "
+                    "was not included onchain yet after readding to mempool for no."
+                    f"{user_operation.number_of_add_to_mempool_attempts} "
                     "-readding it to the mempool"
                 )
                 try:
                     user_operations_hashes_to_remove_from_monitoring.append(
                         user_operation.user_operation_hash)
-
                     if (
                         isinstance(user_operation, UserOperationV6) and
                         self.local_mempool_manager_v6 is not None
@@ -455,7 +452,7 @@ class BundlerManager:
         for user_operation_hash in user_operations_hashes_to_remove_from_monitoring:
             del self.user_operations_to_monitor[user_operation_hash]
 
-    def update_monitor_status(
+    def update_monitor_status_transation_hash(
         self,
         user_operations: list[UserOperationV7] | list[UserOperationV6],
         transaction_hash: str,
@@ -467,8 +464,6 @@ class BundlerManager:
                     user_operation_hash
                 ]
                 user_operation_to_monitor.attempted_bundle_transaction_hash = transaction_hash
-                user_operation_to_monitor.last_attempted_bundle_date = datetime.now()
-                user_operation_to_monitor.number_of_bundle_attempts += 1
             else:
                 logging.error(
                     f"can't find user operation hash: {user_operation_hash} in "
@@ -547,6 +542,23 @@ class BundlerManager:
                     return None, None, None
 
                 user_operation = user_operations[operation_index]
+
+                if user_operation.number_of_add_to_mempool_attempts > 1:
+                    logging.warning(
+                        "Dropping user operation that was already executed from bundle."
+                        f"useroperation: {user_operation.user_operation_hash}"
+                    )
+                    del user_operations[operation_index]
+
+                    if len(user_operations) > 0:
+                        return await self.create_bundle_calldata_and_estimate_gas(
+                            user_operations,
+                            bundler,
+                            entrypoint,
+                        )
+                    else:
+                        logging.info("No useroperations to bundle")
+                        return None, None, None
 
                 # check if userop was already executed if userop caused bundle
                 # gas estimation to fail
