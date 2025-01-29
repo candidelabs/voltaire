@@ -123,8 +123,8 @@ class UserOperationV7(UserOperation):
         self.validated_at_block_hex = None
         self._set_factory_and_paymaster_address()
         self.attempted_bundle_transaction_hash = None
-        self.last_attempted_bundle_date = None
-        self.number_of_bundle_attempts = 0
+        self.last_add_to_mempool_date = None
+        self.number_of_add_to_mempool_attempts = 0
 
     @staticmethod
     def verify_fields_exist_and_fill_optional(
