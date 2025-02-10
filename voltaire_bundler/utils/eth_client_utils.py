@@ -1,5 +1,7 @@
+import asyncio
 import json
 import logging
+import traceback
 from typing import Any
 
 from aiohttp import ClientSession
@@ -42,18 +44,40 @@ async def send_rpc_request_to_eth_client(
             signer,
             private_key
         )
-    async with ClientSession() as session:
-        async with session.post(
-            ethereum_node_url,
-            json=json_request,
-            headers=headers
-        ) as response:
-            try:
-                resp = await response.read()
-                return json.loads(resp)
-            except json.decoder.JSONDecodeError:
-                logging.critical("Invalid json response from eth client")
-                raise ValueError("Invalid json response from eth client")
+    NUMBER_OF_RETRY_ATTEMPTS = 60
+    json_result = None
+    for i in range(NUMBER_OF_RETRY_ATTEMPTS):
+        try:
+            async with ClientSession() as session:
+                async with session.post(
+                    ethereum_node_url,
+                    json=json_request,
+                    headers=headers
+                ) as response:
+                    resp = await response.read()
+                    json_result = json.loads(resp)
+        except json.decoder.JSONDecodeError:
+            logging.error(
+                f"Attempt No. {i+1} to call node rpc failed."
+                "Invalid json response from eth client."
+            )
+            await asyncio.sleep(1)
+        except Exception as excp:
+            logging.error(
+                f"Attempt No. {i+1} to call node rpc failed." +
+                str(traceback.format_exc()) +
+                str(excp)
+            )
+            await asyncio.sleep(1)
+        except:
+            logging.error(
+                f"Attempt No. {i+1} to call node rpc failed." +
+                str(traceback.format_exc())
+            )
+            await asyncio.sleep(1)
+        else:
+            return json_result
+    raise ValueError("Failed rpc request to rpc node client")
 
 
 async def get_latest_block_info(
