@@ -2,7 +2,8 @@ import aiohttp
 import asyncio
 import logging
 from voltaire_bundler.typing import Address
-from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
+from voltaire_bundler.utils.eth_client_utils import \
+        send_rpc_request_to_eth_client_no_retry
 
 
 async def periodic_health_check_cron_job(
@@ -38,7 +39,7 @@ async def periodic_health_check(
 async def check_bundler_balance(
     ethereum_node_url: str, bundler: Address, min_balance: int
 ) -> tuple[bool, dict]:
-    bundler_balance_res = await send_rpc_request_to_eth_client(
+    bundler_balance_res = await send_rpc_request_to_eth_client_no_retry(
         ethereum_node_url,
         "eth_getBalance",
         [bundler, "latest"],
@@ -99,7 +100,7 @@ async def check_live_ethereum_rpc(
     ethereum_node_url: str, target_chain_id_hex: str
 ) -> tuple[bool, str]:
     try:
-        chain_id_hex = await send_rpc_request_to_eth_client(
+        chain_id_hex = await send_rpc_request_to_eth_client_no_retry(
             ethereum_node_url,
             "eth_chainId",
             [],
