@@ -732,7 +732,7 @@ async def get_init_data(args: Namespace) -> InitData:
 
     elif args.tracer == "native":
         try:
-            trace_call_res = await send_rpc_request_to_eth_client(
+            trace_call_res = await send_rpc_request_to_eth_client_no_retry(
                 args.native_tracer_node_url,
                 "debug_traceCall",
                 [{}, 'latest', {"tracer": "bundlerCollectorTracer"}],
