@@ -80,6 +80,47 @@ async def send_rpc_request_to_eth_client(
     raise ValueError("Failed rpc request to rpc node client")
 
 
+async def send_rpc_request_to_eth_client_no_retry(
+    ethereum_node_url,
+    method,
+    params=None,
+) -> Any:
+    json_request = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": method,
+        "params": params,
+    }
+    headers = {
+        "content-type": "application/json",
+        "connection": "keep-alive"
+    }
+    async with ClientSession() as session:
+        async with session.post(
+            ethereum_node_url,
+            json=json_request,
+            headers=headers
+        ) as response:
+            try:
+                resp = await response.read()
+                return json.loads(resp)
+            except json.decoder.JSONDecodeError:
+                logging.critical("Invalid json response from eth client")
+                raise ValueError("Invalid json response from eth client")
+            except Exception as excp:
+                logging.error(
+                    "Call to node rpc failed." +
+                    str(traceback.format_exc()) +
+                    str(excp)
+                )
+                await asyncio.sleep(1)
+            except:
+                logging.error(
+                    str(traceback.format_exc())
+                )
+                await asyncio.sleep(1)
+
+
 async def get_latest_block_info(
         ethereum_node_url) -> tuple[str, int, str, int, str]:
     raw_res: Any = await send_rpc_request_to_eth_client(
