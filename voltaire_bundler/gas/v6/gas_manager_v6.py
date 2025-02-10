@@ -224,7 +224,10 @@ class GasManagerV6(GasManager):
             raise ValueError("simulateHandleOpMod didn't revert!")
 
         elif (
-            "execution reverted" not in result["error"]["message"]
+            (
+                "execution reverted" not in result["error"]["message"]
+                and "execution error" not in result["error"]["message"]  # nethermind
+            )
             or "data" not in result["error"]
             or len(result["error"]["data"]) < 10
         ):

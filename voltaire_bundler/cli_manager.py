@@ -12,7 +12,7 @@ import aiohttp
 
 from voltaire_bundler.mempool.mempool_info import DEFAULT_MEMPOOL_INFO
 from voltaire_bundler.utils.eth_client_utils import \
-    send_rpc_request_to_eth_client
+    send_rpc_request_to_eth_client_no_retry
 
 from .typing import Address, MempoolId
 from .utils.import_key import (import_bundler_account,
@@ -633,7 +633,7 @@ def check_if_valid_rpc_url_and_port(rpc_url, rpc_port) -> None:
 
 async def check_valid_ethereum_rpc_and_get_chain_id(ethereum_node_url) -> str:
     try:
-        chain_id_hex = await send_rpc_request_to_eth_client(
+        chain_id_hex = await send_rpc_request_to_eth_client_no_retry(
             ethereum_node_url,
             "eth_chainId",
             [],
@@ -652,7 +652,7 @@ async def check_valid_ethereum_rpc_and_get_chain_id(ethereum_node_url) -> str:
 
 
 async def check_valid_entrypoint(ethereum_node_url: str, entrypoint: Address):
-    entrypoint_code = await send_rpc_request_to_eth_client(
+    entrypoint_code = await send_rpc_request_to_eth_client_no_retry(
         ethereum_node_url,
         "eth_getCode",
         [entrypoint, "latest"],
