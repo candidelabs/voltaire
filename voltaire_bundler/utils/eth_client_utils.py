@@ -36,7 +36,10 @@ async def send_rpc_request_to_eth_client(
         "method": method,
         "params": params,
     }
-    headers = {"content-type": "application/json"}
+    headers = {
+        "content-type": "application/json",
+        "connection": "keep-alive"
+    }
     if flashbots_signer_private_key_pair is not None:
         signer, private_key = flashbots_signer_private_key_pair
         headers["X-Flashbots-Signature"] = create_flashbots_signature(
@@ -65,8 +68,8 @@ async def send_rpc_request_to_eth_client(
         except Exception as excp:
             logging.error(
                 f"Attempt No. {i+1} to call node rpc failed." +
-                str(traceback.format_exc()) +
-                str(excp)
+                str(excp) +
+                str(traceback.format_exc())
             )
             await asyncio.sleep(1)
         except:
