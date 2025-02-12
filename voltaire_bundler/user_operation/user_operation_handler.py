@@ -177,7 +177,8 @@ class UserOperationHandler(ABC):
     async def get_transaction_receipt(self, transaction_hash: str) -> dict:
         params = [transaction_hash]
         res: Any = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_getTransactionReceipt", params
+            self.ethereum_node_url, "eth_getTransactionReceipt", params,
+            None, "result"
         )
         return res["result"]
 
