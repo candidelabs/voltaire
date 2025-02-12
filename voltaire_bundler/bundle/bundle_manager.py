@@ -285,7 +285,6 @@ class BundlerManager:
                     {"fast": True}
                 ],
                 (self.bundler_address, self.bundler_private_key),
-                "X-Flashbots-Signature"
             )
         else:
             result = await send_rpc_request_to_eth_client(
