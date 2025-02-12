@@ -151,13 +151,13 @@ class BundlerManager:
         )
 
         block_max_fee_per_gas_op = send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_gasPrice"
+            self.ethereum_node_url, "eth_gasPrice", None, None, "result"
         )
 
         nonce_op = send_rpc_request_to_eth_client(
             self.ethereum_node_url,
             "eth_getTransactionCount",
-            [self.bundler_address, "latest"],
+            [self.bundler_address, "latest"], None, "result"
         )
 
         tasks_arr = [
@@ -168,7 +168,8 @@ class BundlerManager:
 
         if not self.is_legacy_mode:
             block_max_priority_fee_per_gas_op = send_rpc_request_to_eth_client(
-                self.ethereum_node_url, "eth_maxPriorityFeePerGas"
+                self.ethereum_node_url, "eth_maxPriorityFeePerGas",
+                None, None, "result"
             )
             tasks_arr.append(block_max_priority_fee_per_gas_op)
 
@@ -707,7 +708,8 @@ class BundlerManager:
                     send_rpc_request_to_eth_client(
                         self.ethereum_node_url,
                         "eth_getProof",
-                        [user_operation.sender_address, [], "latest"]
+                        [user_operation.sender_address, [], "latest"],
+                        None, "result"
                     )
                 )
             senders_root_hashes = await asyncio.gather(

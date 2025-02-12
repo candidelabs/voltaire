@@ -28,7 +28,8 @@ async def send_rpc_request_to_eth_client(
     ethereum_node_url,
     method,
     params=None,
-    flashbots_signer_private_key_pair: tuple[str, str] | None = None
+    flashbots_signer_private_key_pair: tuple[str, str] | None = None,
+    expected_key: str | None = None
 ) -> Any:
     json_request = {
         "jsonrpc": "2.0",
@@ -67,19 +68,27 @@ async def send_rpc_request_to_eth_client(
             await asyncio.sleep(1)
         except Exception as excp:
             logging.error(
-                f"Attempt No. {i+1} to call node rpc failed." +
-                str(excp) +
-                str(traceback.format_exc())
+                f"Attempt No. {i+1} to call node rpc failed."
+                f"error: {str(excp)}"
             )
+            logging.error(f"traceback: {str(traceback.format_exc())}")
             await asyncio.sleep(1)
         except:
             logging.error(
-                f"Attempt No. {i+1} to call node rpc failed." +
-                str(traceback.format_exc())
+                f"Attempt No. {i+1} to call node rpc failed."
             )
+            logging.error(f"traceback: {str(traceback.format_exc())}")
             await asyncio.sleep(1)
         else:
-            return json_result
+            if expected_key is not None and expected_key not in json_result:
+                logging.error(
+                    f"Attempt No. {i+1} to call node rpc failed."
+                    f"the request: {str(json_request)}"
+                    f"as the key {expected_key} is not in the result: {str(json_result)}"
+                )
+                continue
+            else:
+                return json_result
     raise ValueError("Failed rpc request to rpc node client")
 
 
@@ -127,7 +136,7 @@ async def send_rpc_request_to_eth_client_no_retry(
 async def get_latest_block_info(
         ethereum_node_url) -> tuple[str, int, str, int, str]:
     raw_res: Any = await send_rpc_request_to_eth_client(
-        ethereum_node_url, "eth_getBlockByNumber", ["latest", False]
+        ethereum_node_url, "eth_getBlockByNumber", ["latest", False], None, "result"
     )
     latest_block = raw_res["result"]
 

@@ -290,14 +290,14 @@ class GasManagerV6(GasManager):
         max_priority_fee_per_gas = user_operation.max_priority_fee_per_gas
 
         block_max_fee_per_gas_op = send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_gasPrice"
+            self.ethereum_node_url, "eth_gasPrice", None, None, "result"
         )
 
         tasks_arr = [block_max_fee_per_gas_op]
 
         if not self.is_legacy_mode:
             block_max_priority_fee_per_gas_op = send_rpc_request_to_eth_client(
-                self.ethereum_node_url, "eth_maxPriorityFeePerGas"
+                self.ethereum_node_url, "eth_maxPriorityFeePerGas", None, None, "result"
             )
             tasks_arr.append(block_max_priority_fee_per_gas_op)
 
