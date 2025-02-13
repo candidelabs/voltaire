@@ -46,6 +46,20 @@ class UserOperationHandler(ABC):
         transaction = await self.get_transaction_receipt(
                 log_object.transactionHash)
 
+        if (  # pending log
+            transaction is None or
+            "blockNumber" not in transaction or
+            "transactionHash" not in transaction or
+            "transactionIndex" not in transaction or
+            "blockHash" not in transaction
+        ):
+            return None
+
+        if "effectiveGasPrice" in transaction:
+            effective_gas_price = transaction["effectiveGasPrice"]
+        else:
+            effective_gas_price = "0x"
+
         receiptInfo = ReceiptInfo(
             transactionHash=transaction["transactionHash"],
             transactionIndex=log_object.transactionIndex,
@@ -60,7 +74,7 @@ class UserOperationHandler(ABC):
             logsBloom=transaction["logsBloom"],
             # root=transaction['root'],
             status=transaction["status"],
-            effectiveGasPrice="0",
+            effectiveGasPrice=effective_gas_price,
         )
         if not self.is_legacy_mode:
             receiptInfo.effectiveGasPrice = transaction["effectiveGasPrice"]
