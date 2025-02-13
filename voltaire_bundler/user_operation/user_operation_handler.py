@@ -47,6 +47,7 @@ class UserOperationHandler(ABC):
                 log_object.transactionHash)
 
         if (  # pending log
+            transaction is None or
             "blockNumber" not in transaction or
             "transactionHash" not in transaction or
             "transactionIndex" not in transaction or
