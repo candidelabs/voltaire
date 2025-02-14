@@ -364,6 +364,12 @@ async def get_transaction_by_hash(
         transactions_cache[transaction_hash] = res['result']
         return res["result"]
     else:
+        if "error" not in res:
+            logging.error(
+                f"eth_getTransactionByHash failed. error: {str(res["error"])}")
+        else:
+            logging.error(
+                f"eth_getTransactionByHash failed. error: {str(res)}")
         return None
 
 
