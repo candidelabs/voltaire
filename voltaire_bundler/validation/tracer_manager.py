@@ -496,7 +496,7 @@ def validate_entity_storage_access(
                 # storage if factory is staked.
                 # [STO-022], [STO-021]
                 if is_init_code:
-                    if not (entity_title == "sender" and is_factory_staked):
+                    if not is_factory_staked:
                         require_stake_slot = slot
             elif (
                 entity_address in associated_slots_per_entity
