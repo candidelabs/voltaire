@@ -140,17 +140,10 @@ class ReputationManager:
                 entity_address_lowercase]
 
             status = self.get_status(entity_address_lowercase)
-            if status == ReputationStatus.OK:
-                status_str = "ok"
-            elif status == ReputationStatus.THROTTLED:
-                status_str = "throttled"
-            else:
-                status_str = "banned"
-
             entity_reputation_json = {
                 "opsSeen": entry.ops_seen,
                 "opsIncluded": entry.ops_included,
-                "status": status_str,
+                "status": status.value,
                 "address": entity_address_lowercase
             }
             entities_reputation_json.append(entity_reputation_json)
