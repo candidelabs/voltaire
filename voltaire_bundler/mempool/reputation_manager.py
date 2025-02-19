@@ -12,9 +12,9 @@ REPUTATION_BACKOFF_INTERVAL = 3600  # hourly
 
 
 class ReputationStatus(Enum):
-    OK = 1
-    THROTTLED = 2
-    BANNED = 3
+    OK = 0
+    THROTTLED = 1
+    BANNED = 2
 
 
 @dataclass
