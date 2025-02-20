@@ -48,6 +48,7 @@ class ExecutionEndpoint(Endpoint):
     peer_ids_to_cursor: dict[str, int]
     peer_ids_to_user_ops_hashes_queue: dict[str, list[str]]
     disabe_p2p: bool
+    is_eip7702: bool
 
     def __init__(
         self,
@@ -73,7 +74,8 @@ class ExecutionEndpoint(Endpoint):
         logs_incremental_range: int,
         logs_number_of_ranges: int,
         reputation_whitelist: list[str],
-        reputation_blacklist: list[str]
+        reputation_blacklist: list[str],
+        is_eip7702: bool
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_url = ethereum_node_url
@@ -154,6 +156,7 @@ class ExecutionEndpoint(Endpoint):
         self.peer_ids_to_user_ops_hashes_queue = dict()
         self.disable_p2p = disable_p2p
         self.disable_v6 = disable_v6
+        self.is_eip7702 = is_eip7702
 
         asyncio.ensure_future(self.execute_cron_job(is_debug, bundle_interval))
 
@@ -330,6 +333,15 @@ class ExecutionEndpoint(Endpoint):
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
                 "Invalid entrypoint",
+            )
+        if (
+            "eip7702auth" in useroperation_arg and
+            useroperation_arg["eip7702auth"] is not None and
+            not self.is_eip7702
+        ):
+            raise ValidationException(
+                ValidationExceptionCode.InvalidFields,
+                "EIP-7702 tuples are not supported",
             )
 
         if input_entrypoint == LocalMempoolManagerV7.entrypoint_lowercase:

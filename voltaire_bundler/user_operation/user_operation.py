@@ -21,6 +21,7 @@ class UserOperation(ABC):
     attempted_bundle_transaction_hash: str | None
     last_add_to_mempool_date: datetime | None
     number_of_add_to_mempool_attempts: int
+    eip7702_auth: dict[str, str | int] | None
 
     @abstractmethod
     def get_user_operation_json(
@@ -92,6 +93,29 @@ def verify_and_get_bytes(field_name: str, value: str | None) -> bytes:
             ValidationExceptionCode.InvalidFields,
             f"Invalid bytes hex value : {value} in field {field_name}",
         )
+
+
+def verify_and_get_eip7702_auth(value: dict) -> dict[str, str | int]:
+    if (
+        "chainId" not in value or
+        "address" not in value or
+        "nonce" not in value or
+        "yParity" not in value or
+        "r" not in value or
+        "s" not in value
+    ):
+        raise ValidationException(
+            ValidationExceptionCode.InvalidFields,
+            "Invalid eip7702Auth field.",
+        )
+    return {
+        "chainId": verify_and_get_uint("eip7702auth.chainId", value["chainId"]),
+        "addressr": verify_and_get_address("eip7702auth.address", value["address"]),
+        "noncer": verify_and_get_uint("eip7702auth.nonce", value["nonce"]),
+        "yParityr": verify_and_get_uint("eip7702auth.yParity", value["yParity"]),
+        "r": verify_and_get_uint("eip7702auth.r", value["r"]),
+        "s": verify_and_get_uint("eip7702auth.s", value["s"])
+    }
 
 
 def is_user_operation_hash(user_operation_hash: str) -> bool:

@@ -6,7 +6,7 @@ from voltaire_bundler.bundle.exceptions import \
     ValidationException, ValidationExceptionCode
 from voltaire_bundler.typing import Address, MempoolId
 from ..user_operation import \
-    verify_and_get_uint, verify_and_get_bytes, verify_and_get_address
+    verify_and_get_eip7702_auth, verify_and_get_uint, verify_and_get_bytes, verify_and_get_address
 from ..user_operation import UserOperation
 
 
@@ -31,7 +31,18 @@ class UserOperationV6(UserOperation):
     jsonRequestDict: InitVar[dict[str, Address | int | bytes]]
 
     def __init__(self, jsonRequestDict) -> None:
-        if len(jsonRequestDict) != 11:
+        if (
+            "eip7702auth" in jsonRequestDict and
+            jsonRequestDict["eip7702auth"] is not None
+        ):
+            self.eip7702_auth = verify_and_get_eip7702_auth(
+                jsonRequestDict["eip7702auth"]
+            )
+        else:
+            jsonRequestDict["eip7702auth"] = None
+            self.eip7702_auth = None
+
+        if len(jsonRequestDict) != 12:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
                 "Invalid UserOperation",

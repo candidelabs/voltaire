@@ -76,6 +76,7 @@ class InitData:
     health_check_interval: int
     reputation_whitelist: list[str]
     reputation_blacklist: list[str]
+    is_eip7702: bool
 
 
 def address(ep: str):
@@ -99,6 +100,7 @@ def url_no_port(ep: str):
         raise ArgumentTypeError(f"Wrong url format : {ep}")
     return ep
 
+
 def _get_env_or_default(env_var, default, value_type):
     """
     Helper function to get the value from an environment variable or return the default value.
@@ -110,6 +112,7 @@ def _get_env_or_default(env_var, default, value_type):
             return value.split(",")
         return value_type(value)
     return default
+
 
 def initialize_argument_parser() -> ArgumentParser:
     parser = ArgumentParser(
@@ -504,7 +507,17 @@ def initialize_argument_parser() -> ArgumentParser:
         default=_get_env_or_default("VOLTAIRE_REPUTATION_BLACKLIST", None, list),
     )
 
+    parser.add_argument(
+        "--eip7702",
+        type=bool,
+        help="enable eip7702 auth",
+        nargs="?",
+        const=True,
+        default=_get_env_or_default("VOLTAIRE_EIP7702", False, lambda v: v.lower() == "true"),
+    )
+
     return parser
+
 
 async def parse_args(cmd_args: [str]) -> InitData:
     argument_parser: ArgumentParser = initialize_argument_parser()
@@ -698,7 +711,8 @@ async def get_init_data(args: Namespace) -> InitData:
         args.logs_number_of_ranges,
         args.health_check_interval,
         args.reputation_whitelist,
-        args.reputation_blacklist
+        args.reputation_blacklist,
+        args.eip7702
     )
 
     if args.verbose:

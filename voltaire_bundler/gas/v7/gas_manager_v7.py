@@ -192,6 +192,11 @@ class GasManagerV7(GasManager):
                 "code": self.entrypoint_code_override
             }
         }
+        eip7702_auth = user_operation.eip7702_auth
+        if eip7702_auth is not None:
+            default_state_overrides[user_operation.sender_address] = {
+                "code": "0xef0100" + str(eip7702_auth["address"])[2:]
+            }
 
         call_data = function_selector + call_data_params.hex()
 

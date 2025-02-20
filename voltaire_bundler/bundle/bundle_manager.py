@@ -176,13 +176,14 @@ class BundlerManager:
         try:
             tasks = await asyncio.gather(*tasks_arr)
         except ExecutionException as err:
-            logging.error(f"Sending bundle failed with erro: {err.message}") 
+            logging.error(f"Sending bundle failed with erro: {err.message}")
             return
 
         call_data, gas_estimation_hex, merged_storage_map = tasks[0]
 
         if call_data is None or gas_estimation_hex is None:
-            logging.error(f"Sending bundle failed. failed call data or gas estimation.") 
+            logging.error(
+                "Sending bundle failed. failed call data or gas estimation.")
             return
 
         gas_estimation_hex = hex(math.ceil(

@@ -23,15 +23,6 @@ ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 class ValidationManagerV7(ValidationManager):
     user_operation_handler: UserOperationHandlerV7
-    tracer_manager: TracerManager
-    ethereum_node_url: str
-    bundler_address: str
-    chain_id: int
-    bundler_collector_tracer: str
-    is_unsafe: bool
-    is_legacy_mode: bool
-    enforce_gas_price_tolerance: int
-    ethereum_node_debug_trace_call_url: str
 
     def __init__(
         self,
@@ -165,6 +156,17 @@ class ValidationManagerV7(ValidationManager):
     ) -> str:
         call_data = ValidationManagerV7.encode_simulate_validation_calldata(
                 user_operation)
+        state_overrides = {  # override the Entrypoint with EntryPointSimulationsV7
+            entrypoint: {"code": self.entrypoint_code_override}
+        }
+
+        if user_operation.eip7702_auth is not None:
+            new_code = await self.verify_authorization_and_get_code(
+                user_operation.sender_address,
+                user_operation.eip7702_auth
+            )
+            if new_code is not None:
+                state_overrides[user_operation.sender_address] = {"code": new_code}
 
         params = [
             {
@@ -173,9 +175,7 @@ class ValidationManagerV7(ValidationManager):
                 "data": call_data,
             },
             "latest",
-            {  # override the Entrypoint with EntryPointSimulationsV7
-                entrypoint: {"code": self.entrypoint_code_override}
-            }
+            state_overrides
         ]
 
         result: Any = await send_rpc_request_to_eth_client(
@@ -229,6 +229,17 @@ class ValidationManagerV7(ValidationManager):
     ) -> tuple[str, str]:
         call_data = ValidationManagerV7.encode_simulate_validation_calldata(
             user_operation)
+        state_overrides = {  # override the Entrypoint with EntryPointSimulationsV7
+            entrypoint: {"code": self.entrypoint_code_override}
+        }
+
+        if user_operation.eip7702_auth is not None:
+            new_code = await self.verify_authorization_and_get_code(
+                user_operation.sender_address,
+                user_operation.eip7702_auth
+            )
+            if new_code is not None:
+                state_overrides[user_operation.sender_address] = {"code": new_code}
 
         params = [
             {
@@ -239,10 +250,7 @@ class ValidationManagerV7(ValidationManager):
             block_number,
             {
                 "tracer": self.bundler_collector_tracer,
-                "stateOverrides":
-                    {  # override the Entrypoint with EntryPointSimulationsV7
-                        entrypoint: {"code": self.entrypoint_code_override}
-                    }
+                "stateOverrides": state_overrides
             }
         ]
         res: Any = await send_rpc_request_to_eth_client(
