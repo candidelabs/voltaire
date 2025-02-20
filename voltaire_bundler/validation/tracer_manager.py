@@ -218,6 +218,8 @@ def validate_entity_banned_opcodes(
         "INVALID",
         "SELFDESTRUCT",
         "GAS",
+        "BLOBHASH",
+        "BLOBBASEFEE"
     ]
 
     found_opcodes = opcodes.keys() & BANNED_OPCODES
