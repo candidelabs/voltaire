@@ -110,9 +110,9 @@ def verify_and_get_eip7702_auth(value: dict) -> dict[str, str | int]:
         )
     return {
         "chainId": verify_and_get_uint("eip7702auth.chainId", value["chainId"]),
-        "addressr": verify_and_get_address("eip7702auth.address", value["address"]),
-        "noncer": verify_and_get_uint("eip7702auth.nonce", value["nonce"]),
-        "yParityr": verify_and_get_uint("eip7702auth.yParity", value["yParity"]),
+        "address": verify_and_get_address("eip7702auth.address", value["address"]),
+        "nonce": verify_and_get_uint("eip7702auth.nonce", value["nonce"]),
+        "yParity": verify_and_get_uint("eip7702auth.yParity", value["yParity"]),
         "r": verify_and_get_uint("eip7702auth.r", value["r"]),
         "s": verify_and_get_uint("eip7702auth.s", value["s"])
     }
