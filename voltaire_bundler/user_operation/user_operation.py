@@ -21,7 +21,7 @@ class UserOperation(ABC):
     attempted_bundle_transaction_hash: str | None
     last_add_to_mempool_date: datetime | None
     number_of_add_to_mempool_attempts: int
-    eip7702_auth: dict[str, str | int] | None
+    eip7702_auth: dict[str, str] | None
 
     @abstractmethod
     def get_user_operation_json(
@@ -95,7 +95,7 @@ def verify_and_get_bytes(field_name: str, value: str | None) -> bytes:
         )
 
 
-def verify_and_get_eip7702_auth(value: dict) -> dict[str, str | int]:
+def verify_and_get_eip7702_auth(value: dict) -> dict[str, str]:
     if (
         "chainId" not in value or
         "address" not in value or
@@ -109,12 +109,12 @@ def verify_and_get_eip7702_auth(value: dict) -> dict[str, str | int]:
             "Invalid eip7702Auth field.",
         )
     return {
-        "chainId": verify_and_get_uint("eip7702auth.chainId", value["chainId"]),
+        "chainId": hex(verify_and_get_uint("eip7702auth.chainId", value["chainId"])),
         "address": verify_and_get_address("eip7702auth.address", value["address"]),
-        "nonce": verify_and_get_uint("eip7702auth.nonce", value["nonce"]),
-        "yParity": verify_and_get_uint("eip7702auth.yParity", value["yParity"]),
-        "r": verify_and_get_uint("eip7702auth.r", value["r"]),
-        "s": verify_and_get_uint("eip7702auth.s", value["s"])
+        "nonce": hex(verify_and_get_uint("eip7702auth.nonce", value["nonce"])),
+        "yParity": hex(verify_and_get_uint("eip7702auth.yParity", value["yParity"])),
+        "r": hex(verify_and_get_uint("eip7702auth.r", value["r"])),
+        "s": hex(verify_and_get_uint("eip7702auth.s", value["s"]))
     }
 
 
