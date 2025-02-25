@@ -532,6 +532,8 @@ async def parse_args(cmd_args: [str]) -> InitData:
         argument_parser.error("You can only specify either --conditional_rpc or --flashbots_protect_node_url but not both at the same time")
     if args.ethereum_node_debug_trace_call_url and args.unsafe:
         argument_parser.error("You can only specify either --ethereum_node_debug_trace_call_url or --unsafe but not both at the same time")
+    if args.is_legacy_mode and args.eip7702:
+        argument_parser.error("You can only specify either --is_legacy_mode or --eip7702 but not both at the same time")
     init_data = await get_init_data(args)
     return init_data
 
