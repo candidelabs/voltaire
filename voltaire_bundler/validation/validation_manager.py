@@ -13,6 +13,7 @@ from voltaire_bundler.bundle.exceptions import \
 from voltaire_bundler.typing import Address
 from voltaire_bundler.user_operation.models import \
     AggregatorStakeInfo, StakeInfo, UserOperationType
+from voltaire_bundler.utils.eip7702 import format_hex_array_for_rlp_encode
 from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
 from voltaire_bundler.validation.tracer_manager import TracerManager
 
@@ -31,41 +32,56 @@ class ValidationManager(ABC, Generic[UserOperationType]):
     async def verify_authorization_and_get_code(
         self,
         sender_address: Address,
-        authorization: dict[str, str | int],
+        authorization: dict[str, str],
     ) -> str | None:
-        chain_id = authorization["chainId"]
+        chain_id_hex = authorization["chainId"][2:]
+        chain_id = int(chain_id_hex, 16)
         if chain_id != self.chain_id and chain_id != 0:
             raise ValidationException(
-                ValidationExceptionCode.SimulateValidation,
+                ValidationExceptionCode.InvalidFields,
                 "Invalid eip7702auth chainId.",
             )
 
-        address = str(authorization["address"])
-        nonce = authorization["nonce"]
         auth_hash = keccak(
-            "0x05" +  # magic value
-            rlp_encode([chain_id, address, nonce])[2:]
+            bytes.fromhex(
+                "05" +  # magic value
+                rlp_encode(
+                    format_hex_array_for_rlp_encode(
+                        [
+                            authorization["chainId"],
+                            authorization["address"],
+                            authorization["nonce"],
+                        ]
+                    )
+                ).hex()
+            )
         )
         try:
             y_parity = authorization["yParity"]
             r = authorization["r"]
             s = authorization["s"]
-            signature = KeyAPI.Signature((y_parity, r, s))
+            signature = KeyAPI.Signature(
+                vrs=(
+                    int(y_parity, 16),
+                    int(r, 16),
+                    int(s, 16)
+                )
+            )
             auth_signer_address = signature.recover_public_key_from_msg_hash(
                 auth_hash
-            )
+            ).to_address()
         except EthUtilsValidationError or BadSignature as excp:
             logging.error(
-                f"Failed to recover authorization for address: {address}."
+                f"Failed to recover authorization for address: {authorization["address"]}."
                 f"error:{str(excp)}"
             )
             raise ValidationException(
-                ValidationExceptionCode.SimulateValidation,
-                f"Failed to recover authorization for address: {address}."
+                ValidationExceptionCode.InvalidFields,
+                f"Failed to recover authorization for address: {authorization["address"]}."
             )
         if sender_address.lower() != auth_signer_address.lower():
             raise ValidationException(
-                ValidationExceptionCode.SimulateValidation,
+                ValidationExceptionCode.InvalidFields,
                 f"Userop sender: {sender_address} is not equal to auth signer "
                 f"recovered address {auth_signer_address}"
             )
@@ -86,9 +102,11 @@ class ValidationManager(ABC, Generic[UserOperationType]):
         existing_code = tasks[0]["result"]
         current_nonce = tasks[1]["result"]
 
-        new_code = "0xef0100" + address[2:]
-
-        if existing_code == new_code or nonce != current_nonce:
+        new_code = "0xef0100" + authorization["address"][2:]
+        if (
+                existing_code == new_code or
+                int(authorization["nonce"], 16) != int(current_nonce, 16)
+        ):
             return None
         return new_code
 

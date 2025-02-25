@@ -21,6 +21,7 @@ from voltaire_bundler.user_operation.user_operation_handler import \
 from voltaire_bundler.user_operation.v6.user_operation_v6 import UserOperationV6
 from voltaire_bundler.user_operation.v7.user_operation_v7 import UserOperationV7
 
+from voltaire_bundler.utils.eip7702 import create_and_sign_eip7702_raw_transaction
 from voltaire_bundler.utils.eth_client_utils import \
     send_rpc_request_to_eth_client
 
@@ -179,7 +180,7 @@ class BundlerManager:
             logging.error(f"Sending bundle failed with erro: {err.message}")
             return
 
-        call_data, gas_estimation_hex, merged_storage_map = tasks[0]
+        call_data, gas_estimation_hex, merged_storage_map, auth_list = tasks[0]
 
         if call_data is None or gas_estimation_hex is None:
             logging.error(
@@ -217,31 +218,46 @@ class BundlerManager:
             if block_max_priority_fee_per_gas_dec_mod > block_max_fee_per_gas_dec_mod:
                 block_max_priority_fee_per_gas_hex = block_max_fee_per_gas_hex
 
-        txnDict = {
-            "chainId": self.chain_id,
-            "from": self.bundler_address,
-            "to": entrypoint,
-            "nonce": nonce,
-            "gas": gas_estimation_hex,
-            "data": call_data,
-        }
+        if len(auth_list) == 0:
+            txnDict = {
+                "chainId": self.chain_id,
+                "from": self.bundler_address,
+                "to": entrypoint,
+                "nonce": nonce,
+                "gas": gas_estimation_hex,
+                "data": call_data,
+            }
 
-        if self.is_legacy_mode:
-            txnDict.update(
-                {
-                    "gasPrice": block_max_fee_per_gas_hex,
-                }
+            if self.is_legacy_mode:
+                txnDict.update(
+                    {
+                        "gasPrice": block_max_fee_per_gas_hex,
+                    }
+                )
+            else:
+                txnDict.update(
+                    {
+                        "maxFeePerGas": block_max_fee_per_gas_hex,
+                        "maxPriorityFeePerGas": block_max_priority_fee_per_gas_hex,
+                    }
+                )
+            sign_store_txn = Account.sign_transaction(
+                txnDict, private_key=self.bundler_private_key
             )
+            raw_transaction = "0x" + sign_store_txn.raw_transaction.hex()
         else:
-            txnDict.update(
-                {
-                    "maxFeePerGas": block_max_fee_per_gas_hex,
-                    "maxPriorityFeePerGas": block_max_priority_fee_per_gas_hex,
-                }
+            raw_transaction = create_and_sign_eip7702_raw_transaction(
+                chain_id_hex=hex(self.chain_id),
+                nonce_hex=nonce,
+                max_priority_fee_per_gas_hex=block_max_priority_fee_per_gas_hex,
+                max_fee_per_gas_hex=block_max_fee_per_gas_hex,
+                gas_limit_hex=gas_estimation_hex,
+                destination=entrypoint,
+                value_hex="0x",
+                data=call_data,
+                authorization_list=auth_list,
+                eoa_private_key=self.bundler_private_key
             )
-        sign_store_txn = Account.sign_transaction(
-            txnDict, private_key=self.bundler_private_key
-        )
 
         if self.conditional_rpc is not None and merged_storage_map is not None:
             if self.conditional_rpc == ConditionalRpc.eth:
@@ -252,7 +268,7 @@ class BundlerManager:
                 self.ethereum_node_url,
                 method,
                 [
-                    "0x" + sign_store_txn.raw_transaction.hex(),
+                    raw_transaction,
                     {"knownAccounts": merged_storage_map}
                 ]
             )
@@ -261,7 +277,7 @@ class BundlerManager:
                 self.flashbots_protect_node_url,
                 "eth_sendPrivateRawTransaction",
                 [
-                    "0x" + sign_store_txn.raw_transaction.hex(),
+                    raw_transaction,
                     {"fast": True}
                 ],
                 (self.bundler_address, self.bundler_private_key)
@@ -270,7 +286,9 @@ class BundlerManager:
             result = await send_rpc_request_to_eth_client(
                 self.ethereum_node_url,
                 "eth_sendRawTransaction",
-                ["0x" + sign_store_txn.raw_transaction.hex()],
+                [
+                    raw_transaction
+                ],
             )
 
         if "error" in result:
@@ -492,10 +510,13 @@ class BundlerManager:
         user_operations: list[UserOperationV6] | list[UserOperationV7],
         bundler: Address,
         entrypoint: Address,
-    ) -> tuple[str | None, int | None, dict[str, str | dict[str, str]] | None]:
+    ) -> tuple[str | None, int | None, dict[str, str | dict[str, str]] | None, list]:
         user_operations_list = []
+        auth_list = []
         for user_operation in user_operations:
             user_operations_list.append(user_operation.to_list())
+            if user_operation.eip7702_auth is not None:
+                auth_list.append(user_operation.eip7702_auth)
 
         if len(user_operations_list[0]) == 9:
             call_data = BundlerManager.encode_handleops_calldata_v7(
@@ -509,16 +530,15 @@ class BundlerManager:
             assert self.local_mempool_manager_v6 is not None
             mempool_manager = self.local_mempool_manager_v6
 
-        params = [
-            {
-                "from": bundler,
-                "to": entrypoint,
-                "data": call_data
-            }
-        ]
-
+        params = {
+            "from": bundler,
+            "to": entrypoint,
+            "data": call_data,
+        }
+        if (len(auth_list) > 0):
+            params["authorizationList"] = auth_list
         result = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_estimateGas", params
+            self.ethereum_node_url, "eth_estimateGas", [params]
         )
         if "error" in result:
             if "data" in result["error"]:
@@ -541,7 +561,7 @@ class BundlerManager:
                         "Dropping all user operations."
                         + str(result["error"])
                     )
-                    return None, None, None
+                    return None, None, None, []
 
                 user_operation = user_operations[operation_index]
 
@@ -721,7 +741,7 @@ class BundlerManager:
             ):
                 merged_storage_map[
                     user_operation.sender_address] = root_hash_result["result"]["storageHash"]
-        return call_data, call_gas_limit, merged_storage_map
+        return call_data, call_gas_limit, merged_storage_map, auth_list
 
     @staticmethod
     def encode_handleops_calldata_v6(
