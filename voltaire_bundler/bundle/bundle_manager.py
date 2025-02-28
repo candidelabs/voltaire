@@ -580,7 +580,7 @@ class BundlerManager:
                         )
                     else:
                         logging.info("No useroperations to bundle")
-                        return None, None, None
+                        return None, None, None, []
 
                 # check if userop was already executed if userop caused bundle
                 # gas estimation to fail
@@ -618,7 +618,7 @@ class BundlerManager:
                         )
                     else:
                         logging.info("No useroperations to bundle")
-                        return None, None, None
+                        return None, None, None, []
 
                 entity_to_ban = None
                 if "AA3" in reason:
@@ -707,14 +707,14 @@ class BundlerManager:
                     )
                 else:
                     logging.info("No useroperations to bundle")
-                    return None, None, None
+                    return None, None, None, []
             else:
                 logging.error(
                     "Unexpected error during gas estimation for bundle." +
                     "Dropping all user operations."
                     + str(result["error"])
                 )
-                return None, None, None
+                return None, None, None, []
 
         call_gas_limit = result["result"]
 
