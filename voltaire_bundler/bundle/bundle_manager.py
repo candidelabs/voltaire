@@ -22,7 +22,7 @@ from voltaire_bundler.user_operation.v6.user_operation_v6 import UserOperationV6
 from voltaire_bundler.user_operation.v7.user_operation_v7 import UserOperationV7
 
 from voltaire_bundler.utils.eth_client_utils import \
-    send_rpc_request_to_eth_client
+    get_latest_block_info, send_rpc_request_to_eth_client
 
 from ..mempool.reputation_manager import ReputationManager
 
@@ -516,9 +516,14 @@ class BundlerManager:
             }
         ]
 
-        result = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_estimateGas", params
+        results = await asyncio.gather(
+            send_rpc_request_to_eth_client(
+                self.ethereum_node_url, "eth_estimateGas", params
+            ),
+            get_latest_block_info(self.ethereum_node_url)
         )
+        result = results[0]
+        latest_block_number, _, _, _, _ = results[1]
         if "error" in result:
             if "data" in result["error"]:
                 error_data = result["error"]["data"]
@@ -543,6 +548,26 @@ class BundlerManager:
                     return None, None, None
 
                 user_operation = user_operations[operation_index]
+
+                # reattempt to estimate gas if current node is lagging
+                # as we can't assume that the bundler is connected to the same
+                # node during validation and bundle gas estimation
+                assert user_operation.validated_at_block_hex is not None
+                if (
+                    int(user_operation.validated_at_block_hex, 16) >
+                    int(latest_block_number, 16)
+                ):
+                    logging.debug(
+                        "reattempt to estimate gas because of a lagging node."
+                        f"latest node block is: {latest_block_number}."
+                        f"user operation validated at block: {user_operation.validated_at_block_hex}."
+                        f"user_operation_hash: {user_operation.user_operation_hash}"
+                    )
+                    return await self.create_bundle_calldata_and_estimate_gas(
+                        user_operations,
+                        bundler,
+                        entrypoint,
+                    )
 
                 if user_operation.number_of_add_to_mempool_attempts > 1:
                     logging.warning(

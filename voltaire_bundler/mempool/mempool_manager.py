@@ -310,6 +310,19 @@ class LocalMempoolManager():
                     await get_latest_block_info(self.ethereum_node_url)
                 )
 
+                # skip adding this user operation to the bundle if current node is lagging
+                # as we can't assume that the bundler is connected to the same
+                # node during first and second validation
+                assert user_operation.validated_at_block_hex is not None
+                if (user_operation.validated_at_block_hex > latest_block_number):
+                    logging.debug(
+                        "user operation skipped for bundling because of a lagging node."
+                        f"latest node block is: {latest_block_number}."
+                        f"user operation validated at block: {user_operation.validated_at_block_hex}."
+                        f"user_operation_hash: {user_operation_hash}"
+                    )
+                    continue
+
                 try:
                     (
                         _, _, _, _, _,
