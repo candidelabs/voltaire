@@ -41,9 +41,9 @@ class UserOperationV7(UserOperation):
                 ValidationExceptionCode.InvalidFields,
                 "Invalid UserOperation",
             )
-        if jsonRequestDict["eip7702auth"] is not None:
+        if jsonRequestDict["eip7702Auth"] is not None:
             self.eip7702_auth = verify_and_get_eip7702_auth(
-                jsonRequestDict["eip7702auth"]
+                jsonRequestDict["eip7702Auth"]
             )
         else:
             self.eip7702_auth = None
@@ -162,7 +162,7 @@ class UserOperationV7(UserOperation):
             "paymasterVerificationGasLimit",
             "paymasterPostOpGasLimit",
             "paymasterData",
-            "eip7702auth"
+            "eip7702Auth"
         ]
 
         for field in optional_fields_list:

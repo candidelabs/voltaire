@@ -109,12 +109,12 @@ def verify_and_get_eip7702_auth(value: dict) -> dict[str, str]:
             "Invalid eip7702Auth field.",
         )
     return {
-        "chainId": hex(verify_and_get_uint("eip7702auth.chainId", value["chainId"])),
-        "address": verify_and_get_address("eip7702auth.address", value["address"]),
-        "nonce": hex(verify_and_get_uint("eip7702auth.nonce", value["nonce"])),
-        "yParity": hex(verify_and_get_uint("eip7702auth.yParity", value["yParity"])),
-        "r": hex(verify_and_get_uint("eip7702auth.r", value["r"])),
-        "s": hex(verify_and_get_uint("eip7702auth.s", value["s"]))
+        "chainId": hex(verify_and_get_uint("eip7702Auth.chainId", value["chainId"])),
+        "address": verify_and_get_address("eip7702Auth.address", value["address"]),
+        "nonce": hex(verify_and_get_uint("eip7702Auth.nonce", value["nonce"])),
+        "yParity": hex(verify_and_get_uint("eip7702Auth.yParity", value["yParity"])),
+        "r": hex(verify_and_get_uint("eip7702Auth.r", value["r"])),
+        "s": hex(verify_and_get_uint("eip7702Auth.s", value["s"]))
     }
 
 

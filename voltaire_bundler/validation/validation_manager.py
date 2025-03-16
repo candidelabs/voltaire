@@ -39,7 +39,7 @@ class ValidationManager(ABC, Generic[UserOperationType]):
         if chain_id != self.chain_id and chain_id != 0:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
-                "Invalid eip7702auth chainId.",
+                "Invalid eip7702Auth chainId.",
             )
 
         auth_hash = keccak(

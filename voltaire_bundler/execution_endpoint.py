@@ -335,8 +335,8 @@ class ExecutionEndpoint(Endpoint):
                 "Invalid entrypoint",
             )
         if (
-            "eip7702auth" in useroperation_arg and
-            useroperation_arg["eip7702auth"] is not None and
+            "eip7702Auth" in useroperation_arg and
+            useroperation_arg["eip7702Auth"] is not None and
             not self.is_eip7702
         ):
             raise ValidationException(

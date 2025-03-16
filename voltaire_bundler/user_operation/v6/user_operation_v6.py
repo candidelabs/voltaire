@@ -32,14 +32,14 @@ class UserOperationV6(UserOperation):
 
     def __init__(self, jsonRequestDict) -> None:
         if (
-            "eip7702auth" in jsonRequestDict and
-            jsonRequestDict["eip7702auth"] is not None
+            "eip7702Auth" in jsonRequestDict and
+            jsonRequestDict["eip7702Auth"] is not None
         ):
             self.eip7702_auth = verify_and_get_eip7702_auth(
-                jsonRequestDict["eip7702auth"]
+                jsonRequestDict["eip7702Auth"]
             )
         else:
-            jsonRequestDict["eip7702auth"] = None
+            jsonRequestDict["eip7702Auth"] = None
             self.eip7702_auth = None
 
         if len(jsonRequestDict) != 12:
