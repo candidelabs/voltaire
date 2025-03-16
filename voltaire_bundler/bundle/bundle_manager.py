@@ -491,7 +491,16 @@ class BundlerManager:
         user_operations: list[UserOperationV6] | list[UserOperationV7],
         bundler: Address,
         entrypoint: Address,
+        recursion_depth: int = 0
     ) -> tuple[str | None, int | None, dict[str, str | dict[str, str]] | None]:
+        recursion_depth = recursion_depth + 1
+        if recursion_depth > 100:
+            # this shouldn't happen
+            logging.error(
+                "create_bundle_calldata_and_estimate_gas recursion too deep."
+            )
+            return None, None, None
+
         user_operations_list = []
         for user_operation in user_operations:
             user_operations_list.append(user_operation.to_list())
@@ -567,6 +576,7 @@ class BundlerManager:
                         user_operations,
                         bundler,
                         entrypoint,
+                        recursion_depth
                     )
 
                 if user_operation.number_of_add_to_mempool_attempts > 1:
@@ -581,6 +591,7 @@ class BundlerManager:
                             user_operations,
                             bundler,
                             entrypoint,
+                            recursion_depth
                         )
                     else:
                         logging.info("No useroperations to bundle")
@@ -619,6 +630,7 @@ class BundlerManager:
                             user_operations,
                             bundler,
                             entrypoint,
+                            recursion_depth
                         )
                     else:
                         logging.info("No useroperations to bundle")
@@ -708,6 +720,7 @@ class BundlerManager:
                         user_operations,
                         bundler,
                         entrypoint,
+                        recursion_depth
                     )
                 else:
                     logging.info("No useroperations to bundle")
