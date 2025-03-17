@@ -23,7 +23,7 @@ from voltaire_bundler.user_operation.v7.user_operation_v7 import UserOperationV7
 
 from voltaire_bundler.utils.eip7702 import create_and_sign_eip7702_raw_transaction
 from voltaire_bundler.utils.eth_client_utils import \
-    send_rpc_request_to_eth_client
+    get_latest_block_info, send_rpc_request_to_eth_client
 
 from ..mempool.reputation_manager import ReputationManager
 
@@ -510,7 +510,16 @@ class BundlerManager:
         user_operations: list[UserOperationV6] | list[UserOperationV7],
         bundler: Address,
         entrypoint: Address,
+        recursion_depth: int = 0
     ) -> tuple[str | None, int | None, dict[str, str | dict[str, str]] | None, list]:
+        recursion_depth = recursion_depth + 1
+        if recursion_depth > 100:
+            # this shouldn't happen
+            logging.error(
+                "create_bundle_calldata_and_estimate_gas recursion too deep."
+            )
+            return None, None, None, []
+
         user_operations_list = []
         auth_list = []
         for user_operation in user_operations:
@@ -537,9 +546,15 @@ class BundlerManager:
         }
         if (len(auth_list) > 0):
             params["authorizationList"] = auth_list
-        result = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_estimateGas", [params]
+
+        results = await asyncio.gather(
+            send_rpc_request_to_eth_client(
+                self.ethereum_node_url, "eth_estimateGas", [params]
+            ),
+            get_latest_block_info(self.ethereum_node_url)
         )
+        result = results[0]
+        latest_block_number, _, _, _, _ = results[1]
         if "error" in result:
             if "data" in result["error"]:
                 error_data = result["error"]["data"]
@@ -565,6 +580,27 @@ class BundlerManager:
 
                 user_operation = user_operations[operation_index]
 
+                # reattempt to estimate gas if current node is lagging
+                # as we can't assume that the bundler is connected to the same
+                # node during validation and bundle gas estimation
+                assert user_operation.validated_at_block_hex is not None
+                if (
+                    int(user_operation.validated_at_block_hex, 16) >
+                    int(latest_block_number, 16)
+                ):
+                    logging.debug(
+                        "reattempt to estimate gas because of a lagging node."
+                        f"latest node block is: {latest_block_number}."
+                        f"user operation validated at block: {user_operation.validated_at_block_hex}."
+                        f"user_operation_hash: {user_operation.user_operation_hash}"
+                    )
+                    return await self.create_bundle_calldata_and_estimate_gas(
+                        user_operations,
+                        bundler,
+                        entrypoint,
+                        recursion_depth
+                    )
+
                 if user_operation.number_of_add_to_mempool_attempts > 1:
                     logging.warning(
                         "Dropping user operation that was already executed from bundle."
@@ -577,6 +613,7 @@ class BundlerManager:
                             user_operations,
                             bundler,
                             entrypoint,
+                            recursion_depth
                         )
                     else:
                         logging.info("No useroperations to bundle")
@@ -615,6 +652,7 @@ class BundlerManager:
                             user_operations,
                             bundler,
                             entrypoint,
+                            recursion_depth
                         )
                     else:
                         logging.info("No useroperations to bundle")
@@ -704,6 +742,7 @@ class BundlerManager:
                         user_operations,
                         bundler,
                         entrypoint,
+                        recursion_depth
                     )
                 else:
                     logging.info("No useroperations to bundle")
