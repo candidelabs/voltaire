@@ -56,8 +56,12 @@ class UserOperationV7(UserOperation):
         factory = jsonRequestDict["factory"]
         factory_data = jsonRequestDict["factoryData"]
         if factory is not None:
-            self.factory = verify_and_get_address("factory", factory)
-            self.factory_data = verify_and_get_bytes("factoryData", factory_data)
+            if factory == "0x7702":
+                self.factory = None
+                self.factory_data = None
+            else:
+                self.factory = verify_and_get_address("factory", factory)
+                self.factory_data = verify_and_get_bytes("factoryData", factory_data)
         elif factory_data is None:
             self.factory = None
             self.factory_data = None
@@ -217,6 +221,8 @@ class UserOperationV7(UserOperation):
 
     def to_list(self) -> list[Address | str | int | bytes | None]:
         if self.factory is None:
+            init_code = bytes(0)
+        elif self.factory == "0x7702":
             init_code = bytes(0)
         else:
             init_code = (
