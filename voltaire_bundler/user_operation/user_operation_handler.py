@@ -49,9 +49,9 @@ class UserOperationHandler(ABC):
 
         if (  # pending log
             transaction is None or
-            "blockNumber" not in transaction or
-            "transactionHash" not in transaction or
-            "transactionIndex" not in transaction or
+            "blockNumber" not in transaction or transaction["blockNumber"] is None or
+            "transactionHash" not in transaction or transaction["transactionHash"] is None or
+            "transactionIndex" not in transaction or transaction["transactionIndex"] is None or
             "blockHash" not in transaction
         ):
             return None
