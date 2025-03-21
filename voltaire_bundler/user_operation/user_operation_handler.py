@@ -1,4 +1,5 @@
 from abc import ABC
+import asyncio
 from functools import cache
 import logging
 from functools import reduce
@@ -48,9 +49,9 @@ class UserOperationHandler(ABC):
 
         if (  # pending log
             transaction is None or
-            "blockNumber" not in transaction or
-            "transactionHash" not in transaction or
-            "transactionIndex" not in transaction or
+            "blockNumber" not in transaction or transaction["blockNumber"] is None or
+            "transactionHash" not in transaction or transaction["transactionHash"] is None or
+            "transactionIndex" not in transaction or transaction["transactionIndex"] is None or
             "blockHash" not in transaction
         ):
             return None
@@ -348,8 +349,15 @@ transactions_cache: dict[str, dict] = {}
 
 async def get_transaction_by_hash(
     ethereum_node_url: str,
-    transaction_hash
+    transaction_hash: str,
+    recursion_depth: int = 0
 ) -> dict | None:
+    recursion_depth = recursion_depth + 1
+    if recursion_depth > 100:
+        # this shouldn't happen
+        logging.error("get_transaction_by_hash recursion too deep.")
+        return None
+
     global transactions_cache
     if transaction_hash in transactions_cache:
         return transactions_cache[transaction_hash]
@@ -358,11 +366,24 @@ async def get_transaction_by_hash(
         ethereum_node_url, "eth_getTransactionByHash", params
     )
     if "result" in res:
-        # clear cache if bigger than 10_000
-        if len(transactions_cache) > 10_000:
-            transactions_cache = {}
-        transactions_cache[transaction_hash] = res['result']
-        return res["result"]
+        transaction = res['result']
+        if (  # check if pending transaction result
+            transaction is None or
+            "blockHash" not in transaction or transaction["blockHash"] is None or
+            "blockNumber" not in transaction or transaction["blockNumber"] is None or
+            "input" not in transaction
+        ):
+            # if pending transaction, retry in one second
+            await asyncio.sleep(1)
+            transaction = await get_transaction_by_hash(
+                ethereum_node_url, transaction_hash, recursion_depth
+            )
+        else:
+            # clear cache if bigger than 10_000
+            if len(transactions_cache) > 10_000:
+                transactions_cache = {}
+            transactions_cache[transaction_hash] = transaction
+        return transaction
     else:
         if "error" not in res:
             logging.error(
