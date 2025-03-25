@@ -5,13 +5,13 @@ from eth_utils import keccak
 from voltaire_bundler.bundle.exceptions import \
     ValidationException, ValidationExceptionCode
 from voltaire_bundler.typing import Address, MempoolId
-from ..user_operation import \
+from .user_operation import \
     verify_and_get_eip7702_auth, verify_and_get_uint, verify_and_get_bytes, verify_and_get_address
-from ..user_operation import UserOperation
+from .user_operation import UserOperation
 
 
 @dataclass()
-class UserOperationV7(UserOperation):
+class UserOperationV7V8(UserOperation):
     sender_address: Address
     nonce: int
     factory: Address | None
@@ -57,10 +57,12 @@ class UserOperationV7(UserOperation):
         factory_data = jsonRequestDict["factoryData"]
         if factory is not None:
             if factory == "0x7702":
-                self.factory = None
-                self.factory_data = None
+                self.factory = Address("0x7702000000000000000000000000000000000000")
             else:
                 self.factory = verify_and_get_address("factory", factory)
+            if factory_data is None:
+                self.factory_data = None
+            else:
                 self.factory_data = verify_and_get_bytes("factoryData", factory_data)
         elif factory_data is None:
             self.factory = None
@@ -222,8 +224,8 @@ class UserOperationV7(UserOperation):
     def to_list(self) -> list[Address | str | int | bytes | None]:
         if self.factory is None:
             init_code = bytes(0)
-        elif self.factory == "0x7702":
-            init_code = bytes(0)
+        elif self.factory_data is None:
+            init_code = bytes.fromhex(self.factory[2:])
         else:
             init_code = (
                 bytes.fromhex(self.factory[2:]) +
@@ -281,7 +283,7 @@ class UserOperationV7(UserOperation):
         return max_cost * self.max_fee_per_gas
 
     def _set_factory_and_paymaster_address(self) -> None:
-        if self.factory is not None and len(self.factory) >= 20:
+        if (self.factory is not None and len(self.factory) >= 20):
             self.factory_address_lowercase = Address(self.factory.lower())
         else:
             self.factory_address_lowercase = None
@@ -292,57 +294,132 @@ class UserOperationV7(UserOperation):
             self.paymaster_address_lowercase = None
 
 
+DOMAIN_SEPARATOR: bytes | None = None
+
+
 def get_user_operation_hash(
-    user_operation_list: list, entrypoint_addr: str, chain_id: int
+    user_operation_list: list,
+    entrypoint_addr: str,
+    chain_id: int,
+    delegate: str | None = None
 ) -> str:
-    packed_user_operation = keccak(
-        pack_user_operation(user_operation_list)
+    if entrypoint_addr.startswith("0x4337"):  # ep v0.8.0
+        packed_user_operation_hash = keccak(
+            pack_user_operation_for_hashing_v8(user_operation_list, delegate)
+        )
+
+        domain_separator = build_domain_separator(chain_id)
+        user_operation_hash = "0x" + keccak(
+            b'\x19\x01' + domain_separator + packed_user_operation_hash,
+        ).hex()
+        return user_operation_hash
+    else:  # ep v0.7.0
+        packed_user_operation_hash = keccak(
+            pack_user_operation_for_hashing_v7(user_operation_list)
+        )
+        encoded_user_operation_hash = encode(
+            ["(bytes32,address,uint256)"],
+            [[packed_user_operation_hash, entrypoint_addr, chain_id]],
+        )
+
+        user_operation_hash = "0x" + keccak(encoded_user_operation_hash).hex()
+        return user_operation_hash
+
+
+def build_domain_separator(chain_id: int) -> bytes:
+    global DOMAIN_SEPARATOR
+
+    if DOMAIN_SEPARATOR is None:
+        # DOMAIN_NAME = "ERC4337"
+        HASHED_NAME = b'6M\xa2\x8a\\\x92\xbc\xc8\x7f\xe9|\x88\x13\xa6\xc6\xb8\xa3\xa0I\xb0\xea\n2\x8f\xcb\x0bO\x0e\x003u\x86'
+        # DOMAIN_VERSION = "1"
+        HASHED_VERSION = b'\xc8\x9e\xfd\xaaT\xc0\xf2\x0cz\xdfa(\x82\xdf\tP\xf5\xa9Qc~\x03\x07\xcd\xcbLg/)\x8b\x8b\xc6'
+        # TYPE_HASH = keccak("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+        TYPE_HASH = b'\x8bs\xc3\xc6\x9b\xb8\xfe=Q.\xccL\xf7Y\xccy#\x9f{\x17\x9b\x0f\xfa\xca\xa9\xa7]R+9@\x0f'
+        encoded_user_operation_hash = encode(
+            ["(bytes32,bytes32,bytes32,uint256,address)"],
+            [[TYPE_HASH, HASHED_NAME, HASHED_VERSION, chain_id, "0x4337084d9e255ff0702461cf8895ce9e3b5ff108"]],
+        )
+
+        DOMAIN_SEPARATOR = keccak(encoded_user_operation_hash)
+
+    assert DOMAIN_SEPARATOR is not None
+    return DOMAIN_SEPARATOR
+
+
+def pack_user_operation_for_hashing_v8(
+    user_operation_list: list, delegate: str | None = None
+) -> bytes:
+    if user_operation_list[2] == bytes(0):
+        user_operation_list[2] = keccak(user_operation_list[2])  # initCode
+    elif delegate is not None:
+        if len(user_operation_list[2]) > 20:
+            user_operation_list[2] = keccak(
+                bytes.fromhex(delegate[2:]) + user_operation_list[2][20:])
+        else:
+            user_operation_list[2] = keccak(bytes.fromhex(delegate[2:]))
+    else:
+        user_operation_list[2] = keccak(user_operation_list[2])  # initCode
+    user_operation_list[3] = keccak(user_operation_list[3])  # callData
+    user_operation_list[7] = keccak(user_operation_list[7])  # paymasterAndData
+
+    user_operation_list_without_signature = user_operation_list[:-1]
+    # PACKED_USEROP_TYPEHASH = keccak("PackedUserOperation(address sender,uint256 nonce,bytes initCode,bytes callData,bytes32 accountGasLimits,uint256 preVerificationGas,bytes32 gasFees,bytes paymasterAndData)")
+    PACKED_USEROP_TYPEHASH = b')\xa0\xbc\xa4\xafK\xe3B\x13\x98\xda\x00)^X\xe6\xd7\xde8\xcbI"\x14uL\xb6\xa4u\x07\xddo\x8e'
+    user_operation_list_without_signature.insert(0, PACKED_USEROP_TYPEHASH)
+    res = encode(
+        [
+            "bytes32",
+            "address",
+            "uint256",
+            "bytes32",
+            "bytes32",
+            "bytes32",
+            "uint256",
+            "bytes32",
+            "bytes32",
+        ],
+        user_operation_list_without_signature,
     )
-
-    encoded_user_operation_hash = encode(
-        ["(bytes32,address,uint256)"],
-        [[packed_user_operation, entrypoint_addr, chain_id]],
-    )
-    user_operation_hash = "0x" + keccak(encoded_user_operation_hash).hex()
-    return user_operation_hash
+    return res
 
 
-def pack_user_operation(
+def pack_user_operation_for_hashing_v7(
     user_operation_list: list, for_signature: bool = True
 ) -> bytes:
-    if for_signature:
-        user_operation_list[2] = keccak(user_operation_list[2])  # initCode
-        user_operation_list[3] = keccak(user_operation_list[3])  # callData
-        user_operation_list[7] = keccak(user_operation_list[7])  # paymasterAndData
+    user_operation_list[2] = keccak(user_operation_list[2])  # initCode
+    user_operation_list[3] = keccak(user_operation_list[3])  # callData
+    user_operation_list[7] = keccak(user_operation_list[7])  # paymasterAndData
 
-        user_operation_list_without_signature = user_operation_list[:-1]
+    user_operation_list_without_signature = user_operation_list[:-1]
 
-        packed_user_operation = encode(
-            [
-                "address",
-                "uint256",
-                "bytes32",
-                "bytes32",
-                "bytes32",
-                "uint256",
-                "bytes32",
-                "bytes32",
-            ],
-            user_operation_list_without_signature,
-        )
-    else:
-        packed_user_operation = encode(
-            [
-                "address",
-                "uint256",
-                "bytes",
-                "bytes",
-                "bytes32",
-                "uint256",
-                "bytes32",
-                "bytes",
-                "bytes",
-            ],
-            user_operation_list,
-        )
-    return packed_user_operation
+    return encode(
+        [
+            "address",
+            "uint256",
+            "bytes32",
+            "bytes32",
+            "bytes32",
+            "uint256",
+            "bytes32",
+            "bytes32",
+        ],
+        user_operation_list_without_signature,
+    )
+
+
+def pack_user_operation_with_signature(user_operation_list: list) -> bytes:
+    return encode(
+        [
+            "address",
+            "uint256",
+            "bytes",
+            "bytes",
+            "bytes32",
+            "uint256",
+            "bytes32",
+            "bytes",
+            "bytes",
+        ],
+        user_operation_list,
+    )

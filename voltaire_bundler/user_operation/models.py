@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 from voltaire_bundler.typing import Address
-from voltaire_bundler.user_operation.v6.user_operation_v6 import UserOperationV6
-from voltaire_bundler.user_operation.v7.user_operation_v7 import UserOperationV7
+from voltaire_bundler.user_operation.user_operation_v6 import UserOperationV6
+from voltaire_bundler.user_operation.user_operation_v7v8 import UserOperationV7V8
 from typing import TypeVar
 
-UserOperationType = TypeVar('UserOperationType', UserOperationV6, UserOperationV7)
+UserOperationType = TypeVar('UserOperationType', UserOperationV6, UserOperationV7V8)
 
 
 @dataclass

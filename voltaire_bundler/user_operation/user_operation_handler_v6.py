@@ -6,7 +6,7 @@ from voltaire_bundler.bundle.exceptions import UserOpFoundException
 from voltaire_bundler.mempool.sender_mempool import \
     VerifiedUserOperation
 from voltaire_bundler.user_operation.user_operation_handler import UserOperationHandler, get_transaction_by_hash
-from ...gas.v6.gas_manager_v6 import GasManagerV6
+from ..gas.gas_manager_v6 import GasManagerV6
 
 
 class UserOperationHandlerV6(UserOperationHandler):

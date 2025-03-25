@@ -4,10 +4,10 @@ from eth_abi import decode
 from voltaire_bundler.bundle.exceptions import UserOpFoundException
 from voltaire_bundler.typing import Address
 from voltaire_bundler.user_operation.user_operation_handler import UserOperationHandler, get_transaction_by_hash
-from ...gas.v7.gas_manager_v7 import GasManagerV7
+from ..gas.gas_manager_v7v8 import GasManagerV7V8
 
 
-class UserOperationHandlerV7(UserOperationHandler):
+class UserOperationHandlerV7V8(UserOperationHandler):
 
     def __init__(
         self,
@@ -28,7 +28,7 @@ class UserOperationHandlerV7(UserOperationHandler):
         self.is_legacy_mode = is_legacy_mode
         self.ethereum_node_eth_get_logs_url = ethereum_node_eth_get_logs_url
 
-        self.gas_manager = GasManagerV7(
+        self.gas_manager = GasManagerV7V8(
             self.ethereum_node_url,
             chain_id,
             is_legacy_mode,

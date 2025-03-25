@@ -1,13 +1,13 @@
 import logging
-from typing import Any
+from typing import Any, cast
 
 from eth_abi import encode
 from eth_utils import keccak, to_checksum_address
 
 from voltaire_bundler.bundle.exceptions import (ValidationException,
                                                  ValidationExceptionCode)
-from voltaire_bundler.user_operation.v7.user_operation_v7 import UserOperationV7
-from voltaire_bundler.user_operation.v6.user_operation_v6 import UserOperationV6
+from voltaire_bundler.user_operation.user_operation_v7v8 import UserOperationV7V8
+from voltaire_bundler.user_operation.user_operation_v6 import UserOperationV6
 from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
 from voltaire_bundler.typing import Address
 from voltaire_bundler.utils.load_bytecode import load_bytecode
@@ -30,7 +30,7 @@ class TracerManager():
 
     async def validate_trace_results(
         self,
-        user_operation: UserOperationV7 | UserOperationV6,
+        user_operation: UserOperationV7V8 | UserOperationV6,
         entrypoint: str,
         is_sender_staked: bool,
         is_factory_staked: bool | None,
@@ -46,18 +46,23 @@ class TracerManager():
         factory_lowercase = None
         paymaster_lowercase = None
 
-        if isinstance(user_operation, UserOperationV6):
+        if entrypoint_lowercase == "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789":
+            user_operation = cast(UserOperationV6, user_operation)
             factory_lowercase = user_operation.factory_address_lowercase
             paymaster_lowercase = user_operation.paymaster_address_lowercase
             sender_creator_lowercase = "0x7fc98430eaedbb6070b35b39d798725049088348"
             is_init_code = len(user_operation.init_code) > 2
         else:
+            user_operation = cast(UserOperationV7V8, user_operation)
             if user_operation.factory is not None:
                 factory_lowercase = Address(user_operation.factory.lower())
             if user_operation.paymaster is not None:
                 paymaster_lowercase = Address(user_operation.paymaster.lower())
-            sender_creator_lowercase = "0xefc2c1444ebcc4db75e7613d20c6a62ff67a167c"
             is_init_code = user_operation.factory is not None
+            if entrypoint_lowercase == "0x0000000071727de22e5e9d8baf0edac6f37da032":
+                sender_creator_lowercase = "0xefc2c1444ebcc4db75e7613d20c6a62ff67a167c"
+            else:
+                sender_creator_lowercase = "0x449ed7c3e6fee6a97311d4b55475df59c44add33"
 
         (
             sender_data,
@@ -411,7 +416,10 @@ def validate_storage_access(
         is_factory_staked
     )
 
-    if factory_lowercase is not None:
+    if (
+        factory_lowercase is not None and
+        factory_lowercase != "0x7702000000000000000000000000000000000000"
+    ):
         assert is_factory_staked is not None
         sender_storage_map = validate_entity_storage_access(
             entrypoint_lowercase,

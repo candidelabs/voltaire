@@ -12,14 +12,15 @@ from voltaire_bundler.cli_manager import ConditionalRpc
 from voltaire_bundler.user_operation.models import \
     FailedOp, FailedOpWithRevert
 from voltaire_bundler.bundle.exceptions import ExecutionException, ValidationException
-from voltaire_bundler.mempool.v6.mempool_manager_v6 import LocalMempoolManagerV6
-from voltaire_bundler.mempool.v7.mempool_manager_v7 import LocalMempoolManagerV7
+from voltaire_bundler.mempool.mempool_manager_v6 import LocalMempoolManagerV6
+from voltaire_bundler.mempool.mempool_manager_v7 import LocalMempoolManagerV7
+from voltaire_bundler.mempool.mempool_manager_v8 import LocalMempoolManagerV8
 from voltaire_bundler.typing import Address
 from voltaire_bundler.user_operation.user_operation_handler import \
         decode_failed_op_event, decode_failed_op_with_revert_event, \
         get_deposit_info, get_user_operation_logs_for_block_range
-from voltaire_bundler.user_operation.v6.user_operation_v6 import UserOperationV6
-from voltaire_bundler.user_operation.v7.user_operation_v7 import UserOperationV7
+from voltaire_bundler.user_operation.user_operation_v6 import UserOperationV6
+from voltaire_bundler.user_operation.user_operation_v7v8 import UserOperationV7V8
 
 from voltaire_bundler.utils.eip7702 import create_and_sign_eip7702_raw_transaction
 from voltaire_bundler.utils.eth_client_utils import \
@@ -34,6 +35,7 @@ class BundlerManager:
     bundler_address: Address
     local_mempool_manager_v6: LocalMempoolManagerV6 | None
     local_mempool_manager_v7: LocalMempoolManagerV7
+    local_mempool_manager_v8: LocalMempoolManagerV8
     reputation_manager: ReputationManager
     chain_id: int
     is_legacy_mode: bool
@@ -42,14 +44,18 @@ class BundlerManager:
     max_fee_per_gas_percentage_multiplier: int
     max_priority_fee_per_gas_percentage_multiplier: int
     user_operations_to_send_v6: dict[str, UserOperationV6] | None
-    user_operations_to_send_v7: dict[str, UserOperationV7]
-    user_operations_to_monitor: dict[str, UserOperationV6 | UserOperationV7]
+    user_operations_to_send_v7: dict[str, UserOperationV7V8]
+    user_operations_to_send_v8: dict[str, UserOperationV7V8]
+    user_operations_to_monitor_v6: dict[str, UserOperationV6]
+    user_operations_to_monitor_v7: dict[str, UserOperationV7V8]
+    user_operations_to_monitor_v8: dict[str, UserOperationV7V8]
     gas_price_percentage_multiplier: int
 
     def __init__(
         self,
         local_mempool_manager_v6: LocalMempoolManagerV6 | None,
         local_mempool_manager_v7: LocalMempoolManagerV7,
+        local_mempool_manager_v8: LocalMempoolManagerV8,
         ethereum_node_url: str,
         bundler_private_key: str,
         bundler_address: Address,
@@ -62,6 +68,7 @@ class BundlerManager:
     ):
         self.local_mempool_manager_v6 = local_mempool_manager_v6
         self.local_mempool_manager_v7 = local_mempool_manager_v7
+        self.local_mempool_manager_v8 = local_mempool_manager_v8
         self.ethereum_node_url = ethereum_node_url
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
@@ -75,20 +82,31 @@ class BundlerManager:
         self.max_priority_fee_per_gas_percentage_multiplier = (
             max_priority_fee_per_gas_percentage_multiplier
         )
+        self.user_operations_to_send_v8 = {}
         self.user_operations_to_send_v7 = {}
-        self.user_operations_to_monitor = {}
         if self.local_mempool_manager_v6 is None:
             self.user_operations_to_send_v6 = None
         else:
             self.user_operations_to_send_v6 = {}
+
+        self.user_operations_to_monitor_v8 = {}
+        self.user_operations_to_monitor_v7 = {}
+        self.user_operations_to_monitor_v6 = {}
+
         self.gas_price_percentage_multiplier = 100
 
     async def send_next_bundle(self) -> None:
         await self.update_send_queue_and_monitor_queue()
 
+        user_operations_to_send_v8 = self.user_operations_to_send_v8
         user_operations_to_send_v7 = self.user_operations_to_send_v7
+        self.user_operations_to_send_v8 = {}
         self.user_operations_to_send_v7 = {}
         tasks_arr = [
+            self.send_bundle(
+                list(user_operations_to_send_v8.values()),
+                self.local_mempool_manager_v8
+            ),
             self.send_bundle(
                 list(user_operations_to_send_v7.values()),
                 self.local_mempool_manager_v7
@@ -108,34 +126,56 @@ class BundlerManager:
 
     async def update_send_queue_and_monitor_queue(self) -> None:
         tasks_arr = [
-            self.remove_included_and_readd_to_mempool_userops_monitoring(),
+            self.remove_included_and_readd_to_mempool_userops_monitoring(
+                self.user_operations_to_monitor_v8,
+                self.local_mempool_manager_v8.entrypoint,
+                self.local_mempool_manager_v8
+            ),
+            self.remove_included_and_readd_to_mempool_userops_monitoring(
+                self.user_operations_to_monitor_v7,
+                self.local_mempool_manager_v7.entrypoint,
+                self.local_mempool_manager_v7
+            ),
+            self.local_mempool_manager_v8.get_user_operations_to_bundle(
+                self.conditional_rpc is not None
+            ),
             self.local_mempool_manager_v7.get_user_operations_to_bundle(
                 self.conditional_rpc is not None
             )
         ]
         if self.local_mempool_manager_v6 is not None:
-            tasks_arr.append(
+            tasks_arr += [
+                self.remove_included_and_readd_to_mempool_userops_monitoring(
+                    self.user_operations_to_monitor_v6,
+                    self.local_mempool_manager_v6.entrypoint,
+                    self.local_mempool_manager_v6
+                ),
                 self.local_mempool_manager_v6.get_user_operations_to_bundle(
                     self.conditional_rpc is not None
-                )
-            )
+                ),
+            ]
         tasks = await asyncio.gather(*tasks_arr)
 
-        user_operations_to_bundle_v7 = cast(dict[str, UserOperationV7], tasks[1])
+        user_operations_to_bundle_v8 = cast(dict[str, UserOperationV7V8], tasks[2])
+        self.user_operations_to_send_v8 |= user_operations_to_bundle_v8
+        self.user_operations_to_monitor_v8 |= copy.deepcopy(user_operations_to_bundle_v8)
+
+        user_operations_to_bundle_v7 = cast(dict[str, UserOperationV7V8], tasks[3])
         self.user_operations_to_send_v7 |= user_operations_to_bundle_v7
-        self.user_operations_to_monitor |= copy.deepcopy(user_operations_to_bundle_v7)
+        self.user_operations_to_monitor_v7 |= copy.deepcopy(user_operations_to_bundle_v7)
+
         if self.local_mempool_manager_v6 is not None:
             if self.user_operations_to_send_v6 is None:
                 self.user_operations_to_send_v6 = {}
-            user_operations_to_bundle_v6 = cast(dict[str, UserOperationV6], tasks[2])
+            user_operations_to_bundle_v6 = cast(dict[str, UserOperationV6], tasks[5])
             self.user_operations_to_send_v6 |= user_operations_to_bundle_v6
-            self.user_operations_to_monitor |= copy.deepcopy(
+            self.user_operations_to_monitor_v6 |= copy.deepcopy(
                 user_operations_to_bundle_v6)
 
     async def send_bundle(
         self,
-        user_operations: list[UserOperationV7] | list[UserOperationV6],
-        mempool_manager: LocalMempoolManagerV7 | LocalMempoolManagerV6
+        user_operations: list[UserOperationV7V8] | list[UserOperationV6],
+        mempool_manager: LocalMempoolManagerV8 | LocalMempoolManagerV7 | LocalMempoolManagerV6
     ) -> None:
         entrypoint = mempool_manager.entrypoint
         num_of_user_operations = len(user_operations)
@@ -396,15 +436,14 @@ class BundlerManager:
                     user_operation.paymaster_address_lowercase,
                 )
 
-    async def remove_included_and_readd_to_mempool_userops_monitoring(self) -> None:
+    async def remove_included_and_readd_to_mempool_userops_monitoring(
+            self,
+            user_operations_to_monitor: dict[str, UserOperationV7V8] | dict[str, UserOperationV6],
+            entrypoint: str,
+            local_mempool: LocalMempoolManagerV6 | LocalMempoolManagerV7 | LocalMempoolManagerV8
+    ) -> None:
         logs_res_ops = []
-        for user_operation_hash, user_operation in self.user_operations_to_monitor.items():
-            if isinstance(user_operation, UserOperationV6):
-                assert self.local_mempool_manager_v6 is not None
-                entrypoint = self.local_mempool_manager_v6.entrypoint
-            else:
-                entrypoint = self.local_mempool_manager_v7.entrypoint
-
+        for user_operation_hash, user_operation in user_operations_to_monitor.items():
             assert user_operation.validated_at_block_hex is not None
             earliest_block = user_operation.validated_at_block_hex
             logs_res_op = get_user_operation_logs_for_block_range(
@@ -422,7 +461,7 @@ class BundlerManager:
 
         user_operations_hashes_to_remove_from_monitoring = []
         for user_operation, user_operation_log in zip(
-            list(self.user_operations_to_monitor.values()), user_operations_logs
+            list(user_operations_to_monitor.values()), user_operations_logs
         ):
             assert user_operation.last_add_to_mempool_date is not None
             time_diff_sec = (
@@ -454,15 +493,8 @@ class BundlerManager:
                 try:
                     user_operations_hashes_to_remove_from_monitoring.append(
                         user_operation.user_operation_hash)
-                    if (
-                        isinstance(user_operation, UserOperationV6) and
-                        self.local_mempool_manager_v6 is not None
-                    ):
-                        await self.local_mempool_manager_v6.add_user_operation(
-                            user_operation)
-                    else:
-                        await self.local_mempool_manager_v7.add_user_operation(
-                            user_operation)
+                    await local_mempool.add_user_operation(
+                        user_operation)
                 except (ValidationException, ExecutionException, ValueError) as exp:
                     logging.info(
                         "failed readding to the mempool "
@@ -470,17 +502,27 @@ class BundlerManager:
                         f" - cause : {str(exp)} "
                     )
         for user_operation_hash in user_operations_hashes_to_remove_from_monitoring:
-            del self.user_operations_to_monitor[user_operation_hash]
+            del user_operations_to_monitor[user_operation_hash]
 
     def update_monitor_status_transation_hash(
         self,
-        user_operations: list[UserOperationV7] | list[UserOperationV6],
+        user_operations: list[UserOperationV7V8] | list[UserOperationV6],
         transaction_hash: str,
     ) -> None:
         for user_operation in user_operations:
             user_operation_hash = user_operation.user_operation_hash
-            if user_operation_hash in self.user_operations_to_monitor:
-                user_operation_to_monitor = self.user_operations_to_monitor[
+            if user_operation_hash in self.user_operations_to_monitor_v8:
+                user_operation_to_monitor = self.user_operations_to_monitor_v8[
+                    user_operation_hash
+                ]
+                user_operation_to_monitor.attempted_bundle_transaction_hash = transaction_hash
+            elif user_operation_hash in self.user_operations_to_monitor_v7:
+                user_operation_to_monitor = self.user_operations_to_monitor_v7[
+                    user_operation_hash
+                ]
+                user_operation_to_monitor.attempted_bundle_transaction_hash = transaction_hash
+            elif user_operation_hash in self.user_operations_to_monitor_v6:
+                user_operation_to_monitor = self.user_operations_to_monitor_v6[
                     user_operation_hash
                 ]
                 user_operation_to_monitor.attempted_bundle_transaction_hash = transaction_hash
@@ -492,7 +534,7 @@ class BundlerManager:
 
     @staticmethod
     def update_included_status(
-        mempool_manager: LocalMempoolManagerV6 | LocalMempoolManagerV7,
+        mempool_manager: LocalMempoolManagerV6 | LocalMempoolManagerV7 | LocalMempoolManagerV8,
         sender_address: str,
         factory_address: str | None,
         paymaster_address: str | None
@@ -507,7 +549,7 @@ class BundlerManager:
 
     async def create_bundle_calldata_and_estimate_gas(
         self,
-        user_operations: list[UserOperationV6] | list[UserOperationV7],
+        user_operations: list[UserOperationV6] | list[UserOperationV7V8],
         bundler: Address,
         entrypoint: Address,
         recursion_depth: int = 0
@@ -527,8 +569,13 @@ class BundlerManager:
             if user_operation.eip7702_auth is not None:
                 auth_list.append(user_operation.eip7702_auth)
 
-        if len(user_operations_list[0]) == 9:
-            call_data = BundlerManager.encode_handleops_calldata_v7(
+        if entrypoint == self.local_mempool_manager_v8.entrypoint:
+            call_data = BundlerManager.encode_handleops_calldata_v7v8(
+                user_operations_list, self.bundler_address
+            )
+            mempool_manager = self.local_mempool_manager_v8
+        elif entrypoint == self.local_mempool_manager_v7.entrypoint:
+            call_data = BundlerManager.encode_handleops_calldata_v7v8(
                 user_operations_list, self.bundler_address
             )
             mempool_manager = self.local_mempool_manager_v7
@@ -799,7 +846,7 @@ class BundlerManager:
         return call_data
 
     @staticmethod
-    def encode_handleops_calldata_v7(
+    def encode_handleops_calldata_v7v8(
             user_operations_list: list[list[Any]], bundler_address: str) -> str:
         function_selector = "0x765e827f"  # handleOps
         params = encode(
