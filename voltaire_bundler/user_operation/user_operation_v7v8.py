@@ -32,6 +32,7 @@ class UserOperationV7V8(UserOperation):
     paymaster_address_lowercase: Address | None
     valid_mempools_ids: list[MempoolId]
     user_operation_hash: str
+    eip7702_auth: dict[str, str] | None
     jsonRequestDict: InitVar[dict[str, Address | int | bytes]]
 
     def __init__(self, jsonRequestDict) -> None:

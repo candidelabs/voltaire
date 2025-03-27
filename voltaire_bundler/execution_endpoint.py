@@ -273,6 +273,7 @@ class ExecutionEndpoint(Endpoint):
 
     async def _event_rpc_estimateUserOperationGas(
             self, req_arguments: list) -> dict[str, str]:
+        useroperation_arg = req_arguments[0]
         state_override_set_dict: dict[str, Any] = {}
         if req_arguments[2] is not None:
             state_override_set_dict: dict[str, Any] = req_arguments[2]
@@ -292,6 +293,19 @@ class ExecutionEndpoint(Endpoint):
             )
 
         if (
+            "eip7702Auth" in useroperation_arg and
+            useroperation_arg["eip7702Auth"] is not None and
+            (
+                not self.is_eip7702 or
+                input_entrypoint != LocalMempoolManagerV8.entrypoint_lowercase
+            )
+        ):
+            raise ValidationException(
+                ValidationExceptionCode.InvalidFields,
+                "EIP-7702 tuples are not supported",
+            )
+
+        if (
             input_entrypoint == LocalMempoolManagerV7.entrypoint_lowercase or
             input_entrypoint == LocalMempoolManagerV8.entrypoint_lowercase
         ):
@@ -301,7 +315,7 @@ class ExecutionEndpoint(Endpoint):
                 entrypoint = LocalMempoolManagerV8.entrypoint
             user_operation_with_optional_params = (
                 fell_user_operation_optional_parameters_for_estimateUserOperationGas(
-                    req_arguments[0]))
+                    useroperation_arg))
             user_operation = UserOperationV7V8(
                 user_operation_with_optional_params)
             gas_manager = self.user_operation_handler_v7v8.gas_manager
@@ -324,7 +338,7 @@ class ExecutionEndpoint(Endpoint):
             entrypoint = LocalMempoolManagerV6.entrypoint
             user_operation_with_optional_params = (
                 fell_user_operation_optional_parameters_for_estimateUserOperationGas(
-                    req_arguments[0])
+                    useroperation_arg)
             )
             user_operation = UserOperationV6(
                 user_operation_with_optional_params)
@@ -364,7 +378,10 @@ class ExecutionEndpoint(Endpoint):
         if (
             "eip7702Auth" in useroperation_arg and
             useroperation_arg["eip7702Auth"] is not None and
-            not self.is_eip7702
+            (
+                not self.is_eip7702 or
+                input_entrypoint != LocalMempoolManagerV8.entrypoint_lowercase
+            )
         ):
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
