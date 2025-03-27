@@ -104,6 +104,13 @@ class ValidationManagerV7(ValidationManager):
             latest_block_timestamp
         )
 
+        ValidationManagerV7.verify_sig_and_timestamp(
+            return_info.paymaster_validation_data.sig_failed,
+            return_info.paymaster_validation_data.valid_until,
+            return_info.paymaster_validation_data.valid_after,
+            latest_block_timestamp
+        )
+
         user_operation_hash = get_user_operation_hash(
             user_operation.to_list(), entrypoint, self.chain_id
         )
@@ -343,16 +350,17 @@ class ValidationManagerV7(ValidationManager):
         )
 
         paymaster_validation_data_bytes = encode(["uint256"], [return_info_arr[3]])
-        paymaster_validation_data_int = int(sender_validation_data_bytes.hex(), 16)
+        paymaster_validation_data_int = int(paymaster_validation_data_bytes.hex() ,16)
         if paymaster_validation_data_int > 1:
             paymaster_sig_failed = (
-                    int(paymaster_validation_data_bytes[12:].hex() ,16) == 1)
-            paymaster_valid_until_int = int(paymaster_validation_data_bytes[:6].hex(), 16)
+                int(paymaster_validation_data_bytes[12:].hex(), 16) == 1
+            )
+            paymaster_valid_until_int = int(paymaster_validation_data_bytes[6:12].hex(), 16)
             if paymaster_valid_until_int == 0:
                 paymaster_valid_until = 18446744073709551615  # type(uint64).max
             else:
                 paymaster_valid_until = paymaster_valid_until_int
-            paymaster_valid_after = int(paymaster_validation_data_bytes[6:12].hex(), 16)
+            paymaster_valid_after = int(paymaster_validation_data_bytes[:6].hex() ,16)
         else:
             # the most likely validation_data_int is either 0 or 1
             # this is why a separate branch is created
