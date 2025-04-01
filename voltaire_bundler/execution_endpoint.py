@@ -18,7 +18,7 @@ from voltaire_bundler.user_operation.user_operation_v6 import \
 from voltaire_bundler.user_operation.user_operation_v7v8 import \
         UserOperationV7V8
 from voltaire_bundler.user_operation.user_operation import \
-        is_user_operation_hash
+        is_user_operation_hash, verify_and_get_address, verify_and_get_uint
 from voltaire_bundler.user_operation.user_operation_handler_v6 import \
     UserOperationHandlerV6
 from voltaire_bundler.user_operation.user_operation_handler_v7v8 import \
@@ -294,15 +294,30 @@ class ExecutionEndpoint(Endpoint):
 
         if (
             "eip7702Auth" in useroperation_arg and
-            useroperation_arg["eip7702Auth"] is not None and
-            (
+            useroperation_arg["eip7702Auth"] is not None
+        ):
+            if (
                 not self.is_eip7702 or
                 input_entrypoint != LocalMempoolManagerV8.entrypoint_lowercase
+            ):
+                raise ValidationException(
+                    ValidationExceptionCode.InvalidFields,
+                    "EIP-7702 tuples are not supported",
+                )
+
+            auth_chain_id = verify_and_get_uint(
+                "eip7702Auth.chainId",
+                useroperation_arg["eip7702Auth"]["chainId"]
             )
-        ):
-            raise ValidationException(
-                ValidationExceptionCode.InvalidFields,
-                "EIP-7702 tuples are not supported",
+            if auth_chain_id != 0 and auth_chain_id != self.chain_id:
+                raise ValidationException(
+                    ValidationExceptionCode.InvalidFields,
+                    "Invalid EIP-7702 tuple chainId.",
+                )
+
+            _ = verify_and_get_address(
+                    "eip7702Auth.address",
+                    useroperation_arg["eip7702Auth"]["address"]
             )
 
         if (
