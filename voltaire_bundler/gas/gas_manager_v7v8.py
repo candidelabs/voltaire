@@ -200,18 +200,18 @@ class GasManagerV7V8(GasManager):
             }
         }
         eip7702_auth = user_operation.eip7702_auth
-        if eip7702_auth is not None:
-            default_state_overrides[user_operation.sender_address] = {
-                "code": "0xef0100" + str(eip7702_auth["address"])[2:]
-            }
+
+        if eip7702_auth is not None or user_operation.paymaster is not None:
+            default_state_overrides[user_operation.sender_address] = {}
+            if eip7702_auth is not None:
+                default_state_overrides[user_operation.sender_address][
+                    "code"] = "0xef0100" + eip7702_auth["address"][2:]
+
+            if user_operation.paymaster is not None:
+                default_state_overrides[user_operation.sender_address][
+                    "balance"] = "0x314dc6448d9338c15b0a00000000"
 
         call_data = function_selector + call_data_params.hex()
-
-        if user_operation.paymaster is not None:
-            default_state_overrides[user_operation.sender_address] = {
-                "balance": "0x314dc6448d9338c15b0a00000000"
-            }
-
         params: list[Any] = [
             {
                 "from": ZERO_ADDRESS,
