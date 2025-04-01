@@ -1,23 +1,23 @@
 from dataclasses import dataclass
 
-from ..mempool_manager import LocalMempoolManager
-from ..mempool_info import DEFAULT_MEMPOOL_INFO
+from .mempool_manager import LocalMempoolManager
+from .mempool_info import DEFAULT_MEMPOOL_INFO
 from voltaire_bundler.typing import Address, MempoolId
-from voltaire_bundler.user_operation.v7.user_operation_handler_v7 import \
-    UserOperationHandlerV7
+from voltaire_bundler.user_operation.user_operation_handler_v6 import \
+    UserOperationHandlerV6
 
 from voltaire_bundler.mempool.reputation_manager import ReputationManager
-from ...validation.v7.validation_manager_v7 import ValidationManagerV7
+from ..validation.validation_manager_v6 import ValidationManagerV6
 
 
 @dataclass
-class LocalMempoolManagerV7(LocalMempoolManager):
-    entrypoint = Address("0x0000000071727De22E5E9d8BAf0edAc6f37da032")
-    entrypoint_lowercase = Address("0x0000000071727de22e5e9d8baf0edac6f37da032")
+class LocalMempoolManagerV6(LocalMempoolManager):
+    entrypoint = Address("0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789")
+    entrypoint_lowercase = Address("0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789")
 
     def __init__(
         self,
-        user_operation_handler: UserOperationHandlerV7,
+        user_operation_handler: UserOperationHandlerV6,
         ethereum_node_url: str,
         bundler_address: str,
         chain_id: int,
@@ -28,7 +28,7 @@ class LocalMempoolManagerV7(LocalMempoolManager):
         reputation_whitelist: list[str],
         reputation_blacklist: list[str]
     ):
-        self.validation_manager = ValidationManagerV7(
+        self.validation_manager = ValidationManagerV6(
             user_operation_handler,
             ethereum_node_url,
             bundler_address,

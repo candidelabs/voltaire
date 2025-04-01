@@ -5,24 +5,24 @@ import voltaire_bundler
 from voltaire_bundler.bundle.exceptions import \
     ValidationException, ValidationExceptionCode
 from voltaire_bundler.user_operation.user_operation_handler import decode_failed_op_event, decode_failed_op_with_revert_event
-from voltaire_bundler.user_operation.v7.user_operation_v7 import UserOperationV7
-from voltaire_bundler.user_operation.v7.user_operation_handler_v7 import \
-    UserOperationHandlerV7
+from voltaire_bundler.user_operation.user_operation_v7v8 import UserOperationV7V8
+from voltaire_bundler.user_operation.user_operation_handler_v7v8 import \
+    UserOperationHandlerV7V8
 from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
-from voltaire_bundler.user_operation.v7.user_operation_v7 import \
+from voltaire_bundler.user_operation.user_operation_v7v8 import \
         get_user_operation_hash
 from voltaire_bundler.utils.load_bytecode import load_bytecode
 from voltaire_bundler.user_operation.models import (
         AggregatorStakeInfo, FailedOp, FailedOpWithRevert, PaymasterValidationData,
         ReturnInfoV7, SenderValidationData, StakeInfo)
 from voltaire_bundler.validation.tracer_manager import TracerManager
-from ..validation_manager import ValidationManager
+from .validation_manager import ValidationManager
 
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 
-class ValidationManagerV7(ValidationManager):
-    user_operation_handler: UserOperationHandlerV7
+class ValidationManagerV7V8(ValidationManager):
+    user_operation_handler: UserOperationHandlerV7V8
     tracer_manager: TracerManager
     ethereum_node_url: str
     bundler_address: str
@@ -35,7 +35,7 @@ class ValidationManagerV7(ValidationManager):
 
     def __init__(
         self,
-        user_operation_handler: UserOperationHandlerV7,
+        user_operation_handler: UserOperationHandlerV7V8,
         ethereum_node_url: str,
         bundler_address: str,
         chain_id: int,
@@ -66,7 +66,7 @@ class ValidationManagerV7(ValidationManager):
 
     async def validate_user_operation(
         self,
-        user_operation: UserOperationV7,
+        user_operation: UserOperationV7V8,
         entrypoint: str,
         block_number: str,
         latest_block_timestamp: int,
@@ -96,15 +96,15 @@ class ValidationManagerV7(ValidationManager):
             factory_stake_info,
             paymaster_stake_info,
             aggregator_stake_info,
-        ) = ValidationManagerV7.decode_validation_result(validation_result)
-        ValidationManagerV7.verify_sig_and_timestamp(
+        ) = ValidationManagerV7V8.decode_validation_result(validation_result)
+        ValidationManagerV7V8.verify_sig_and_timestamp(
             return_info.sender_validation_data.sig_failed,
             return_info.sender_validation_data.valid_until,
             return_info.sender_validation_data.valid_after,
             latest_block_timestamp
         )
 
-        ValidationManagerV7.verify_sig_and_timestamp(
+        ValidationManagerV7V8.verify_sig_and_timestamp(
             return_info.paymaster_validation_data.sig_failed,
             return_info.paymaster_validation_data.valid_until,
             return_info.paymaster_validation_data.valid_after,
@@ -168,9 +168,9 @@ class ValidationManagerV7(ValidationManager):
         )
 
     async def simulate_validation_without_tracing(
-        self, user_operation: UserOperationV7, entrypoint: str
+        self, user_operation: UserOperationV7V8, entrypoint: str
     ) -> str:
-        call_data = ValidationManagerV7.encode_simulate_validation_calldata(
+        call_data = ValidationManagerV7V8.encode_simulate_validation_calldata(
                 user_operation)
 
         params = [
@@ -230,11 +230,11 @@ class ValidationManagerV7(ValidationManager):
 
     async def simulate_validation_with_tracing(
         self,
-        user_operation: UserOperationV7,
+        user_operation: UserOperationV7V8,
         entrypoint: str,
         block_number: str,
     ) -> tuple[str, str]:
-        call_data = ValidationManagerV7.encode_simulate_validation_calldata(
+        call_data = ValidationManagerV7V8.encode_simulate_validation_calldata(
             user_operation)
 
         params = [
@@ -413,7 +413,7 @@ class ValidationManagerV7(ValidationManager):
         )
 
     @staticmethod
-    def encode_simulate_validation_calldata(user_operation: UserOperationV7) -> str:
+    def encode_simulate_validation_calldata(user_operation: UserOperationV7V8) -> str:
         # simulateValidation(entrypoint solidity function) will always revert
         function_selector = "0xc3bce009"
         params = encode(

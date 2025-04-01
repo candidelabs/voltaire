@@ -9,13 +9,13 @@ from voltaire_bundler.bundle.exceptions import \
 from voltaire_bundler.user_operation.models import \
     AggregatorStakeInfo, FailedOp, ReturnInfo, StakeInfo
 from voltaire_bundler.user_operation.user_operation_handler import decode_failed_op_event
-from voltaire_bundler.user_operation.v6.user_operation_v6 import UserOperationV6
-from voltaire_bundler.user_operation.v6.user_operation_handler_v6 import \
+from voltaire_bundler.user_operation.user_operation_v6 import UserOperationV6
+from voltaire_bundler.user_operation.user_operation_handler_v6 import \
     UserOperationHandlerV6
 from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
 from voltaire_bundler.utils.load_bytecode import load_bytecode
-from ..validation_manager import ValidationManager
-from voltaire_bundler.user_operation.v6.user_operation_v6 import \
+from .validation_manager import ValidationManager
+from voltaire_bundler.user_operation.user_operation_v6 import \
         get_user_operation_hash
 from voltaire_bundler.validation.tracer_manager import TracerManager
 

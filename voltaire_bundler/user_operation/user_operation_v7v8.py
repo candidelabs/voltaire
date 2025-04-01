@@ -5,13 +5,13 @@ from eth_utils import keccak
 from voltaire_bundler.bundle.exceptions import \
     ValidationException, ValidationExceptionCode
 from voltaire_bundler.typing import Address, MempoolId
-from ..user_operation import \
+from .user_operation import \
     verify_and_get_uint, verify_and_get_bytes, verify_and_get_address
-from ..user_operation import UserOperation
+from .user_operation import UserOperation
 
 
 @dataclass()
-class UserOperationV7(UserOperation):
+class UserOperationV7V8(UserOperation):
     sender_address: Address
     nonce: int
     factory: Address | None

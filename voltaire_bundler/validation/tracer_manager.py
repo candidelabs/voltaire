@@ -6,8 +6,8 @@ from eth_utils import keccak, to_checksum_address
 
 from voltaire_bundler.bundle.exceptions import (ValidationException,
                                                  ValidationExceptionCode)
-from voltaire_bundler.user_operation.v7.user_operation_v7 import UserOperationV7
-from voltaire_bundler.user_operation.v6.user_operation_v6 import UserOperationV6
+from voltaire_bundler.user_operation.user_operation_v7v8 import UserOperationV7V8
+from voltaire_bundler.user_operation.user_operation_v6 import UserOperationV6
 from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
 from voltaire_bundler.typing import Address
 from voltaire_bundler.utils.load_bytecode import load_bytecode
@@ -30,7 +30,7 @@ class TracerManager():
 
     async def validate_trace_results(
         self,
-        user_operation: UserOperationV7 | UserOperationV6,
+        user_operation: UserOperationV7V8 | UserOperationV6,
         entrypoint: str,
         is_sender_staked: bool,
         is_factory_staked: bool | None,

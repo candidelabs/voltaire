@@ -13,23 +13,23 @@ from voltaire_bundler.event_bus_manager.endpoint import Client, Endpoint
 from voltaire_bundler.typing import Address
 from voltaire_bundler.user_operation.user_operation_handler import \
         get_deposit_info
-from voltaire_bundler.user_operation.v6.user_operation_v6 import \
+from voltaire_bundler.user_operation.user_operation_v6 import \
         UserOperationV6
-from voltaire_bundler.user_operation.v7.user_operation_v7 import \
-        UserOperationV7
+from voltaire_bundler.user_operation.user_operation_v7v8 import \
+        UserOperationV7V8
 from voltaire_bundler.user_operation.user_operation import \
         is_user_operation_hash
-from voltaire_bundler.user_operation.v6.user_operation_handler_v6 import \
+from voltaire_bundler.user_operation.user_operation_handler_v6 import \
     UserOperationHandlerV6
-from voltaire_bundler.user_operation.v7.user_operation_handler_v7 import \
-    UserOperationHandlerV7
+from voltaire_bundler.user_operation.user_operation_handler_v7v8 import \
+    UserOperationHandlerV7V8
 from voltaire_bundler.user_operation.user_operation_handler import \
     fell_user_operation_optional_parameters_for_estimateUserOperationGas
 from voltaire_bundler.utils.eth_client_utils import get_latest_block_info
 
 from .bundle.bundle_manager import BundlerManager
-from .mempool.v6.mempool_manager_v6 import LocalMempoolManagerV6
-from .mempool.v7.mempool_manager_v7 import LocalMempoolManagerV7
+from .mempool.mempool_manager_v6 import LocalMempoolManagerV6
+from .mempool.mempool_manager_v7 import LocalMempoolManagerV7
 from .mempool.reputation_manager import ReputationManager
 
 user_operation_by_hash_cache: dict[str, dict] = {}
@@ -40,7 +40,7 @@ class ExecutionEndpoint(Endpoint):
     ethereum_node_url: str
     bundle_manager: BundlerManager
     user_operation_handler_v6: Optional[UserOperationHandlerV6]
-    user_operation_handler_v7: UserOperationHandlerV7
+    user_operation_handler_v7v8: UserOperationHandlerV7V8
     reputation_manager: ReputationManager
     chain_id: int
     local_mempool_manager_v6: Optional[LocalMempoolManagerV6]
@@ -79,7 +79,7 @@ class ExecutionEndpoint(Endpoint):
         self.ethereum_node_url = ethereum_node_url
         self.chain_id = chain_id
 
-        self.user_operation_handler_v7 = UserOperationHandlerV7(
+        self.user_operation_handler_v7v8 = UserOperationHandlerV7V8(
             chain_id,
             ethereum_node_url,
             bundler_address,
@@ -94,7 +94,7 @@ class ExecutionEndpoint(Endpoint):
         )
 
         self.local_mempool_manager_v7 = LocalMempoolManagerV7(
-            self.user_operation_handler_v7,
+            self.user_operation_handler_v7v8,
             ethereum_node_url,
             bundler_address,
             chain_id,
@@ -272,9 +272,9 @@ class ExecutionEndpoint(Endpoint):
             user_operation_with_optional_params = (
                 fell_user_operation_optional_parameters_for_estimateUserOperationGas(
                     req_arguments[0]))
-            user_operation = UserOperationV7(
+            user_operation = UserOperationV7V8(
                 user_operation_with_optional_params)
-            gas_manager = self.user_operation_handler_v7.gas_manager
+            gas_manager = self.user_operation_handler_v7v8.gas_manager
             (
                 call_gas_limit_hex,
                 preverification_gas_hex,
@@ -333,7 +333,7 @@ class ExecutionEndpoint(Endpoint):
             )
 
         if input_entrypoint == LocalMempoolManagerV7.entrypoint_lowercase:
-            user_operation = UserOperationV7(useroperation_arg)
+            user_operation = UserOperationV7V8(useroperation_arg)
             local_mempool = self.local_mempool_manager_v7
         elif (input_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase and
                 self.local_mempool_manager_v6 is not None):
@@ -387,7 +387,7 @@ class ExecutionEndpoint(Endpoint):
             self.local_mempool_manager_v7.senders_to_senders_mempools.values()
         )
         user_operation_by_hash_json_ops.append(asyncio.create_task(
-            self.user_operation_handler_v7.get_user_operation_by_hash_rpc(
+            self.user_operation_handler_v7v8.get_user_operation_by_hash_rpc(
                 user_operation_hash,
                 LocalMempoolManagerV7.entrypoint,
                 senders_mempools,
@@ -463,7 +463,7 @@ class ExecutionEndpoint(Endpoint):
                 )
 
         user_operation_receipt_info_json_ops.append(asyncio.create_task(
-            self.user_operation_handler_v7.get_user_operation_receipt_rpc(
+            self.user_operation_handler_v7v8.get_user_operation_receipt_rpc(
                 user_operation_hash,
                 LocalMempoolManagerV7.entrypoint,
             ))
@@ -664,7 +664,7 @@ class ExecutionEndpoint(Endpoint):
 
         try:
             if topic == self.local_mempool_manager_v7.canonical_mempool_id:
-                user_operation_obj = UserOperationV7(verified_useroperation[
+                user_operation_obj = UserOperationV7V8(verified_useroperation[
                     "user_operation"])
                 local_mempool = self.local_mempool_manager_v7
                 if entrypoint_lowercase != local_mempool.entrypoint_lowercase:

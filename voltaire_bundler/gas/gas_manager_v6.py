@@ -4,16 +4,16 @@ from typing import Any
 
 from eth_abi import decode, encode
 
-from voltaire_bundler.bundle.exceptions import \
-    (ExecutionException, ExecutionExceptionCode,
-     ValidationException, ValidationExceptionCode)
+from voltaire_bundler.bundle.exceptions import ExecutionException, \
+        ExecutionExceptionCode, ValidationException, ValidationExceptionCode
 from voltaire_bundler.gas.gas_manager import GasManager
-from voltaire_bundler.user_operation.models import FailedOp, FailedOpWithRevert
+from voltaire_bundler.user_operation.models import FailedOp
 from voltaire_bundler.user_operation.user_operation_handler import \
-    decode_failed_op_event, decode_failed_op_with_revert_event
+        decode_failed_op_event
 from voltaire_bundler.utils.load_bytecode import load_bytecode
-from ...user_operation.v7.user_operation_v7 import UserOperationV7
-from ...user_operation.v7.user_operation_v7 import pack_user_operation
+from ..user_operation.user_operation_v6 import UserOperationV6
+from voltaire_bundler.user_operation.user_operation_v6 import \
+        pack_user_operation
 from voltaire_bundler.utils.eth_client_utils import \
     send_rpc_request_to_eth_client
 
@@ -21,7 +21,7 @@ ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 MIN_CALL_GAS_LIMIT = 21_000
 
 
-class GasManagerV7(GasManager):
+class GasManagerV6(GasManager):
     ethereum_node_url: str
     chain_id: str
     is_legacy_mode: bool
@@ -55,11 +55,11 @@ class GasManagerV7(GasManager):
         self.max_verification_gas = max_verification_gas
         self.max_call_data_gas = max_call_data_gas
         self.entrypoint_code_override = load_bytecode(
-            "EntryPointSimulationsV7WithBinarySearch.json")
+            "EntryPointSimulationsV6WithBinarySearch.json")
 
     async def estimate_user_operation_gas(
         self,
-        user_operation: UserOperationV7,
+        user_operation: UserOperationV6,
         entrypoint: str,
         state_override_set_dict: dict[str, Any],
     ) -> tuple[str, str, str]:
@@ -73,7 +73,6 @@ class GasManagerV7(GasManager):
         estimated_verification_gas_limit = 0
         estimated_call_gas_limit = 0
         is_check_once = not (input_call_gas_limit == 0)
-
         (estimated_call_gas_limit, estimated_verification_gas_limit) = (
             await self.estimate_call_gas_and_verificationgas_limit(
                 user_operation,
@@ -113,7 +112,7 @@ class GasManagerV7(GasManager):
 
     async def estimate_call_gas_and_verificationgas_limit(
         self,
-        user_operation: UserOperationV7,
+        user_operation: UserOperationV6,
         entrypoint: str,
         state_override_set_dict: dict[str, Any],
         is_check_once: bool,
@@ -137,6 +136,7 @@ class GasManagerV7(GasManager):
                 is_check_once,
                 state_override_set_dict,
             )
+
             if solidity_error[:10] == "0xdeb13018":  # SimulationResult
                 return (int(failed_op_params_res[1]),
                         int(failed_op_params_res[0]))
@@ -153,13 +153,15 @@ class GasManagerV7(GasManager):
                     ExecutionExceptionCode.UserOperationReverted,
                     str(bytes([b for b in error_message if b != 0]))  # remove zero bytes from error message
                 )
-
+        # this should not be reached
+        logging.critical(
+                "Unexpected error during estimate_call_gas_and_verificationgas_limit")
         raise ValueError(
                 "Unexpected error during estimate_call_gas_and_verificationgas_limit")
 
     async def simulate_handle_op_mod(
         self,
-        user_operation: UserOperationV7,
+        user_operation: UserOperationV6,
         entrypoint: str,
         min_gas: int,
         max_gas: int,
@@ -168,10 +170,10 @@ class GasManagerV7(GasManager):
         state_override_set_dict: dict[str, Any],
     ) -> tuple[str, list[int | bytes]]:
         # simulateHandleOpMod(entrypoint solidity function) will always revert
-        function_selector = "0xbbfd906b"
+        function_selector = "0x85085b6b"
         call_data_params = encode(
             [
-                "(address,uint256,bytes,bytes,bytes32,uint256,bytes32,bytes,bytes)",  # useroperation
+                "(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)",  # useroperation
                 "(uint256,uint256,uint256,bool,bool)",
             ],
             [
@@ -186,15 +188,17 @@ class GasManagerV7(GasManager):
                 "balance": "0x314dc6448d9338c15b0a00000000",
             },
             entrypoint: {
-                # override the Entrypoint with EntryPointSimulationsV7 for callGasLimit
+                # override the Entrypoint with EntryPointSimulationsV6 for callGasLimit
                 # binary search
                 "code": self.entrypoint_code_override
             }
         }
 
         call_data = function_selector + call_data_params.hex()
-
-        if user_operation.paymaster is not None:
+        # if there is no paymaster, override the sender's balance for gas estimation
+        if len(user_operation.paymaster_and_data) == 0:
+            # if the target is zero, simulate_handle_op is called to estimate
+            # gas limits override the sender balance with the high value of 10^15 eth
             default_state_overrides[user_operation.sender_address] = {
                 "balance": "0x314dc6448d9338c15b0a00000000"
             }
@@ -212,9 +216,10 @@ class GasManagerV7(GasManager):
         result: Any = await send_rpc_request_to_eth_client(
             self.ethereum_node_url, "eth_call", params
         )
+
         if "error" not in result:
             # this should never happen
-            logging.critical("balanceOf eth_call failed")
+            logging.critical("simulateHandleOpMod didn't revert!")
             raise ValueError("simulateHandleOpMod didn't revert!")
 
         elif (
@@ -249,16 +254,6 @@ class GasManagerV7(GasManager):
             ]
         elif error_selector[:10] == "0x59f233d2":  # EstimateCallGasRevertAtMax
             error_params_api = ["bytes"]  # revertData
-        elif error_selector == FailedOpWithRevert.SELECTOR:  # FailedOpWithRevert
-            operation_index, reason, inner = decode_failed_op_with_revert_event(
-                error_params
-            )
-
-            raise ValidationException(
-                ValidationExceptionCode.SimulateValidation,
-                reason + str(bytes([b for b in inner if b != 0]))
-            )
-
         elif error_selector == FailedOp.SELECTOR:
             (
                 _,
@@ -287,14 +282,14 @@ class GasManagerV7(GasManager):
 
         return error_selector, error_params_decoded
 
-    def calc_base_preverification_gas(self, user_operation: UserOperationV7) -> int:
+    def calc_base_preverification_gas(self, user_operation: UserOperationV6) -> int:
         user_operation_list = user_operation.to_list()
 
-        user_operation_list[5] = 21000
+        user_operation_list[6] = 21000
 
         # set a dummy signature only if the user didn't supply any
-        if len(user_operation_list[8]) < 65:
-            user_operation_list[8] = (
+        if len(user_operation_list[10]) < 65:
+            user_operation_list[10] = (
                 b"\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01"  # signature
             )
 

@@ -12,14 +12,14 @@ from voltaire_bundler.cli_manager import ConditionalRpc
 from voltaire_bundler.user_operation.models import \
     FailedOp, FailedOpWithRevert
 from voltaire_bundler.bundle.exceptions import ExecutionException, ValidationException
-from voltaire_bundler.mempool.v6.mempool_manager_v6 import LocalMempoolManagerV6
-from voltaire_bundler.mempool.v7.mempool_manager_v7 import LocalMempoolManagerV7
+from voltaire_bundler.mempool.mempool_manager_v6 import LocalMempoolManagerV6
+from voltaire_bundler.mempool.mempool_manager_v7 import LocalMempoolManagerV7
 from voltaire_bundler.typing import Address
 from voltaire_bundler.user_operation.user_operation_handler import \
         decode_failed_op_event, decode_failed_op_with_revert_event, \
         get_deposit_info, get_user_operation_logs_for_block_range
-from voltaire_bundler.user_operation.v6.user_operation_v6 import UserOperationV6
-from voltaire_bundler.user_operation.v7.user_operation_v7 import UserOperationV7
+from voltaire_bundler.user_operation.user_operation_v6 import UserOperationV6
+from voltaire_bundler.user_operation.user_operation_v7v8 import UserOperationV7V8
 
 from voltaire_bundler.utils.eth_client_utils import \
     get_latest_block_info, send_rpc_request_to_eth_client
@@ -41,8 +41,8 @@ class BundlerManager:
     max_fee_per_gas_percentage_multiplier: int
     max_priority_fee_per_gas_percentage_multiplier: int
     user_operations_to_send_v6: dict[str, UserOperationV6] | None
-    user_operations_to_send_v7: dict[str, UserOperationV7]
-    user_operations_to_monitor: dict[str, UserOperationV6 | UserOperationV7]
+    user_operations_to_send_v7: dict[str, UserOperationV7V8]
+    user_operations_to_monitor: dict[str, UserOperationV6 | UserOperationV7V8]
     gas_price_percentage_multiplier: int
 
     def __init__(
@@ -120,7 +120,7 @@ class BundlerManager:
             )
         tasks = await asyncio.gather(*tasks_arr)
 
-        user_operations_to_bundle_v7 = cast(dict[str, UserOperationV7], tasks[1])
+        user_operations_to_bundle_v7 = cast(dict[str, UserOperationV7V8], tasks[1])
         self.user_operations_to_send_v7 |= user_operations_to_bundle_v7
         self.user_operations_to_monitor |= copy.deepcopy(user_operations_to_bundle_v7)
         if self.local_mempool_manager_v6 is not None:
@@ -133,7 +133,7 @@ class BundlerManager:
 
     async def send_bundle(
         self,
-        user_operations: list[UserOperationV7] | list[UserOperationV6],
+        user_operations: list[UserOperationV7V8] | list[UserOperationV6],
         mempool_manager: LocalMempoolManagerV7 | LocalMempoolManagerV6
     ) -> None:
         entrypoint = mempool_manager.entrypoint
@@ -455,7 +455,7 @@ class BundlerManager:
 
     def update_monitor_status_transation_hash(
         self,
-        user_operations: list[UserOperationV7] | list[UserOperationV6],
+        user_operations: list[UserOperationV7V8] | list[UserOperationV6],
         transaction_hash: str,
     ) -> None:
         for user_operation in user_operations:
@@ -488,7 +488,7 @@ class BundlerManager:
 
     async def create_bundle_calldata_and_estimate_gas(
         self,
-        user_operations: list[UserOperationV6] | list[UserOperationV7],
+        user_operations: list[UserOperationV6] | list[UserOperationV7V8],
         bundler: Address,
         entrypoint: Address,
         recursion_depth: int = 0
