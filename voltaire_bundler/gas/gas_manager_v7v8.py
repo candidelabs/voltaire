@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import math
 from typing import Any
@@ -13,7 +14,7 @@ from voltaire_bundler.user_operation.user_operation_handler import \
     decode_failed_op_event, decode_failed_op_with_revert_event
 from voltaire_bundler.utils.load_bytecode import load_bytecode
 from ..user_operation.user_operation_v7v8 import UserOperationV7V8
-from ..user_operation.user_operation_v7v8 import pack_user_operation
+from ..user_operation.user_operation_v7v8 import pack_user_operation_with_signature
 from voltaire_bundler.utils.eth_client_utils import \
     send_rpc_request_to_eth_client
 
@@ -30,7 +31,8 @@ class GasManagerV7V8(GasManager):
     estimate_gas_with_override_enabled: bool
     max_verification_gas: int
     max_call_data_gas: int
-    entrypoint_code_override: str
+    entrypoint_code_override_v7: str
+    entrypoint_code_override_v8: str
 
     def __init__(
         self,
@@ -54,8 +56,10 @@ class GasManagerV7V8(GasManager):
         self.estimate_gas_with_override_enabled = True
         self.max_verification_gas = max_verification_gas
         self.max_call_data_gas = max_call_data_gas
-        self.entrypoint_code_override = load_bytecode(
+        self.entrypoint_code_override_v7 = load_bytecode(
             "EntryPointSimulationsV7WithBinarySearch.json")
+        self.entrypoint_code_override_v8 = load_bytecode(
+            "EntryPointSimulationsV8WithBinarySearch.json")
 
     async def estimate_user_operation_gas(
         self,
@@ -179,6 +183,10 @@ class GasManagerV7V8(GasManager):
                 [min_gas, max_gas, 10_000, is_continious, is_check_once]
             ],
         )
+        if entrypoint.lower() == "0x4337084d9e255ff0702461cf8895ce9e3b5ff108":
+            entrypoint_code_override = self.entrypoint_code_override_v8
+        else:
+            entrypoint_code_override = self.entrypoint_code_override_v7
 
         default_state_overrides: dict[str, Any] = {
             ZERO_ADDRESS: {
@@ -188,17 +196,22 @@ class GasManagerV7V8(GasManager):
             entrypoint: {
                 # override the Entrypoint with EntryPointSimulationsV7 for callGasLimit
                 # binary search
-                "code": self.entrypoint_code_override
+                "code": entrypoint_code_override
             }
         }
+        eip7702_auth = user_operation.eip7702_auth
+
+        if eip7702_auth is not None or user_operation.paymaster is not None:
+            default_state_overrides[user_operation.sender_address] = {}
+            if eip7702_auth is not None:
+                default_state_overrides[user_operation.sender_address][
+                    "code"] = "0xef0100" + eip7702_auth["address"][2:]
+
+            if user_operation.paymaster is not None:
+                default_state_overrides[user_operation.sender_address][
+                    "balance"] = "0x314dc6448d9338c15b0a00000000"
 
         call_data = function_selector + call_data_params.hex()
-
-        if user_operation.paymaster is not None:
-            default_state_overrides[user_operation.sender_address] = {
-                "balance": "0x314dc6448d9338c15b0a00000000"
-            }
-
         params: list[Any] = [
             {
                 "from": ZERO_ADDRESS,
@@ -287,7 +300,143 @@ class GasManagerV7V8(GasManager):
 
         return error_selector, error_params_decoded
 
-    def calc_base_preverification_gas(self, user_operation: UserOperationV7V8) -> int:
+    async def verify_gas_fees_and_get_price(
+        self, user_operation: UserOperationV7V8, enforce_gas_price_tolerance: int
+    ) -> str:
+        max_fee_per_gas = user_operation.max_fee_per_gas
+        max_priority_fee_per_gas = user_operation.max_priority_fee_per_gas
+
+        block_max_fee_per_gas_op = send_rpc_request_to_eth_client(
+            self.ethereum_node_url, "eth_gasPrice", None, None, "result"
+        )
+
+        tasks_arr = [block_max_fee_per_gas_op]
+
+        if not self.is_legacy_mode:
+            block_max_priority_fee_per_gas_op = send_rpc_request_to_eth_client(
+                self.ethereum_node_url, "eth_maxPriorityFeePerGas", None, None, "result"
+            )
+            tasks_arr.append(block_max_priority_fee_per_gas_op)
+
+        tasks: Any = await asyncio.gather(*tasks_arr)
+
+        block_max_fee_per_gas_hex = tasks[0]["result"]
+        block_max_fee_per_gas = int(block_max_fee_per_gas_hex, 16)
+        block_max_fee_per_gas = math.ceil(
+            block_max_fee_per_gas * (
+                self.max_fee_per_gas_percentage_multiplier / 100)
+        )
+        block_max_fee_per_gas_with_tolerance = math.ceil(
+            block_max_fee_per_gas * (1 - (enforce_gas_price_tolerance / 100))
+        )
+        block_max_fee_per_gas_with_tolerance_hex = hex(
+            block_max_fee_per_gas_with_tolerance
+        )
+
+        if enforce_gas_price_tolerance < 100:
+            if self.is_legacy_mode:
+                block_max_priority_fee_per_gas = block_max_fee_per_gas
+                if max_fee_per_gas < block_max_fee_per_gas_with_tolerance:
+                    raise ValidationException(
+                        ValidationExceptionCode.SimulateValidation,
+                        "Max fee per gas is too low. it should be minimum : " +
+                        f"{block_max_fee_per_gas_with_tolerance_hex}",
+                    )
+
+            else:
+                block_max_priority_fee_per_gas = int(tasks[1]["result"], 16)
+                block_max_priority_fee_per_gas = math.ceil(
+                    block_max_priority_fee_per_gas
+                    * (self.max_priority_fee_per_gas_percentage_multiplier
+                       / 100)
+                )
+
+                # max priority fee per gas can't be higher than max fee per gas
+                if block_max_priority_fee_per_gas > block_max_fee_per_gas:
+                    block_max_priority_fee_per_gas = block_max_fee_per_gas
+
+                estimated_base_fee = max(
+                    block_max_fee_per_gas - block_max_priority_fee_per_gas, 1
+                )
+
+                if max_fee_per_gas < estimated_base_fee:
+                    raise ValidationException(
+                        ValidationExceptionCode.InvalidFields,
+                        "Max fee per gas is too low. it should be minimum " +
+                        f"the estimated base fee: {hex(estimated_base_fee)}",
+                    )
+                if max_priority_fee_per_gas < 1:
+                    raise ValidationException(
+                        ValidationExceptionCode.InvalidFields,
+                        "Max priority fee per gas is too low. " +
+                        "it should be minimum : 1",
+                    )
+                if (
+                    min(
+                        max_fee_per_gas,
+                        estimated_base_fee + max_priority_fee_per_gas,
+                    )
+                    < block_max_fee_per_gas_with_tolerance
+                ):
+                    raise ValidationException(
+                        ValidationExceptionCode.InvalidFields,
+                        "Max fee per gas and (Max priority fee per gas + estimated basefee) " +
+                        f"should be equal or higher than : {block_max_fee_per_gas_with_tolerance_hex}",
+                    )
+
+        return block_max_fee_per_gas_hex
+
+    async def verify_preverification_gas_and_verification_gas_limit(
+        self,
+        user_operation: UserOperationV7V8,
+        entrypoint: str,
+    ) -> None:
+        expected_preverification_gas = await self.get_preverification_gas(
+            user_operation,
+            entrypoint,
+        )
+
+        if user_operation.pre_verification_gas < expected_preverification_gas:
+            raise ValidationException(
+                ValidationExceptionCode.SimulateValidation,
+                "Preverification gas is too low. it should be minimum : " +
+                f"{hex(expected_preverification_gas)}",
+            )
+
+        if user_operation.verification_gas_limit > self.max_verification_gas:
+            raise ValidationException(
+                ValidationExceptionCode.SimulateValidation,
+                "Verification gas is too high. it should be maximum : " +
+                f"{hex(self.max_verification_gas)}",
+            )
+
+    async def get_preverification_gas(
+        self,
+        user_operation: UserOperationV7V8,
+        entrypoint: str,
+        preverification_gas_percentage_coefficient: int = 100,
+        preverification_gas_addition_constant: int = 0,
+    ) -> int:
+        base_preverification_gas = GasManagerV7V8.calc_base_preverification_gas(
+            user_operation
+        )
+        l1_gas = 0
+
+        calculated_preverification_gas = base_preverification_gas + l1_gas
+
+        adjusted_preverification_gas = math.ceil(
+            (
+                calculated_preverification_gas
+                * preverification_gas_percentage_coefficient
+                / 100
+            )
+            + preverification_gas_addition_constant
+        )
+
+        return adjusted_preverification_gas
+
+    @staticmethod
+    def calc_base_preverification_gas(user_operation: UserOperationV7V8) -> int:
         user_operation_list = user_operation.to_list()
 
         user_operation_list[5] = 21000
@@ -306,8 +455,7 @@ class GasManagerV7V8(GasManager):
         bundle_size = 1
         # sigSize = 65
 
-        packed = pack_user_operation(
-                user_operation_list, False)
+        packed = pack_user_operation_with_signature(user_operation_list)
         packed_length = len(packed)
         zero_byte_count = packed.count(b"\x00")
         non_zero_byte_count = packed_length - zero_byte_count

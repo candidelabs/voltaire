@@ -18,7 +18,7 @@ from voltaire_bundler.user_operation.user_operation_v6 import \
 from voltaire_bundler.user_operation.user_operation_v7v8 import \
         UserOperationV7V8
 from voltaire_bundler.user_operation.user_operation import \
-        is_user_operation_hash
+        is_user_operation_hash, verify_and_get_address, verify_and_get_uint
 from voltaire_bundler.user_operation.user_operation_handler_v6 import \
     UserOperationHandlerV6
 from voltaire_bundler.user_operation.user_operation_handler_v7v8 import \
@@ -30,6 +30,7 @@ from voltaire_bundler.utils.eth_client_utils import get_latest_block_info
 from .bundle.bundle_manager import BundlerManager
 from .mempool.mempool_manager_v6 import LocalMempoolManagerV6
 from .mempool.mempool_manager_v7 import LocalMempoolManagerV7
+from .mempool.mempool_manager_v8 import LocalMempoolManagerV8
 from .mempool.reputation_manager import ReputationManager
 
 user_operation_by_hash_cache: dict[str, dict] = {}
@@ -45,9 +46,11 @@ class ExecutionEndpoint(Endpoint):
     chain_id: int
     local_mempool_manager_v6: Optional[LocalMempoolManagerV6]
     local_mempool_manager_v7: LocalMempoolManagerV7
+    local_mempool_manager_v8: LocalMempoolManagerV8
     peer_ids_to_cursor: dict[str, int]
     peer_ids_to_user_ops_hashes_queue: dict[str, list[str]]
     disabe_p2p: bool
+    is_eip7702: bool
 
     def __init__(
         self,
@@ -73,7 +76,8 @@ class ExecutionEndpoint(Endpoint):
         logs_incremental_range: int,
         logs_number_of_ranges: int,
         reputation_whitelist: list[str],
-        reputation_blacklist: list[str]
+        reputation_blacklist: list[str],
+        is_eip7702: bool
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_url = ethereum_node_url
@@ -91,6 +95,19 @@ class ExecutionEndpoint(Endpoint):
             max_call_data_gas,
             logs_incremental_range,
             logs_number_of_ranges,
+        )
+
+        self.local_mempool_manager_v8 = LocalMempoolManagerV8(
+            self.user_operation_handler_v7v8,
+            ethereum_node_url,
+            bundler_address,
+            chain_id,
+            is_unsafe,
+            enforce_gas_price_tolerance,
+            is_legacy_mode,
+            ethereum_node_debug_trace_call_url,
+            reputation_whitelist,
+            reputation_blacklist
         )
 
         self.local_mempool_manager_v7 = LocalMempoolManagerV7(
@@ -140,6 +157,7 @@ class ExecutionEndpoint(Endpoint):
         self.bundle_manager = BundlerManager(
             self.local_mempool_manager_v6,
             self.local_mempool_manager_v7,
+            self.local_mempool_manager_v8,
             ethereum_node_url,
             bundler_private_key,
             bundler_address,
@@ -154,6 +172,7 @@ class ExecutionEndpoint(Endpoint):
         self.peer_ids_to_user_ops_hashes_queue = dict()
         self.disable_p2p = disable_p2p
         self.disable_v6 = disable_v6
+        self.is_eip7702 = is_eip7702
 
         asyncio.ensure_future(self.execute_cron_job(is_debug, bundle_interval))
 
@@ -201,11 +220,13 @@ class ExecutionEndpoint(Endpoint):
         # await self.send_pooled_user_op_hashes_request("", 0)
 
     async def update_p2p_gossip(self, p2pClient: Client) -> None:
-        requestEvents = self.local_mempool_manager_v7.create_p2p_gossip_requests()
+        requestEvents = self.local_mempool_manager_v8.create_p2p_gossip_requests()
+        requestEvents += self.local_mempool_manager_v7.create_p2p_gossip_requests()
         if self.local_mempool_manager_v6 is not None:
             requestEvents += self.local_mempool_manager_v6.create_p2p_gossip_requests()
         for requestEvent in requestEvents:
             await p2pClient.broadcast_only(requestEvent)
+        self.local_mempool_manager_v8.verified_useroperations_standard_mempool_gossip_queue.clear()
         self.local_mempool_manager_v7.verified_useroperations_standard_mempool_gossip_queue.clear()
         if self.local_mempool_manager_v6 is not None:
             self.local_mempool_manager_v6.verified_useroperations_standard_mempool_gossip_queue.clear()
@@ -242,13 +263,17 @@ class ExecutionEndpoint(Endpoint):
         return hex(self.chain_id)
 
     async def _event_rpc_supportedEntryPoints(self, _) -> list:
-        entrypoints = [self.local_mempool_manager_v7.entrypoint]
+        entrypoints = [
+            self.local_mempool_manager_v8.entrypoint,
+            self.local_mempool_manager_v7.entrypoint,
+        ]
         if self.local_mempool_manager_v6 is not None:
             entrypoints.append(self.local_mempool_manager_v6.entrypoint)
         return entrypoints
 
     async def _event_rpc_estimateUserOperationGas(
             self, req_arguments: list) -> dict[str, str]:
+        useroperation_arg = req_arguments[0]
         state_override_set_dict: dict[str, Any] = {}
         if req_arguments[2] is not None:
             state_override_set_dict: dict[str, Any] = req_arguments[2]
@@ -267,11 +292,45 @@ class ExecutionEndpoint(Endpoint):
                 "Invalid entrypoint",
             )
 
-        if input_entrypoint == LocalMempoolManagerV7.entrypoint_lowercase:
-            entrypoint = LocalMempoolManagerV7.entrypoint
+        if (
+            "eip7702Auth" in useroperation_arg and
+            useroperation_arg["eip7702Auth"] is not None
+        ):
+            if (
+                not self.is_eip7702 or
+                input_entrypoint != LocalMempoolManagerV8.entrypoint_lowercase
+            ):
+                raise ValidationException(
+                    ValidationExceptionCode.InvalidFields,
+                    "EIP-7702 tuples are not supported",
+                )
+
+            auth_chain_id = verify_and_get_uint(
+                "eip7702Auth.chainId",
+                useroperation_arg["eip7702Auth"]["chainId"]
+            )
+            if auth_chain_id != 0 and auth_chain_id != self.chain_id:
+                raise ValidationException(
+                    ValidationExceptionCode.InvalidFields,
+                    "Invalid EIP-7702 tuple chainId.",
+                )
+
+            _ = verify_and_get_address(
+                    "eip7702Auth.address",
+                    useroperation_arg["eip7702Auth"]["address"]
+            )
+
+        if (
+            input_entrypoint == LocalMempoolManagerV7.entrypoint_lowercase or
+            input_entrypoint == LocalMempoolManagerV8.entrypoint_lowercase
+        ):
+            if input_entrypoint == LocalMempoolManagerV7.entrypoint_lowercase:
+                entrypoint = LocalMempoolManagerV7.entrypoint
+            else:
+                entrypoint = LocalMempoolManagerV8.entrypoint
             user_operation_with_optional_params = (
                 fell_user_operation_optional_parameters_for_estimateUserOperationGas(
-                    req_arguments[0]))
+                    useroperation_arg))
             user_operation = UserOperationV7V8(
                 user_operation_with_optional_params)
             gas_manager = self.user_operation_handler_v7v8.gas_manager
@@ -294,7 +353,7 @@ class ExecutionEndpoint(Endpoint):
             entrypoint = LocalMempoolManagerV6.entrypoint
             user_operation_with_optional_params = (
                 fell_user_operation_optional_parameters_for_estimateUserOperationGas(
-                    req_arguments[0])
+                    useroperation_arg)
             )
             user_operation = UserOperationV6(
                 user_operation_with_optional_params)
@@ -331,8 +390,22 @@ class ExecutionEndpoint(Endpoint):
                 ValidationExceptionCode.InvalidFields,
                 "Invalid entrypoint",
             )
-
-        if input_entrypoint == LocalMempoolManagerV7.entrypoint_lowercase:
+        if (
+            "eip7702Auth" in useroperation_arg and
+            useroperation_arg["eip7702Auth"] is not None and
+            (
+                not self.is_eip7702 or
+                input_entrypoint != LocalMempoolManagerV8.entrypoint_lowercase
+            )
+        ):
+            raise ValidationException(
+                ValidationExceptionCode.InvalidFields,
+                "EIP-7702 tuples are not supported",
+            )
+        if input_entrypoint == LocalMempoolManagerV8.entrypoint_lowercase:
+            user_operation = UserOperationV7V8(useroperation_arg)
+            local_mempool = self.local_mempool_manager_v8
+        elif input_entrypoint == LocalMempoolManagerV7.entrypoint_lowercase:
             user_operation = UserOperationV7V8(useroperation_arg)
             local_mempool = self.local_mempool_manager_v7
         elif (input_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase and
@@ -344,7 +417,6 @@ class ExecutionEndpoint(Endpoint):
                 ValidationExceptionCode.InvalidFields,
                 "Unsupported entrypoint",
             )
-
         (user_operation_hash, verified_at_block_hash, valid_mempools) = (
             await local_mempool.add_user_operation(user_operation)
         )
@@ -372,26 +444,34 @@ class ExecutionEndpoint(Endpoint):
         user_operation_by_hash_json_ops = []
         if (self.local_mempool_manager_v6 is not None and
                 self.user_operation_handler_v6 is not None):
-            senders_mempools = (
-                self.local_mempool_manager_v6.senders_to_senders_mempools.values()
-            )
-            user_operation_by_hash_json_ops.append(asyncio.create_task(
-                self.user_operation_handler_v6.get_user_operation_by_hash_rpc(
-                    user_operation_hash,
-                    LocalMempoolManagerV6.entrypoint,
-                    senders_mempools,
-                ))
+            user_operation_by_hash_json_ops.append(
+                asyncio.create_task(
+                    self.user_operation_handler_v6.get_user_operation_by_hash_rpc(
+                        user_operation_hash,
+                        LocalMempoolManagerV6.entrypoint,
+                        self.local_mempool_manager_v6.senders_to_senders_mempools.values(),
+                    )
+                )
             )
 
-        senders_mempools = (
-            self.local_mempool_manager_v7.senders_to_senders_mempools.values()
+        user_operation_by_hash_json_ops.append(
+            asyncio.create_task(
+                self.user_operation_handler_v7v8.get_user_operation_by_hash_rpc(
+                    user_operation_hash,
+                    LocalMempoolManagerV8.entrypoint,
+                    self.local_mempool_manager_v8.senders_to_senders_mempools.values(),
+                )
+            )
         )
-        user_operation_by_hash_json_ops.append(asyncio.create_task(
-            self.user_operation_handler_v7v8.get_user_operation_by_hash_rpc(
-                user_operation_hash,
-                LocalMempoolManagerV7.entrypoint,
-                senders_mempools,
-            ))
+
+        user_operation_by_hash_json_ops.append(
+            asyncio.create_task(
+                self.user_operation_handler_v7v8.get_user_operation_by_hash_rpc(
+                    user_operation_hash,
+                    LocalMempoolManagerV7.entrypoint,
+                    self.local_mempool_manager_v7.senders_to_senders_mempools.values(),
+                )
+            )
         )
         done, _ = await asyncio.wait(
             user_operation_by_hash_json_ops,
@@ -418,27 +498,36 @@ class ExecutionEndpoint(Endpoint):
         # if not found, check monitoring system
         # for the period between a user op leaves the local mempool to be bundled
         # and inclusion onchain
-        if user_operation_hash in self.bundle_manager.user_operations_to_monitor:
-            user_op = self.bundle_manager.user_operations_to_monitor[
+        if (
+            self.local_mempool_manager_v6 is not None and
+            user_operation_hash in self.bundle_manager.user_operations_to_monitor_v6
+        ):
+            user_op = self.bundle_manager.user_operations_to_monitor_v6[
                 user_operation_hash
             ]
-            if (
-                isinstance(user_op, UserOperationV6) and
-                self.local_mempool_manager_v6 is not None
-            ):
-                entrypoint = self.local_mempool_manager_v6.entrypoint
-            else:
-                entrypoint = self.local_mempool_manager_v7.entrypoint
-            user_operation_by_hash_json = {
-                "userOperation": user_op.get_user_operation_json(),
-                "entryPoint": entrypoint,
-                "blockNumber": None,
-                "blockHash": None,
-                "transactionHash": user_op.attempted_bundle_transaction_hash,
-            }
-            return user_operation_by_hash_json
+            entrypoint = self.local_mempool_manager_v6.entrypoint
+        elif user_operation_hash in self.bundle_manager.user_operations_to_monitor_v7:
+            user_op = self.bundle_manager.user_operations_to_monitor_v7[
+                user_operation_hash
+            ]
+            entrypoint = self.local_mempool_manager_v7.entrypoint
+        elif user_operation_hash in self.bundle_manager.user_operations_to_monitor_v6:
 
-        return None
+            user_op = self.bundle_manager.user_operations_to_monitor_v8[
+                user_operation_hash
+            ]
+            entrypoint = self.local_mempool_manager_v8.entrypoint
+        else:
+            return None
+
+        user_operation_by_hash_json = {
+            "userOperation": user_op.get_user_operation_json(),
+            "entryPoint": entrypoint,
+            "blockNumber": None,
+            "blockHash": None,
+            "transactionHash": user_op.attempted_bundle_transaction_hash,
+        }
+        return user_operation_by_hash_json
 
     async def _event_rpc_getUserOperationReceipt(
             self, req_arguments: list) -> dict | None:
@@ -462,6 +551,12 @@ class ExecutionEndpoint(Endpoint):
                     ))
                 )
 
+        user_operation_receipt_info_json_ops.append(asyncio.create_task(
+            self.user_operation_handler_v7v8.get_user_operation_receipt_rpc(
+                user_operation_hash,
+                LocalMempoolManagerV8.entrypoint,
+            ))
+        )
         user_operation_receipt_info_json_ops.append(asyncio.create_task(
             self.user_operation_handler_v7v8.get_user_operation_receipt_rpc(
                 user_operation_hash,
@@ -500,6 +595,7 @@ class ExecutionEndpoint(Endpoint):
         if self.local_mempool_manager_v6 is not None:
             self.local_mempool_manager_v6.clear_user_operations()
         self.local_mempool_manager_v7.clear_user_operations()
+        self.local_mempool_manager_v8.clear_user_operations()
 
         return "ok"
 
@@ -514,7 +610,9 @@ class ExecutionEndpoint(Endpoint):
                 "Invalid entrypoint",
             )
 
-        if input_entrypoint == LocalMempoolManagerV7.entrypoint_lowercase:
+        if input_entrypoint == LocalMempoolManagerV8.entrypoint_lowercase:
+            local_mempool = self.local_mempool_manager_v8
+        elif input_entrypoint == LocalMempoolManagerV7.entrypoint_lowercase:
             local_mempool = self.local_mempool_manager_v7
         elif (input_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase and
               self.local_mempool_manager_v6 is not None):
@@ -543,7 +641,9 @@ class ExecutionEndpoint(Endpoint):
                 "Invalid entrypoint",
             )
 
-        if input_entrypoint == LocalMempoolManagerV7.entrypoint_lowercase:
+        if input_entrypoint == LocalMempoolManagerV8.entrypoint_lowercase:
+            local_mempool = self.local_mempool_manager_v8
+        elif input_entrypoint == LocalMempoolManagerV7.entrypoint_lowercase:
             local_mempool = self.local_mempool_manager_v7
         elif (input_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase and
               self.local_mempool_manager_v6 is not None):
@@ -576,6 +676,7 @@ class ExecutionEndpoint(Endpoint):
         return "ok"
 
     async def _event_debug_bundler_clearReputation(self, _: list) -> str:
+        self.local_mempool_manager_v8.reputation_manager.clear_all_repuations()
         self.local_mempool_manager_v7.reputation_manager.clear_all_repuations()
         if self.local_mempool_manager_v6 is not None:
             self.local_mempool_manager_v6.reputation_manager.clear_all_repuations()
@@ -593,7 +694,9 @@ class ExecutionEndpoint(Endpoint):
                 "Invalid entrypoint",
             )
 
-        if input_entrypoint == LocalMempoolManagerV7.entrypoint_lowercase:
+        if input_entrypoint == LocalMempoolManagerV8.entrypoint_lowercase:
+            local_mempool = self.local_mempool_manager_v8
+        elif input_entrypoint == LocalMempoolManagerV7.entrypoint_lowercase:
             local_mempool = self.local_mempool_manager_v7
         elif (input_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase and
               self.local_mempool_manager_v6 is not None):
@@ -621,7 +724,10 @@ class ExecutionEndpoint(Endpoint):
                 "Invalid entrypoint",
             )
 
-        if input_entrypoint == LocalMempoolManagerV7.entrypoint_lowercase:
+        if input_entrypoint == LocalMempoolManagerV8.entrypoint_lowercase:
+            entrypoint = LocalMempoolManagerV8.entrypoint
+            local_mempool = self.local_mempool_manager_v8
+        elif input_entrypoint == LocalMempoolManagerV7.entrypoint_lowercase:
             entrypoint = LocalMempoolManagerV7.entrypoint
             local_mempool = self.local_mempool_manager_v7
         elif (input_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase and

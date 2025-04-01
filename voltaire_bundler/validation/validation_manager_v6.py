@@ -25,15 +25,6 @@ ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 class ValidationManagerV6(ValidationManager):
     user_operation_handler: UserOperationHandlerV6
-    tracer_manager: TracerManager
-    ethereum_node_url: str
-    bundler_address: str
-    chain_id: int
-    bundler_collector_tracer: str
-    is_unsafe: bool
-    is_legacy_mode: bool
-    enforce_gas_price_tolerance: int
-    ethereum_node_debug_trace_call_url: str
 
     def __init__(
         self,

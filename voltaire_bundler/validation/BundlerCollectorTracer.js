@@ -1,7 +1,3 @@
-// javascript code of tracer function
-// NOTE: we process this locally for hardhat, but send to geth for remote tracing.
-// should NOT "require" anything, or use logs.
-// see LogTrace for valid types (but alas, this one must be javascript, not typescript).
 /**
  * tracer to collect data for opcode banning.
  * this method is passed as the "tracer" for eth_traceCall (note, the function itself)
@@ -74,9 +70,7 @@
         const opcode = log.op.toString();
         const stackSize = log.stack.length();
         const stackTop3 = [];
-        // different than infinitism's implementation by only storing
-        // one value to stakcTop as the tracer reverts with large validation
-        for (let i = 0; i < 1 && i < stackSize; i++) {
+        for (let i = 0; i < 3 && i < stackSize; i++) {
             stackTop3.push(log.stack.peek(i));
         }
         this.lastThreeOpcodes.push({ opcode, stackTop3 });
