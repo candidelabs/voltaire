@@ -195,12 +195,6 @@ class GasManagerV6(GasManager):
             }
         }
 
-        eip7702_auth = user_operation.eip7702_auth
-        if eip7702_auth is not None:
-            default_state_overrides[user_operation.sender_address] = {
-                "code": "0xef0100" + str(eip7702_auth["address"])[2:]
-            }
-
         call_data = function_selector + call_data_params.hex()
         # if there is no paymaster, override the sender's balance for gas estimation
         if len(user_operation.paymaster_and_data) == 0:
