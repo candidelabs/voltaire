@@ -1,6 +1,13 @@
+import asyncio
 import os
+import logging
 from typing import Any
 from eth_abi import decode, encode
+from eth_utils import keccak
+from eth_utils import ValidationError as EthUtilsValidationError
+from eth_keys import KeyAPI
+from eth_keys.exceptions import BadSignature
+from rlp import encode as rlp_encode
 import voltaire_bundler
 from voltaire_bundler.bundle.exceptions import \
     ValidationException, ValidationExceptionCode
@@ -17,6 +24,8 @@ from voltaire_bundler.user_operation.models import (
         ReturnInfoV7, SenderValidationData, StakeInfo)
 from voltaire_bundler.validation.tracer_manager import TracerManager
 from .validation_manager import ValidationManager
+from voltaire_bundler.typing import Address
+from voltaire_bundler.utils.eip7702 import format_hex_array_for_rlp_encode
 
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
@@ -328,6 +337,87 @@ class ValidationManagerV7V8(ValidationManager):
                 ValidationExceptionCode.SimulateValidation,
                 "Invalid Validation result from debug_traceCall",
             )
+    
+    async def verify_authorization_and_get_code(
+        self,
+        sender_address: Address,
+        authorization: dict[str, str],
+    ) -> str | None:
+        chain_id_hex = authorization["chainId"][2:]
+        chain_id = int(chain_id_hex, 16)
+        if chain_id != self.chain_id and chain_id != 0:
+            raise ValidationException(
+                ValidationExceptionCode.InvalidFields,
+                "Invalid eip7702Auth chainId.",
+            )
+
+        auth_hash = keccak(
+            bytes.fromhex(
+                "05" +  # magic value
+                rlp_encode(
+                    format_hex_array_for_rlp_encode(
+                        [
+                            authorization["chainId"],
+                            authorization["address"],
+                            authorization["nonce"],
+                        ]
+                    )
+                ).hex()
+            )
+        )
+        try:
+            y_parity = authorization["yParity"]
+            r = authorization["r"]
+            s = authorization["s"]
+            signature = KeyAPI.Signature(
+                vrs=(
+                    int(y_parity, 16),
+                    int(r, 16),
+                    int(s, 16)
+                )
+            )
+            auth_signer_address = signature.recover_public_key_from_msg_hash(
+                auth_hash
+            ).to_address()
+        except EthUtilsValidationError or BadSignature as excp:
+            logging.error(
+                f"Failed to recover authorization for address: {authorization["address"]}."
+                f"error:{str(excp)}"
+            )
+            raise ValidationException(
+                ValidationExceptionCode.InvalidFields,
+                f"Failed to recover authorization for address: {authorization["address"]}."
+            )
+        if sender_address.lower() != auth_signer_address.lower():
+            raise ValidationException(
+                ValidationExceptionCode.InvalidFields,
+                f"Userop sender: {sender_address} is not equal to auth signer "
+                f"recovered address {auth_signer_address}"
+            )
+
+        existing_code_op = send_rpc_request_to_eth_client(
+            self.ethereum_node_url,
+            "eth_getCode",
+            [sender_address, "latest"],
+            None, "result"
+        )
+        nonce_op = send_rpc_request_to_eth_client(
+            self.ethereum_node_url,
+            "eth_getTransactionCount",
+            [sender_address, "latest"], None, "result"
+        )
+        tasks_arr = [existing_code_op, nonce_op]
+        tasks = await asyncio.gather(*tasks_arr)
+        existing_code = tasks[0]["result"]
+        current_nonce = tasks[1]["result"]
+
+        new_code = "0xef0100" + authorization["address"][2:]
+        if (
+                existing_code == new_code or
+                int(authorization["nonce"], 16) != int(current_nonce, 16)
+        ):
+            return None
+        return new_code
 
     @staticmethod
     def decode_validation_result(

@@ -183,16 +183,6 @@ class ValidationManagerV6(ValidationManager):
             },
             "latest",
         ]
-        if user_operation.eip7702_auth is not None:
-            new_code = await self.verify_authorization_and_get_code(
-                user_operation.sender_address,
-                user_operation.eip7702_auth
-            )
-            if new_code is not None:
-                state_overrides = {
-                    user_operation.sender_address: {"code": new_code}
-                }
-                params.append(state_overrides)
 
         result: Any = await send_rpc_request_to_eth_client(
             self.ethereum_node_url, "eth_call", params
@@ -228,15 +218,6 @@ class ValidationManagerV6(ValidationManager):
         call_data = ValidationManagerV6.encode_simulate_validation_calldata(
             user_operation
         )
-        state_overrides: dict = {}
-
-        if user_operation.eip7702_auth is not None:
-            new_code = await self.verify_authorization_and_get_code(
-                user_operation.sender_address,
-                user_operation.eip7702_auth
-            )
-            if new_code is not None:
-                state_overrides[user_operation.sender_address] = {"code": new_code}
 
         params = [
             {
@@ -247,7 +228,6 @@ class ValidationManagerV6(ValidationManager):
             block_number,
             {
                 "tracer": self.bundler_collector_tracer,
-                "stateOverrides": state_overrides
             },
         ]
         res: Any = await send_rpc_request_to_eth_client(
