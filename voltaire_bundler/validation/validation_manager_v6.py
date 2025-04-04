@@ -73,7 +73,8 @@ class ValidationManagerV6(ValidationManager):
         AggregatorStakeInfo | None,
         str,
         list[str] | None,
-        dict[str, str | dict[str, str]] | None
+        dict[str, str | dict[str, str]] | None,
+        bytes
     ]:
         debug_data: Any = None
         if self.is_unsafe:
@@ -166,7 +167,8 @@ class ValidationManagerV6(ValidationManager):
             None,
             user_operation_hash,
             associated_addresses,
-            storage_map
+            storage_map,
+            return_info.paymasterContext
         )
 
     async def simulate_validation_without_tracing(

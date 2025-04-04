@@ -86,7 +86,8 @@ class LocalMempoolManager():
             aggregator_stake_info,
             user_operation_hash,
             associated_addresses,
-            storage_map
+            storage_map,
+            paymaster_context
         ) = await self.validation_manager.validate_user_operation(
             user_operation,
             self.entrypoint,
@@ -95,6 +96,18 @@ class LocalMempoolManager():
             self.MIN_STAKE,
             self.MIN_UNSTAKE_DELAY
         )
+
+        # EREP-050
+        if paymaster_stake_info is not None:
+            is_paymaster_staked = self.is_staked(
+                paymaster_stake_info.stake, paymaster_stake_info.unstakeDelaySec)
+
+            if len(paymaster_context) > 0 and not is_paymaster_staked:
+                raise ValidationException(
+                    ValidationExceptionCode.OpcodeValidation,
+                    "An unstaked paymaster may not return a context.",
+                )
+
         if associated_addresses is None:
             user_operation.code_hash = None
         else:
@@ -196,7 +209,8 @@ class LocalMempoolManager():
                 aggregator_stake_info,
                 user_operation_hash,
                 associated_addresses,
-                storage_map
+                storage_map,
+                paymaster_context
             ) = await self.validation_manager.validate_user_operation(
                 user_operation,
                 self.entrypoint,
@@ -205,6 +219,18 @@ class LocalMempoolManager():
                 self.MIN_STAKE,
                 self.MIN_UNSTAKE_DELAY
             )
+
+            # EREP-050
+            if paymaster_stake_info is not None:
+                is_paymaster_staked = self.is_staked(
+                    paymaster_stake_info.stake, paymaster_stake_info.unstakeDelaySec)
+
+                if len(paymaster_context) > 0 and not is_paymaster_staked:
+                    raise ValidationException(
+                        ValidationExceptionCode.OpcodeValidation,
+                        "An unstaked paymaster may not return a context.",
+                    )
+
             if associated_addresses is None:
                 user_operation.code_hash = None
             else:
@@ -327,7 +353,8 @@ class LocalMempoolManager():
                     (
                         _, _, _, _, _,
                         associated_addresses,
-                        storage_map
+                        storage_map,
+                        _
                     ) = await self.validation_manager.validate_user_operation(
                         user_operation,
                         self.entrypoint,

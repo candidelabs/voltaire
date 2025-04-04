@@ -81,7 +81,8 @@ class ValidationManagerV7V8(ValidationManager):
         AggregatorStakeInfo | None,
         str,
         list[str] | None,
-        dict[str, str | dict[str, str]] | None
+        dict[str, str | dict[str, str]] | None,
+        bytes
     ]:
         debug_data: Any = None
         if self.is_unsafe:
@@ -105,7 +106,6 @@ class ValidationManagerV7V8(ValidationManager):
             return_info.sender_validation_data.valid_after,
             latest_block_timestamp
         )
-
         ValidationManagerV7V8.verify_sig_and_timestamp(
             return_info.paymaster_validation_data.sig_failed,
             return_info.paymaster_validation_data.valid_until,
@@ -179,7 +179,8 @@ class ValidationManagerV7V8(ValidationManager):
             aggregator_stake_info,
             user_operation_hash,
             addresses_called,
-            storage_map
+            storage_map,
+            return_info.paymaster_context
         )
 
     async def simulate_validation_without_tracing(

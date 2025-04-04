@@ -34,7 +34,8 @@ class ValidationManager(ABC, Generic[UserOperationType]):
         AggregatorStakeInfo | None,
         str,
         list[str] | None,
-        dict[str, str | dict[str, str]] | None
+        dict[str, str | dict[str, str]] | None,
+        bytes
     ]:
         pass
 
