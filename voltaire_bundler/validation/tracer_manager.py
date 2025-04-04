@@ -205,7 +205,7 @@ def validate_entity_banned_opcodes(
     opcodes: dict[str, int],
     opcode_source: str,
     is_entity_staked: bool | None,
-    is_factory: bool = False,
+    is_factory_staked: bool | None,
 ) -> None:
     # opcodes from [OP-011]
     BANNED_OPCODES = [
@@ -219,7 +219,6 @@ def validate_entity_banned_opcodes(
         "DIFFICULTY",
         "GASLIMIT",
         "BASEFEE",
-        "CREATE",
         "INVALID",
         "SELFDESTRUCT",
         "GAS",
@@ -235,14 +234,27 @@ def validate_entity_banned_opcodes(
             ValidationExceptionCode.OpcodeValidation,
             opcode_source + " uses banned opcode: " + opcodes_str,
         )
-    # [OP-031]
-    if "CREATE2" in opcodes:
-        if ((opcodes["CREATE2"] > 1) or
-                (opcodes["CREATE2"] == 1 and not is_factory)):
-            raise ValidationException(
-                ValidationExceptionCode.OpcodeValidation,
-                opcode_source + " uses banned opcode: " + "CREATE2",
-            )
+    if "CREATE" in opcodes and (
+        (opcode_source != 'account' and opcode_source != 'factory') or
+        (
+            opcode_source == 'account' and
+            is_factory_staked is None  # check if factory by checking if None
+        )
+    ):
+        raise ValidationException(
+            ValidationExceptionCode.OpcodeValidation,
+            opcode_source + " uses banned opcode: " + "CREATE",
+        )
+
+    if "CREATE2" in opcodes and (
+        (opcodes["CREATE2"] > 1) or
+        (opcode_source != 'account' and opcode_source != 'factory') or
+        (opcode_source == 'account' and not is_factory_staked)
+    ):
+        raise ValidationException(
+            ValidationExceptionCode.OpcodeValidation,
+            opcode_source + " uses banned opcode: " + "CREATE2",
+        )
 
     # opcodes allowed in staked entities [OP-080]
     if "BALANCE" in opcodes and not is_entity_staked:
@@ -266,13 +278,14 @@ def validate_banned_opcodes(
     is_factory_staked: bool | None,
     is_paymaster_staked: bool | None,
 ) -> None:
-    validate_entity_banned_opcodes(sender_opcodes, "account", is_sender_staked)
+    validate_entity_banned_opcodes(
+        sender_opcodes, "account", is_sender_staked, is_factory_staked)
     if factory_opcodes is not None:
         validate_entity_banned_opcodes(
-                factory_opcodes, "factory", is_factory_staked, True)
+            factory_opcodes, "factory", is_factory_staked, is_factory_staked)
     if paymaster_opcodes is not None:
         validate_entity_banned_opcodes(
-            paymaster_opcodes, "paymaster", is_paymaster_staked)
+            paymaster_opcodes, "paymaster", is_paymaster_staked, is_factory_staked)
 
 
 def filter_entites_data(
