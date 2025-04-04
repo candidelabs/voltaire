@@ -140,21 +140,28 @@ class LocalMempoolManager():
 
         new_sender = self.senders_to_senders_mempools[new_sender_address]
 
-        replaced_user_operation_hash = await new_sender.add_user_operation(
+        replaced_user_operation_hash_and_paymaster = await new_sender.add_user_operation(
             user_operation,
             user_operation_hash,
             latest_block_hash,
         )
-        if replaced_user_operation_hash is not None:
+        if replaced_user_operation_hash_and_paymaster is not None:
+            _, old_paymaster = replaced_user_operation_hash_and_paymaster
+            if old_paymaster is not None:
+                self.reputation_manager.update_seen_status(old_paymaster, -1)
+            if user_operation.paymaster_address_lowercase is not None:
+                self.reputation_manager.update_seen_status(
+                    user_operation.paymaster_address_lowercase
+                )
             self._remove_hash_from_entities_ops_hashes_in_mempool(
                 user_operation_hash
             )
-
-        self.update_all_seen_status(
-            user_operation.sender_address,
-            user_operation.factory_address_lowercase,
-            user_operation.paymaster_address_lowercase,
-        )
+        else:
+            self.update_all_seen_status(
+                user_operation.sender_address,
+                user_operation.factory_address_lowercase,
+                user_operation.paymaster_address_lowercase,
+            )
 
         if user_operation.factory_address_lowercase is not None:
             self._add_hash_to_entity_ops_hashes_in_mempool(
@@ -282,19 +289,26 @@ class LocalMempoolManager():
 
         new_sender = self.senders_to_senders_mempools[new_sender_address]
 
-        replaced_user_operation_hash = await new_sender.add_user_operation(
+        replaced_user_operation_hash_and_paymaster = await new_sender.add_user_operation(
             user_operation, user_operation_hash, latest_block_hash
         )
-        if replaced_user_operation_hash is not None:
+        if replaced_user_operation_hash_and_paymaster is not None:
+            _, old_paymaster = replaced_user_operation_hash_and_paymaster
+            if old_paymaster is not None:
+                self.reputation_manager.update_seen_status(old_paymaster, -1)
+            if user_operation.paymaster_address_lowercase is not None:
+                self.reputation_manager.update_seen_status(
+                    user_operation.paymaster_address_lowercase
+                )
             self._remove_hash_from_entities_ops_hashes_in_mempool(
                 user_operation_hash
             )
-
-        self.update_all_seen_status(
-            user_operation.sender_address,
-            user_operation.factory_address_lowercase,
-            user_operation.paymaster_address_lowercase,
-        )
+        else:
+            self.update_all_seen_status(
+                user_operation.sender_address,
+                user_operation.factory_address_lowercase,
+                user_operation.paymaster_address_lowercase,
+            )
 
         if user_operation.factory_address_lowercase is not None:
             self._add_hash_to_entity_ops_hashes_in_mempool(
