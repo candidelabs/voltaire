@@ -503,11 +503,10 @@ def validate_entity_storage_access(
                 )
             ):
                 # special case: account.validateUserOp is allowed to use assoc
-                # storage if factory is staked.
+                # storage if factory is staked or entity is staked.
                 # [STO-022], [STO-021]
-                if is_init_code:
-                    if not is_factory_staked:
-                        require_stake_slot = slot
+                if is_init_code and not (is_staked or is_factory_staked):
+                    require_stake_slot = slot
             elif (
                 entity_address in associated_slots_per_entity
                 and is_slot_associated_with_address(
