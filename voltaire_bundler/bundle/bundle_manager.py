@@ -23,8 +23,7 @@ from voltaire_bundler.user_operation.user_operation_v6 import UserOperationV6
 from voltaire_bundler.user_operation.user_operation_v7v8 import UserOperationV7V8
 
 from voltaire_bundler.utils.eip7702 import create_and_sign_eip7702_raw_transaction
-from voltaire_bundler.utils.eth_client_utils import \
-    get_latest_block_info, send_rpc_request_to_eth_client
+from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
 
 from ..mempool.reputation_manager import ReputationManager
 
@@ -102,24 +101,44 @@ class BundlerManager:
         user_operations_to_send_v7 = self.user_operations_to_send_v7
         self.user_operations_to_send_v8 = {}
         self.user_operations_to_send_v7 = {}
+        highest_verified_at_block_v8 = sorted(map(
+            lambda userop: int(userop.validated_at_block_hex, 16)
+            if userop.validated_at_block_hex is not None else 0,
+            user_operations_to_send_v8.values()
+        ))[-1] if user_operations_to_send_v8.values() else 0
+        highest_verified_at_block_v7 = sorted(map(
+            lambda userop: int(userop.validated_at_block_hex, 16)
+            if userop.validated_at_block_hex is not None else 0,
+            user_operations_to_send_v7.values()
+        ))[-1] if user_operations_to_send_v7.values() else 0
+
         tasks_arr = [
             self.send_bundle(
                 list(user_operations_to_send_v8.values()),
-                self.local_mempool_manager_v8
+                self.local_mempool_manager_v8,
+                highest_verified_at_block_v8
             ),
             self.send_bundle(
                 list(user_operations_to_send_v7.values()),
-                self.local_mempool_manager_v7
+                self.local_mempool_manager_v7,
+                highest_verified_at_block_v7
             )
         ]
         if self.user_operations_to_send_v6 is not None:
             assert self.local_mempool_manager_v6 is not None
             user_operations_to_send_v6 = self.user_operations_to_send_v6
             self.user_operations_to_send_v6 = {}
+            highest_verified_at_block_v6 = sorted(map(
+                lambda userop: int(userop.validated_at_block_hex, 16)
+                if userop.validated_at_block_hex is not None else 0,
+                user_operations_to_send_v6.values()
+            ))[-1] if user_operations_to_send_v6.values() else 0
+
             tasks_arr.append(
                 self.send_bundle(
                     list(user_operations_to_send_v6.values()),
-                    self.local_mempool_manager_v6
+                    self.local_mempool_manager_v6,
+                    highest_verified_at_block_v6
                 )
             )
         await asyncio.gather(*tasks_arr)
@@ -175,7 +194,8 @@ class BundlerManager:
     async def send_bundle(
         self,
         user_operations: list[UserOperationV7V8] | list[UserOperationV6],
-        mempool_manager: LocalMempoolManagerV8 | LocalMempoolManagerV7 | LocalMempoolManagerV6
+        mempool_manager: LocalMempoolManagerV8 | LocalMempoolManagerV7 | LocalMempoolManagerV6,
+        highest_verified_at_block: int
     ) -> None:
         entrypoint = mempool_manager.entrypoint
         num_of_user_operations = len(user_operations)
@@ -189,6 +209,7 @@ class BundlerManager:
             user_operations,
             self.bundler_address,
             entrypoint,
+            highest_verified_at_block
         )
 
         block_max_fee_per_gas_op = send_rpc_request_to_eth_client(
@@ -355,7 +376,9 @@ class BundlerManager:
                             "by 10%  - gas_price_percentage_multiplier now is "
                             f"{self.gas_price_percentage_multiplier}%"
                         )
-                        await self.send_bundle(user_operations, mempool_manager)
+                        await self.send_bundle(
+                            user_operations, mempool_manager, highest_verified_at_block
+                        )
                     else:
                         logging.error(
                             "Failed to send bundle. Dropping all user operations"
@@ -375,7 +398,9 @@ class BundlerManager:
                             f"{self.gas_price_percentage_multiplier}%"
                         )
 
-                        await self.send_bundle(user_operations, mempool_manager)
+                        await self.send_bundle(
+                            user_operations, mempool_manager, highest_verified_at_block
+                        )
                     else:
                         logging.error(
                             "Failed to send bundle. Dropping all user operations"
@@ -552,6 +577,7 @@ class BundlerManager:
         user_operations: list[UserOperationV6] | list[UserOperationV7V8],
         bundler: Address,
         entrypoint: Address,
+        highest_verified_at_block: int,
         recursion_depth: int = 0
     ) -> tuple[str | None, int | None, dict[str, str | dict[str, str]] | None, list]:
         recursion_depth = recursion_depth + 1
@@ -590,23 +616,55 @@ class BundlerManager:
             assert self.local_mempool_manager_v6 is not None
             mempool_manager = self.local_mempool_manager_v6
 
+        # see EntryPointMinBlock.sol
+        entrypoint_proxy_bytecode = (
+            "0x60806040527f" +
+            encode(["uint256"], [highest_verified_at_block]).hex() +
+            "4311610066576040517f08c379a000000000000000000000000000000000000000000000000000000000815260040161005d90610119565b60405180910390fd5b5f54365f5f375f5f365f5f73" +
+            entrypoint[2:] +
+            "5af13d5f5f3e80610095573d5ffd5b3d5ff35b5f82825260208201905092915050565b7f63757272656e7420626c6f636b206e756d626572206973206e6f7420686967685f8201527f6572207468616e206d696e426c6f636b00000000000000000000000000000000602082015250565b5f610103603083610099565b915061010e826100a9565b604082019050919050565b5f6020820190508181035f830152610130816100f7565b905091905056fea2646970667358221220fdaf8cdf14134724b4c557e94fe297425c83ef6bba7e4741a52b5f093f2324b464736f6c634300081b0033"
+        )
         params = {
             "from": bundler,
-            "to": entrypoint,
+            "to": "0x0000000000000000000000000000000000000000",
             "data": call_data,
         }
         if (len(auth_list) > 0):
             params["authorizationList"] = auth_list
 
-        results = await asyncio.gather(
-            send_rpc_request_to_eth_client(
-                self.ethereum_node_url, "eth_estimateGas", [params]
-            ),
-            get_latest_block_info(self.ethereum_node_url)
+        result = await send_rpc_request_to_eth_client(
+            self.ethereum_node_url,
+            "eth_estimateGas",
+            [
+                params,
+                "pending",
+                {
+                    "0x0000000000000000000000000000000000000000": {
+                        "code": entrypoint_proxy_bytecode
+                    }
+                }
+            ]
         )
-        result = results[0]
-        latest_block_number, _, _, _, _ = results[1]
         if "error" in result:
+            if "message" in result["error"]:
+                if (
+                    "current block number is not higher than minBlock" in
+                    result["error"]["message"]
+                ):
+                    # reattempt to estimate gas if current node is lagging
+                    # as we can't assume that the bundler is connected to the same
+                    # node during validation and bundle gas estimation
+                    logging.debug(
+                        "reattempt to estimate gas because of a lagging node."
+                        f"current node latest block is less than: {highest_verified_at_block}."
+                    )
+                    return await self.create_bundle_calldata_and_estimate_gas(
+                        user_operations,
+                        bundler,
+                        entrypoint,
+                        recursion_depth
+                    )
+
             if "data" in result["error"]:
                 error_data = result["error"]["data"]
                 selector = error_data[:10]
@@ -630,27 +688,6 @@ class BundlerManager:
                     return None, None, None, []
 
                 user_operation = user_operations[operation_index]
-
-                # reattempt to estimate gas if current node is lagging
-                # as we can't assume that the bundler is connected to the same
-                # node during validation and bundle gas estimation
-                assert user_operation.validated_at_block_hex is not None
-                if (
-                    int(user_operation.validated_at_block_hex, 16) >
-                    int(latest_block_number, 16)
-                ):
-                    logging.debug(
-                        "reattempt to estimate gas because of a lagging node."
-                        f"latest node block is: {latest_block_number}."
-                        f"user operation validated at block: {user_operation.validated_at_block_hex}."
-                        f"user_operation_hash: {user_operation.user_operation_hash}"
-                    )
-                    return await self.create_bundle_calldata_and_estimate_gas(
-                        user_operations,
-                        bundler,
-                        entrypoint,
-                        recursion_depth
-                    )
 
                 if user_operation.number_of_add_to_mempool_attempts > 1:
                     logging.warning(
