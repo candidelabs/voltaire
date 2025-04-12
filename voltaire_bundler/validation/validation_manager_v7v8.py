@@ -70,8 +70,8 @@ class ValidationManagerV7V8(ValidationManager):
         self,
         user_operation: UserOperationV7V8,
         entrypoint: str,
-        block_number: str,
-        latest_block_timestamp: int,
+        block_number: str | None,
+        min_block_number: str | None,
         min_stake: int,
         min_unstake_delay: int,
     ) -> tuple[
@@ -82,16 +82,18 @@ class ValidationManagerV7V8(ValidationManager):
         str,
         list[str] | None,
         dict[str, str | dict[str, str]] | None,
-        bytes
+        bytes,
+        str,
+        str
     ]:
         debug_data: Any = None
         if self.is_unsafe:
             validation_result = await self.simulate_validation_without_tracing(
-                user_operation, entrypoint
+                user_operation, entrypoint, block_number, min_block_number
             )
         else:
             validation_result, debug_data = await self.simulate_validation_with_tracing(
-                user_operation, entrypoint, block_number
+                user_operation, entrypoint, block_number, min_block_number
             )
         (
             return_info,
@@ -99,18 +101,21 @@ class ValidationManagerV7V8(ValidationManager):
             factory_stake_info,
             paymaster_stake_info,
             aggregator_stake_info,
+            validated_at_block_number,
+            validated_at_block_timestamp,
+            validated_at_block_hash
         ) = ValidationManagerV7V8.decode_validation_result(validation_result)
         ValidationManagerV7V8.verify_sig_and_timestamp(
             return_info.sender_validation_data.sig_failed,
             return_info.sender_validation_data.valid_until,
             return_info.sender_validation_data.valid_after,
-            latest_block_timestamp
+            validated_at_block_timestamp
         )
         ValidationManagerV7V8.verify_sig_and_timestamp(
             return_info.paymaster_validation_data.sig_failed,
             return_info.paymaster_validation_data.valid_until,
             return_info.paymaster_validation_data.valid_after,
-            latest_block_timestamp
+            validated_at_block_timestamp
         )
 
         if (
@@ -180,14 +185,32 @@ class ValidationManagerV7V8(ValidationManager):
             user_operation_hash,
             addresses_called,
             storage_map,
-            return_info.paymaster_context
+            return_info.paymaster_context,
+            hex(validated_at_block_number),
+            validated_at_block_hash
         )
 
     async def simulate_validation_without_tracing(
-        self, user_operation: UserOperationV7V8, entrypoint: str
+        self,
+        user_operation: UserOperationV7V8,
+        entrypoint: str,
+        block_number: str | None,
+        min_block_number: str | None = None,
+        recursion_depth: int = 0
     ) -> str:
+        recursion_depth = recursion_depth + 1
+        if recursion_depth > 100:
+            # this shouldn't happen
+            logging.error(
+                "simulate_validation_without_tracing recursion too deep."
+            )
+            raise ValidationException(
+                ValidationExceptionCode.SimulateValidation,
+                "",
+            )
+
         call_data = ValidationManagerV7V8.encode_simulate_validation_calldata(
-                user_operation)
+            user_operation, min_block_number)
         if entrypoint.lower() == "0x4337084d9e255ff0702461cf8895ce9e3b5ff108":
             entrypoint_code_override = self.entrypoint_code_override_v8
         else:
@@ -210,7 +233,7 @@ class ValidationManagerV7V8(ValidationManager):
                 "to": entrypoint,
                 "data": call_data,
             },
-            "latest",
+            block_number if block_number is not None else "latest",
             state_overrides
         ]
 
@@ -221,10 +244,25 @@ class ValidationManagerV7V8(ValidationManager):
             "result" in result
         ):
             return result["result"][2:]
-        elif (
-                "error" in result and
-                "message" in result["error"]
-        ):
+        elif ("error" in result and "message" in result["error"]):
+            if (
+                "current block number is not higher than minBlock" in
+                result["error"]["message"]
+            ):
+                # reattempt to validate if current node is lagging
+                # as we can't assume that the bundler is connected to the same
+                # node during first and second validation
+                logging.debug(
+                    "reattempt to validate because of a lagging node."
+                    f"current node latest block is less than: {min_block_number}."
+                )
+                return await self.simulate_validation_without_tracing(
+                    user_operation,
+                    entrypoint,
+                    block_number,
+                    min_block_number,
+                    recursion_depth
+                )
             if "data" in result["error"]:
                 error_data = result["error"]["data"]
                 selector = str(error_data[:10])
@@ -261,10 +299,23 @@ class ValidationManagerV7V8(ValidationManager):
         self,
         user_operation: UserOperationV7V8,
         entrypoint: str,
-        block_number: str,
+        block_number: str | None,
+        min_block_number: str | None = None,
+        recursion_depth: int = 0
     ) -> tuple[str, str]:
+        recursion_depth = recursion_depth + 1
+        if recursion_depth > 100:
+            # this shouldn't happen
+            logging.error(
+                "create_bundle_calldata_and_estimate_gas recursion too deep."
+            )
+            raise ValidationException(
+                ValidationExceptionCode.SimulateValidation,
+                "",
+            )
+
         call_data = ValidationManagerV7V8.encode_simulate_validation_calldata(
-            user_operation)
+            user_operation, min_block_number)
         if entrypoint.lower() == "0x4337084d9e255ff0702461cf8895ce9e3b5ff108":
             entrypoint_code_override = self.entrypoint_code_override_v8
         else:
@@ -286,7 +337,7 @@ class ValidationManagerV7V8(ValidationManager):
                 "to": entrypoint,
                 "data": call_data,
             },
-            block_number,
+            block_number if block_number is not None else "latest",
             {
                 "tracer": self.bundler_collector_tracer,
                 "stateOverrides": state_overrides
@@ -319,6 +370,24 @@ class ValidationManagerV7V8(ValidationManager):
                 reason = decode(
                     ["string"], bytes.fromhex(remaining_result)
                 )  # decode revert message
+                if (
+                    "current block number is not higher than minBlock" in
+                    reason
+                ):
+                    # reattempt to validate if current node is lagging
+                    # as we can't assume that the bundler is connected to the same
+                    # node during first and second validation
+                    logging.debug(
+                        "reattempt to validate because of a lagging node."
+                        f"current node latest block is less than: {min_block_number}."
+                    )
+                    return await self.simulate_validation_with_tracing(
+                        user_operation,
+                        entrypoint,
+                        block_number,
+                        min_block_number,
+                        recursion_depth
+                    )
 
                 raise ValidationException(
                     ValidationExceptionCode.SimulateValidation,
@@ -338,7 +407,7 @@ class ValidationManagerV7V8(ValidationManager):
                 ValidationExceptionCode.SimulateValidation,
                 "Invalid Validation result from debug_traceCall",
             )
-    
+
     async def verify_authorization_and_get_code(
         self,
         sender_address: Address,
@@ -424,14 +493,19 @@ class ValidationManagerV7V8(ValidationManager):
     def decode_validation_result(
         solidity_error_params: str,
     ) -> tuple[ReturnInfoV7, StakeInfo, StakeInfo,
-               StakeInfo, AggregatorStakeInfo]:
+               StakeInfo, AggregatorStakeInfo, int, int, str]:
         VALIDATION_RESULT_ABI = [
-            "((uint256,uint256,uint256,uint256,bytes),(uint256,uint256),(uint256,uint256),(uint256,uint256),(address,(uint256,uint256)))"
+            "((uint256,uint256,uint256,uint256,bytes),(uint256,uint256),(uint256,uint256),(uint256,uint256),(address,(uint256,uint256)))",
+            "uint256", "uint256", "bytes32"
         ]
         try:
-            validation_result_decoded = decode(
+            decode_result = decode(
                     VALIDATION_RESULT_ABI, bytes.fromhex(solidity_error_params)
-            )[0]
+            )
+            validation_result_decoded = decode_result[0]
+            validated_at_block_number = decode_result[1]
+            validated_at_block_timestamp = decode_result[2]
+            validated_at_block_hash = decode_result[3]
         except Exception:
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
@@ -531,17 +605,25 @@ class ValidationManagerV7V8(ValidationManager):
             factory_info,
             paymaster_info,
             aggregator_staked_info,
+            validated_at_block_number,
+            validated_at_block_timestamp,
+            validated_at_block_hash
         )
 
     @staticmethod
-    def encode_simulate_validation_calldata(user_operation: UserOperationV7V8) -> str:
+    def encode_simulate_validation_calldata(
+        user_operation: UserOperationV7V8, min_block_number: str | None = None
+    ) -> str:
         # simulateValidation(entrypoint solidity function) will always revert
-        function_selector = "0xc3bce009"
+        function_selector = "0x6ffd58b7"
         params = encode(
             [
-                "(address,uint256,bytes,bytes,bytes32,uint256,bytes32,bytes,bytes)"
+                "(address,uint256,bytes,bytes,bytes32,uint256,bytes32,bytes,bytes)",
+                "uint256"
             ],
-            [user_operation.to_list()],
+            [
+                user_operation.to_list(),
+                int(min_block_number, 16) if min_block_number is not None else 0
+            ]
         )
-
         return function_selector + params.hex()

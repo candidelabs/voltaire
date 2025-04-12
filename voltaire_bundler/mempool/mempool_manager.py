@@ -17,7 +17,6 @@ from voltaire_bundler.user_operation.user_operation_handler import UserOperation
 from voltaire_bundler.event_bus_manager.endpoint import RequestEvent
 from voltaire_bundler.validation.validation_manager import ValidationManager
 from voltaire_bundler.typing import Address, MempoolId
-from voltaire_bundler.utils.eth_client_utils import get_latest_block_info
 from voltaire_bundler.user_operation.user_operation import UserOperation
 from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
 
@@ -58,9 +57,6 @@ class LocalMempoolManager():
     ) -> tuple[str, str, List[MempoolId]]:
         user_operation.last_add_to_mempool_date = datetime.now()
         user_operation.number_of_add_to_mempool_attempts += 1
-        latest_block_number, _, _, latest_block_timestamp, latest_block_hash = (
-            await get_latest_block_info(self.ethereum_node_url)
-        )
         self._verify_banned_and_throttled_entities(
             user_operation.sender_address,
             user_operation.factory_address_lowercase,
@@ -87,12 +83,14 @@ class LocalMempoolManager():
             user_operation_hash,
             associated_addresses,
             storage_map,
-            paymaster_context
+            paymaster_context,
+            validated_at_block_number,
+            validated_at_block_hash
         ) = await self.validation_manager.validate_user_operation(
             user_operation,
             self.entrypoint,
-            latest_block_number,
-            latest_block_timestamp,
+            None,
+            None,
             self.MIN_STAKE,
             self.MIN_UNSTAKE_DELAY
         )
@@ -125,11 +123,11 @@ class LocalMempoolManager():
         )
 
         await self.validate_paymaster_deposit(
-            user_operation, latest_block_number)
+            user_operation, validated_at_block_number)
 
         self.validate_multiple_roles_violation(user_operation)
 
-        user_operation.validated_at_block_hex = latest_block_number
+        user_operation.validated_at_block_hex = validated_at_block_number
         new_sender = None
         new_sender_address = user_operation.sender_address
 
@@ -143,7 +141,7 @@ class LocalMempoolManager():
         replaced_user_operation_hash_and_paymaster = await new_sender.add_user_operation(
             user_operation,
             user_operation_hash,
-            latest_block_hash,
+            validated_at_block_hash,
         )
         if replaced_user_operation_hash_and_paymaster is not None:
             _, old_paymaster = replaced_user_operation_hash_and_paymaster
@@ -179,7 +177,11 @@ class LocalMempoolManager():
         user_operation.valid_mempools_ids = valid_mempools_ids
         user_operation.user_operation_hash = user_operation_hash
 
-        return user_operation_hash, latest_block_number, valid_mempools_ids
+        return (
+            user_operation_hash,
+            validated_at_block_number,
+            valid_mempools_ids
+        )
 
     async def add_user_operation_p2p(
         self,
@@ -197,16 +199,12 @@ class LocalMempoolManager():
                 user_operation,
                 self.entrypoint,
             )
-            gas_price_hex = await self.user_operation_handler.gas_manager.verify_gas_fees_and_get_price(
+            await self.user_operation_handler.gas_manager.verify_gas_fees_and_get_price(
                 user_operation, self.enforce_gas_price_tolerance
             )
             user_operation.validated_at_block_hex = verified_at_block_hash
         except ValidationException:
             return "No"
-
-        latest_block_number, _, _, latest_block_timestamp, latest_block_hash = (
-            await get_latest_block_info(self.ethereum_node_url)
-        )
 
         try:
             (
@@ -217,12 +215,14 @@ class LocalMempoolManager():
                 user_operation_hash,
                 associated_addresses,
                 storage_map,
-                paymaster_context
+                paymaster_context,
+                validated_at_block_number,
+                validated_at_block_hash
             ) = await self.validation_manager.validate_user_operation(
                 user_operation,
                 self.entrypoint,
-                latest_block_number,
-                latest_block_timestamp,
+                None,
+                None,
                 self.MIN_STAKE,
                 self.MIN_UNSTAKE_DELAY
             )
@@ -258,7 +258,7 @@ class LocalMempoolManager():
                     user_operation,
                     self.entrypoint,
                     verified_at_block_hash,
-                    latest_block_timestamp,
+                    None,
                     self.MIN_STAKE,
                     self.MIN_UNSTAKE_DELAY
                 )
@@ -275,7 +275,7 @@ class LocalMempoolManager():
         )
 
         await self.validate_paymaster_deposit(
-            user_operation, latest_block_number)
+            user_operation, validated_at_block_number)
 
         self.validate_multiple_roles_violation(user_operation)
 
@@ -290,7 +290,7 @@ class LocalMempoolManager():
         new_sender = self.senders_to_senders_mempools[new_sender_address]
 
         replaced_user_operation_hash_and_paymaster = await new_sender.add_user_operation(
-            user_operation, user_operation_hash, latest_block_hash
+            user_operation, user_operation_hash, validated_at_block_hash
         )
         if replaced_user_operation_hash_and_paymaster is not None:
             _, old_paymaster = replaced_user_operation_hash_and_paymaster
@@ -346,34 +346,17 @@ class LocalMempoolManager():
                 user_operation = sender_mempool.user_operation_hashs_to_verified_user_operation[
                     user_operation_hash].user_operation
 
-                latest_block_number, _, _, latest_block_timestamp, _ = (
-                    await get_latest_block_info(self.ethereum_node_url)
-                )
-
-                # skip adding this user operation to the bundle if current node is lagging
-                # as we can't assume that the bundler is connected to the same
-                # node during first and second validation
-                assert user_operation.validated_at_block_hex is not None
-                if (user_operation.validated_at_block_hex > latest_block_number):
-                    logging.debug(
-                        "user operation skipped for bundling because of a lagging node."
-                        f"latest node block is: {latest_block_number}."
-                        f"user operation validated at block: {user_operation.validated_at_block_hex}."
-                        f"user_operation_hash: {user_operation_hash}"
-                    )
-                    continue
-
                 try:
                     (
                         _, _, _, _, _,
                         associated_addresses,
                         storage_map,
-                        _
+                        _, _, _
                     ) = await self.validation_manager.validate_user_operation(
                         user_operation,
                         self.entrypoint,
-                        latest_block_number,
-                        latest_block_timestamp,
+                        None,
+                        user_operation.validated_at_block_hex,
                         self.MIN_STAKE,
                         self.MIN_UNSTAKE_DELAY
                     )

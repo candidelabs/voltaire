@@ -23,8 +23,8 @@ class ValidationManager(ABC, Generic[UserOperationType]):
         self,
         user_operation: UserOperationType,
         entrypoint: str,
-        block_number: str,
-        latest_block_timestamp: int,
+        block_number: str | None,
+        min_block_number: str | None,
         min_stake: int,
         min_unstake_delay: int,
     ) -> tuple[
@@ -35,7 +35,9 @@ class ValidationManager(ABC, Generic[UserOperationType]):
         str,
         list[str] | None,
         dict[str, str | dict[str, str]] | None,
-        bytes
+        bytes,
+        str,
+        str
     ]:
         pass
 

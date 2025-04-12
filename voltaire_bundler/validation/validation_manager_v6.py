@@ -56,16 +56,17 @@ class ValidationManagerV6(ValidationManager):
             self.bundler_collector_tracer = keyfile.read()
 
         self.entrypoint_code_override = load_bytecode(
-            "EntryPointSimulationsV7.json")
+            "EntryPointSimulationsV6.json")
 
     async def validate_user_operation(
         self,
         user_operation: UserOperationV6,
         entrypoint: str,
         block_number: str,
-        latest_block_timestamp: int,
+        min_block_number: str | None,
         min_stake: int,
         min_unstake_delay: int,
+        recursion_depth: int = 0
     ) -> tuple[
         StakeInfo,
         StakeInfo | None,
@@ -74,41 +75,80 @@ class ValidationManagerV6(ValidationManager):
         str,
         list[str] | None,
         dict[str, str | dict[str, str]] | None,
-        bytes
+        bytes,
+        str,
+        str
     ]:
+        recursion_depth = recursion_depth + 1
+        if recursion_depth > 100:
+            # this shouldn't happen
+            logging.error(
+                "simulate_validation_without_tracing recursion too deep."
+            )
+            raise ValidationException(
+                ValidationExceptionCode.SimulateValidation,
+                "",
+            )
+
         debug_data: Any = None
         if self.is_unsafe:
             (
                 selector,
                 validation_result,
             ) = await self.simulate_validation_without_tracing(
-                user_operation, entrypoint
+                user_operation, entrypoint, block_number, min_block_number
             )
         else:
             debug_data = await self.simulate_validation_with_tracing(
-                user_operation, entrypoint, block_number
+                user_operation, entrypoint, block_number, min_block_number
             )
             selector = debug_data["calls"][-1]["data"][:10]
             validation_result = debug_data["calls"][-1]["data"][10:]
-
         if selector == FailedOp.SELECTOR:
             _, reason = decode_failed_op_event(validation_result)
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
                 "revert reason : " + reason,
             )
+        elif selector == "0x08c379a0":  # Error(string)
+            reason = decode(
+                ["string"], bytes.fromhex(validation_result)
+            )  # decode revert message
+            if (
+                "current block number is not higher than minBlock" in
+                reason
+            ):
+                # reattempt to validate if current node is lagging
+                # as we can't assume that the bundler is connected to the same
+                # node during first and second validation
+                logging.debug(
+                    "reattempt to validate because of a lagging node."
+                    f"current node latest block is less than: {min_block_number}."
+                )
+                return await self.validate_user_operation(
+                    user_operation,
+                    entrypoint,
+                    block_number,
+                    min_block_number,
+                    min_stake,
+                    min_unstake_delay,
+                    recursion_depth
+                )
 
         (
             return_info,
             sender_stake_info,
             factory_stake_info,
             paymaster_stake_info,
+            validated_at_block_number,
+            validated_at_block_timestamp,
+            validated_at_block_hash
         ) = ValidationManagerV6.decode_validation_result(validation_result)
         ValidationManagerV6.verify_sig_and_timestamp(
             return_info.sigFailed,
             return_info.validUntil,
             return_info.validAfter,
-            latest_block_timestamp
+            validated_at_block_timestamp
         )
 
         user_operation_hash = get_user_operation_hash(
@@ -168,14 +208,24 @@ class ValidationManagerV6(ValidationManager):
             user_operation_hash,
             associated_addresses,
             storage_map,
-            return_info.paymasterContext
+            return_info.paymasterContext,
+            hex(validated_at_block_number),
+            validated_at_block_hash
         )
 
     async def simulate_validation_without_tracing(
-        self, user_operation: UserOperationV6, entrypoint: str
+        self,
+        user_operation: UserOperationV6,
+        entrypoint: str,
+        block_number: str | None,
+        min_block_number: str | None = None
     ) -> tuple[str, str]:
         call_data = ValidationManagerV6.encode_simulate_validation_calldata(
-                user_operation)
+            user_operation, min_block_number)
+
+        state_overrides = {  # override the Entrypoint with EntryPointSimulationsV6
+            entrypoint: {"code": self.entrypoint_code_override}
+        }
 
         params = [
             {
@@ -183,7 +233,8 @@ class ValidationManagerV6(ValidationManager):
                 "to": entrypoint,
                 "data": call_data,
             },
-            "latest",
+            block_number if block_number is not None else "latest",
+            state_overrides
         ]
         result: Any = await send_rpc_request_to_eth_client(
             self.ethereum_node_url, "eth_call", params
@@ -203,7 +254,6 @@ class ValidationManagerV6(ValidationManager):
                 ValidationExceptionCode.SimulateValidation,
                 result["error"]["message"],
             )
-
         error_data = result["error"]["data"]
         solidity_error_selector = str(error_data[:10])
         solidity_error_params = error_data[10:]
@@ -215,10 +265,15 @@ class ValidationManagerV6(ValidationManager):
         user_operation: UserOperationV6,
         entrypoint: str,
         block_number: str,
+        min_block_number: str | None = None
     ) -> str:
         call_data = ValidationManagerV6.encode_simulate_validation_calldata(
-            user_operation
+            user_operation, min_block_number
         )
+
+        state_overrides = {  # override the Entrypoint with EntryPointSimulationsV6
+            entrypoint: {"code": self.entrypoint_code_override},
+        }
 
         params = [
             {
@@ -226,13 +281,15 @@ class ValidationManagerV6(ValidationManager):
                 "to": entrypoint,
                 "data": call_data,
             },
-            block_number,
-            {"tracer": self.bundler_collector_tracer},
+            block_number if block_number is not None else "latest",
+            {
+                "tracer": self.bundler_collector_tracer,
+                "stateOverrides": state_overrides
+            }
         ]
         res: Any = await send_rpc_request_to_eth_client(
             self.ethereum_node_debug_trace_call_url, "debug_traceCall", params
         )
-
         if "result" in res:
             debug_data = res["result"]
             return debug_data
@@ -251,12 +308,13 @@ class ValidationManagerV6(ValidationManager):
     @staticmethod
     def decode_validation_result(
         solidity_error_params: str,
-    ) -> tuple[ReturnInfo, StakeInfo, StakeInfo, StakeInfo]:
+    ) -> tuple[ReturnInfo, StakeInfo, StakeInfo, StakeInfo, int, int, str]:
         VALIDATION_RESULT_ABI = [
             "(uint256,uint256,bool,uint64,uint64,bytes)",
             "(uint256,uint256)",
             "(uint256,uint256)",
             "(uint256,uint256)",
+            "uint256", "uint256", "bytes32"
         ]
         try:
             validation_result_decoded = decode(
@@ -292,23 +350,35 @@ class ValidationManagerV6(ValidationManager):
         paymaster_info = StakeInfo(
             stake=paymaster_info_arr[0], unstakeDelaySec=paymaster_info_arr[1]
         )
+        validated_at_block_number = validation_result_decoded[4]
+        validated_at_block_timestamp = validation_result_decoded[5]
+        validated_at_block_hash = validation_result_decoded[6]
 
         return (
             return_info,
             sender_info,
             factory_info,
             paymaster_info,
+            validated_at_block_number,
+            validated_at_block_timestamp,
+            validated_at_block_hash
         )
 
     @staticmethod
-    def encode_simulate_validation_calldata(user_operation: UserOperationV6) -> str:
+    def encode_simulate_validation_calldata(
+        user_operation: UserOperationV6, min_block_number: str | None = None
+    ) -> str:
         # simulateValidation(entrypoint solidity function) will always revert
-        function_selector = "0xee219423"
+        function_selector = "0x6b5e3767"
         params = encode(
             [
-                "(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)"
+                "(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)",
+                "uint256"
             ],
-            [user_operation.to_list()],
+            [
+                user_operation.to_list(),
+                int(min_block_number, 16) if min_block_number is not None else 0
+            ],
         )
 
         return function_selector + params.hex()

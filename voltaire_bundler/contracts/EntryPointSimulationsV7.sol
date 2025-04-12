@@ -4,15 +4,83 @@ pragma solidity ^0.8.23;
 /* solhint-disable avoid-low-level-calls */
 /* solhint-disable no-inline-assembly */
 
-import "./EntryPoint.sol";
-import "../interfaces/IEntryPointSimulations.sol";
+import "https://github.com/eth-infinitism/account-abstraction/blob/releases/v0.7/contracts/core/EntryPoint.sol";
+
+interface IEntryPointSimulations is IEntryPoint {
+    // Return value of simulateHandleOp.
+    struct ExecutionResult {
+        uint256 preOpGas;
+        uint256 paid;
+        uint256 accountValidationData;
+        uint256 paymasterValidationData;
+        bool targetSuccess;
+        bytes targetResult;
+    }
+
+    /**
+     * Successful result from simulateValidation.
+     * If the account returns a signature aggregator the "aggregatorInfo" struct is filled in as well.
+     * @param returnInfo     Gas and time-range returned values
+     * @param senderInfo     Stake information about the sender
+     * @param factoryInfo    Stake information about the factory (if any)
+     * @param paymasterInfo  Stake information about the paymaster (if any)
+     * @param aggregatorInfo Signature aggregation info (if the account requires signature aggregator)
+     *                       Bundler MUST use it to verify the signature, or reject the UserOperation.
+     */
+    struct ValidationResult {
+        ReturnInfo returnInfo;
+        StakeInfo senderInfo;
+        StakeInfo factoryInfo;
+        StakeInfo paymasterInfo;
+        AggregatorStakeInfo aggregatorInfo;
+    }
+
+    /**
+     * Simulate a call to account.validateUserOp and paymaster.validatePaymasterUserOp.
+     * @dev The node must also verify it doesn't use banned opcodes, and that it doesn't reference storage
+     *      outside the account's data.
+     * @param userOp - The user operation to validate.
+     * @return the validation result structure
+     */
+    function simulateValidation(
+        PackedUserOperation calldata userOp,
+        uint256 minBlock
+    )
+    external
+    returns (
+        ValidationResult memory, uint256 currentBlockNumber, uint256 currentBlockTimeStamp, bytes32 currentBlockHash
+    );
+
+    /**
+     * Simulate full execution of a UserOperation (including both validation and target execution)
+     * It performs full validation of the UserOperation, but ignores signature error.
+     * An optional target address is called after the userop succeeds,
+     * and its value is returned (before the entire call is reverted).
+     * Note that in order to collect the the success/failure of the target call, it must be executed
+     * with trace enabled to track the emitted events.
+     * @param op The UserOperation to simulate.
+     * @param target         - If nonzero, a target address to call after userop simulation. If called,
+     *                         the targetSuccess and targetResult are set to the return from that call.
+     * @param targetCallData - CallData to pass to target address.
+     * @return the execution result structure
+     */
+    function simulateHandleOp(
+        PackedUserOperation calldata op,
+        address target,
+        bytes calldata targetCallData
+    )
+    external
+    returns (
+        ExecutionResult memory
+    );
+}
 
 /*
  * This contract inherits the EntryPoint and extends it with the view-only methods that are executed by
  * the bundler in order to check UserOperation validity and estimate its gas consumption.
  * This contract should never be deployed on-chain and is only used as a parameter for the "eth_call" request.
  */
-contract EntryPointSimulations is EntryPoint, IEntryPointSimulations {
+contract EntryPointSimulationsModV7 is EntryPoint, IEntryPointSimulations {
     // solhint-disable-next-line var-name-mixedcase
     AggregatorStakeInfo private NOT_AGGREGATED = AggregatorStakeInfo(address(0), StakeInfo(0, 0));
 
@@ -35,17 +103,19 @@ contract EntryPointSimulations is EntryPoint, IEntryPointSimulations {
      * it as entrypoint, since the simulation functions don't check the signatures
      */
     constructor() {
-        require(block.number < 100, "should not be deployed");
+        //require(block.number < 100, "should not be deployed");
     }
 
-    /// @inheritdoc IEntryPointSimulations
     function simulateValidation(
-        PackedUserOperation calldata userOp
+        PackedUserOperation calldata userOp,
+        uint256 minBlock
     )
     external
     returns (
-        ValidationResult memory
+        ValidationResult memory, uint256 currentBlockNumber, uint256 currentBlockTimeStamp, bytes32 currentBlockHash
     ){
+        require(minBlock == 0 || block.number >= minBlock, "current block number is not higher than minBlock");
+
         UserOpInfo memory outOpInfo;
 
         _simulationOnlyValidations(userOp);
@@ -82,13 +152,14 @@ contract EntryPointSimulations is EntryPoint, IEntryPointSimulations {
                 _getStakeInfo(aggregator)
             );
         }
-        return ValidationResult(
+        return (ValidationResult(
             returnInfo,
             senderInfo,
             factoryInfo,
             paymasterInfo,
             aggregatorInfo
-        );
+        ), block.number, block.timestamp, blockhash(block.number));
+
     }
 
     /// @inheritdoc IEntryPointSimulations
@@ -188,3 +259,4 @@ contract EntryPointSimulations is EntryPoint, IEntryPointSimulations {
         }
     }
 }
+
