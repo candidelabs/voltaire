@@ -23,7 +23,8 @@ from voltaire_bundler.user_operation.user_operation_v6 import UserOperationV6
 from voltaire_bundler.user_operation.user_operation_v7v8 import UserOperationV7V8
 
 from voltaire_bundler.utils.eip7702 import create_and_sign_eip7702_raw_transaction
-from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
+from voltaire_bundler.utils.eth_client_utils import \
+    encode_handleops_calldata_v6, encode_handleops_calldata_v7v8, send_rpc_request_to_eth_client
 
 from ..mempool.reputation_manager import ReputationManager
 
@@ -596,21 +597,21 @@ class BundlerManager:
                 user_operations_list.append(user_operation.to_list())
                 if user_operation.eip7702_auth is not None:
                     auth_list.append(user_operation.eip7702_auth)
-            call_data = BundlerManager.encode_handleops_calldata_v7v8(
+            call_data = encode_handleops_calldata_v7v8(
                 user_operations_list, self.bundler_address
             )
             mempool_manager = self.local_mempool_manager_v8
         elif entrypoint == self.local_mempool_manager_v7.entrypoint:
             for user_operation in user_operations:
                 user_operations_list.append(user_operation.to_list())
-            call_data = BundlerManager.encode_handleops_calldata_v7v8(
+            call_data = encode_handleops_calldata_v7v8(
                 user_operations_list, self.bundler_address
             )
             mempool_manager = self.local_mempool_manager_v7
         else:
             for user_operation in user_operations:
                 user_operations_list.append(user_operation.to_list())
-            call_data = BundlerManager.encode_handleops_calldata_v6(
+            call_data = encode_handleops_calldata_v6(
                 user_operations_list, self.bundler_address
             )
             assert self.local_mempool_manager_v6 is not None
@@ -868,35 +869,4 @@ class BundlerManager:
             ):
                 merged_storage_map[
                     user_operation.sender_address] = root_hash_result["result"]["storageHash"]
-        return call_data, call_gas_limit, merged_storage_map, auth_list
-
-    @staticmethod
-    def encode_handleops_calldata_v6(
-        user_operations_list: list[list[Any]], bundler_address: str
-    ) -> str:
-        function_selector = "0x1fad948c"  # handleOps
-        params = encode(
-            [
-                "(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)[]",
-                "address",
-            ],
-            [user_operations_list, bundler_address],
-        )
-
-        call_data = function_selector + params.hex()
-        return call_data
-
-    @staticmethod
-    def encode_handleops_calldata_v7v8(
-            user_operations_list: list[list[Any]], bundler_address: str) -> str:
-        function_selector = "0x765e827f"  # handleOps
-        params = encode(
-            [
-                "(address,uint256,bytes,bytes,bytes32,uint256,bytes32,bytes,bytes)[]",
-                "address",
-            ],
-            [user_operations_list, bundler_address],
-        )
-
-        call_data = function_selector + params.hex()
-        return call_data
+        return call_data, call_gas_limit, merged_storage_map, auth_list 
