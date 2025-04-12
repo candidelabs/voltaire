@@ -111,7 +111,7 @@ class LocalMempoolManager():
         else:
             user_operation.code_hash = (
                 await self.validation_manager.tracer_manager.get_addresses_code_hash(
-                    associated_addresses
+                    associated_addresses, validated_at_block_number
                 )
             )
 
@@ -243,7 +243,7 @@ class LocalMempoolManager():
             else:
                 user_operation.code_hash = (
                     await self.validation_manager.tracer_manager.get_addresses_code_hash(
-                        associated_addresses
+                        associated_addresses, validated_at_block_number
                     )
                 )
 

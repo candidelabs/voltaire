@@ -115,47 +115,18 @@ class TracerManager():
 
         return associated_addresses, storage_map
 
-    async def get_code_hash_and_associated_addresses(
-        self,
-        sender_data: Any,
-        factory_data: Any | None,
-        paymaster_data: Any | None,
-    ) -> tuple[str | None, list[str]]:
-        associated_addresses_lowercase: list[str] = list(
-            sender_data["contractSize"].keys()
-        )
-        if factory_data is not None:
-            associated_addresses_lowercase = (
-                associated_addresses_lowercase +
-                list(factory_data["contractSize"].keys())
-            )
-
-        if paymaster_data is not None:
-            associated_addresses_lowercase = (
-                associated_addresses_lowercase +
-                list(paymaster_data["contractSize"].keys())
-            )
-        code_hash = None
-        associated_addresses = []
-        if len(associated_addresses_lowercase) > 0:
-            associated_addresses = [
-                to_checksum_address(lower_case_address)
-                for lower_case_address in associated_addresses_lowercase
-            ]
-            if len(associated_addresses) > 0:
-                code_hash = await self.get_addresses_code_hash(
-                    associated_addresses
-                )
-        return code_hash, associated_addresses
-
-    async def get_addresses_code_hash(self, addresses: list[str]) -> str:
+    async def get_addresses_code_hash(
+        self, addresses: list[str] | None, block_number: str | None = None
+    ) -> str | None:
+        if addresses is None:
+            return None
         call_data = encode(["address[]"], [addresses])
         params = [
             {
                 "from": self.bundler_address,
                 "data": self.bundler_helper_byte_code + call_data.hex(),
             },
-            "latest",
+            block_number if block_number is not None else "latest",
         ]
         result: Any = await send_rpc_request_to_eth_client(
             self.ethereum_node_url, "eth_call", params
