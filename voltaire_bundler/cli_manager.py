@@ -516,6 +516,18 @@ def initialize_argument_parser() -> ArgumentParser:
         default=_get_env_or_default("VOLTAIRE_EIP7702", False, lambda v: v.lower() == "true"),
     )
 
+    parser.add_argument(
+        "--disable_entrypoints_code_check",
+        type=bool,
+        help="disable checking if the supported entrypoints are deployed.",
+        nargs="?",
+        const=True,
+        default=_get_env_or_default(
+            "VOLTAIRE_DISABLE_ENTRYPOINTS_CODE_CHECK",
+            False, lambda v: v.lower() == "true"
+        )
+    )
+
     return parser
 
 
@@ -674,7 +686,9 @@ async def get_init_data(args: Namespace) -> InitData:
             "sendRawTransactionalConditional can't work with unsafe mode."
         )
         sys.exit(1)
-    await check_valid_entrypoints(args.ethereum_node_url, args.disable_v6)
+
+    if not args.disable_entrypoints_code_check:
+        await check_valid_entrypoints(args.ethereum_node_url, args.disable_v6)
 
     ret = InitData(
         args.rpc_url,
