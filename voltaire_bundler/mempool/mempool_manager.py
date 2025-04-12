@@ -337,6 +337,8 @@ class LocalMempoolManager():
     ) -> dict[str, UserOperation]:
         bundle = {}
         senders_lowercase = [x.lower() for x in self.senders_to_senders_mempools.keys()]
+        validate_user_operations_ops = []
+        user_operations = []
         for sender_address in list(self.senders_to_senders_mempools):
             sender_mempool = self.senders_to_senders_mempools[sender_address]
             if len(sender_mempool.user_operation_hashs_to_verified_user_operation) > 0:
@@ -345,94 +347,121 @@ class LocalMempoolManager():
                 )
                 user_operation = sender_mempool.user_operation_hashs_to_verified_user_operation[
                     user_operation_hash].user_operation
+                user_operations.append(user_operation)
+                validate_user_operations_ops.append(
+                    self.validate_user_operation_to_bundle(user_operation)
+                )
+        validation_results = await asyncio.gather(*validate_user_operations_ops)
 
-                try:
-                    (
-                        _, _, _, _, _,
-                        associated_addresses,
-                        storage_map,
-                        _, _, _
-                    ) = await self.validation_manager.validate_user_operation(
-                        user_operation,
-                        self.entrypoint,
-                        None,
-                        user_operation.validated_at_block_hex,
-                        self.MIN_STAKE,
-                        self.MIN_UNSTAKE_DELAY
-                    )
-                    if storage_map is not None:
-                        to_bundle = True
-                        for storage_address_lowercase in storage_map.keys():
-                            if (
-                                storage_address_lowercase != sender_address.lower() and
-                                storage_address_lowercase in senders_lowercase
-                            ):
-                                to_bundle = False
-                                break
-                        if is_conditional_rpc:
-                            user_operation.storage_map = storage_map
+        new_code_hash_ops = []
+        for (_, associated_addresses, _) in validation_results:
+            new_code_hash_ops.append(
+                self.validation_manager.tracer_manager.get_addresses_code_hash(
+                    associated_addresses
+                )
+            )
+        new_code_hash_results = await asyncio.gather(*new_code_hash_ops)
 
-                        if not to_bundle:
-                            logging.debug(
-                                "user operation skipped for bundling because " +
-                                "user_op_access_other_ops_sender_in_bundle."
-                                "user_operation_hash: " + user_operation_hash
-                            )
-                            continue
-                    if associated_addresses is None:
-                        new_code_hash = None
-                    else:
-                        new_code_hash = (
-                            await self.validation_manager.tracer_manager.get_addresses_code_hash(
-                                associated_addresses
-                            )
-                        )
+        for (
+            user_operation,
+            (is_valid, associated_addresses, storage_map),
+            new_code_hash
+        ) in zip(
+            user_operations,
+            validation_results,
+            new_code_hash_results
+        ):
+            sender_address = user_operation.sender_address
+            sender_mempool = self.senders_to_senders_mempools[sender_address]
+            user_operation_hash = user_operation.user_operation_hash
+            if is_valid:
+                if storage_map is not None:
+                    to_bundle = True
+                    for storage_address_lowercase in storage_map.keys():
+                        if (
+                            storage_address_lowercase != sender_address.lower() and
+                            storage_address_lowercase in senders_lowercase
+                        ):
+                            to_bundle = False
+                            break
+                    if is_conditional_rpc:
+                        user_operation.storage_map = storage_map
 
-                    if new_code_hash != user_operation.code_hash:
-                        del sender_mempool.user_operation_hashs_to_verified_user_operation[
-                            user_operation_hash]
-                        self._remove_hash_from_entities_ops_hashes_in_mempool(
-                            user_operation_hash
-                        )
+                    if not to_bundle:
                         logging.debug(
-                            "user operation dropped because code hash changed." +
+                            "user operation skipped for bundling because " +
+                            "user_op_access_other_ops_sender_in_bundle."
                             "user_operation_hash: " + user_operation_hash
                         )
                         continue
 
-                except ValidationException as err:
-                    if (
-                        user_operation.paymaster_address_lowercase is not None and
-                        "AA21" not in err.message  # not the paymaster
-                    ):
-                        # EREP-015: special case: if it is account/factory failure
-                        # then decreases paymaster's opsSeen
-                        self.reputation_manager.update_seen_status(
-                            user_operation.paymaster_address_lowercase, -1)
-
+                if new_code_hash != user_operation.code_hash:
                     del sender_mempool.user_operation_hashs_to_verified_user_operation[
                         user_operation_hash]
                     self._remove_hash_from_entities_ops_hashes_in_mempool(
-                            user_operation_hash
-                        )
+                        user_operation_hash
+                    )
                     logging.debug(
-                        "user operation dropped because it failed second validation: " 
-                        + str(err.message) +
-                        " user_operation_hash: " + user_operation_hash
+                        "user operation dropped because code hash changed." +
+                        "user_operation_hash: " + user_operation_hash
                     )
                     continue
-
-                bundle[user_operation_hash] = user_operation
+            else:
                 del sender_mempool.user_operation_hashs_to_verified_user_operation[
                     user_operation_hash]
                 self._remove_hash_from_entities_ops_hashes_in_mempool(
-                    user_operation_hash
-                )
-        for sender_address in list(self.senders_to_senders_mempools):
-            sender_mempool = self.senders_to_senders_mempools[sender_address]
+                        user_operation_hash
+                    )
+                continue
+
+            bundle[user_operation_hash] = user_operation
+            del sender_mempool.user_operation_hashs_to_verified_user_operation[
+                user_operation_hash]
+            self._remove_hash_from_entities_ops_hashes_in_mempool(
+                user_operation_hash
+            )
             if len(sender_mempool.user_operation_hashs_to_verified_user_operation) == 0:
                 del self.senders_to_senders_mempools[sender_address]
         return bundle
+
+    async def validate_user_operation_to_bundle(
+        self, user_operation
+    ) -> tuple[
+        bool,
+        list[str] | None,
+        dict[str, str | dict[str, str]] | None,
+    ]:
+        try:
+            (
+                _, _, _, _, _,
+                associated_addresses,
+                storage_map,
+                _, _, _
+            ) = await self.validation_manager.validate_user_operation(
+                user_operation,
+                self.entrypoint,
+                None,
+                user_operation.validated_at_block_hex,
+                self.MIN_STAKE,
+                self.MIN_UNSTAKE_DELAY
+            )
+            return True, associated_addresses, storage_map
+        except ValidationException as err:
+            if (
+                user_operation.paymaster_address_lowercase is not None and
+                "AA21" not in err.message  # not the paymaster
+            ):
+                # EREP-015: special case: if it is account/factory failure
+                # then decreases paymaster's opsSeen
+                self.reputation_manager.update_seen_status(
+                    user_operation.paymaster_address_lowercase, -1)
+            logging.debug(
+                "user operation dropped because it failed second validation: "
+                + str(err.message) +
+                " user_operation_hash: " + user_operation.user_operation_hash
+            )
+
+            return False, None, None
 
     def get_user_operations_hashes_with_mempool_id(
         self, mempool_id: MempoolId, offset: int
