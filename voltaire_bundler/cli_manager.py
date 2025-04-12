@@ -631,6 +631,10 @@ async def check_valid_entrypoints(ethereum_node_url: str, disable_v6: bool):
         ethereum_node_url,
         Address("0x0000000071727De22E5E9d8BAf0edAc6f37da032")
     )
+    await check_valid_entrypoint(
+        ethereum_node_url,
+        Address("0x4337084d9e255ff0702461cf8895ce9e3b5ff108")
+    )
 
 
 async def get_init_data(args: Namespace) -> InitData:
