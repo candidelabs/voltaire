@@ -417,7 +417,7 @@ class GasManagerV7V8(GasManager):
         preverification_gas_percentage_coefficient: int = 100,
         preverification_gas_addition_constant: int = 0,
     ) -> int:
-        base_preverification_gas = GasManagerV7V8.calc_base_preverification_gas(
+        base_preverification_gas = self.calc_base_preverification_gas(
             user_operation
         )
         l1_gas = 0
@@ -435,8 +435,7 @@ class GasManagerV7V8(GasManager):
 
         return adjusted_preverification_gas
 
-    @staticmethod
-    def calc_base_preverification_gas(user_operation: UserOperationV7V8) -> int:
+    def calc_base_preverification_gas(self, user_operation: UserOperationV7V8) -> int:
         user_operation_list = user_operation.to_list()
 
         user_operation_list[5] = 21000
