@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "voltaire_bundler"
-version = "v0.1.0-alpha.45"
+version = "v0.1.0-alpha.46"
 description = "EIP-4337 python Bundler"
 authors = ["Candide Wallet Team"]
 license = "LGPL"
