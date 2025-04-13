@@ -1,13 +1,15 @@
 from abc import ABC, abstractmethod
 import asyncio
+import logging
 import math
 from typing import Generic, Any
+from eth_abi import encode, decode
 
 from voltaire_bundler.user_operation.models import UserOperationType
 from voltaire_bundler.bundle.exceptions import \
     ValidationException, ValidationExceptionCode
 from voltaire_bundler.utils.eth_client_utils import \
-    send_rpc_request_to_eth_client
+    encode_handleops_calldata_v6, encode_handleops_calldata_v7v8, send_rpc_request_to_eth_client
 
 
 class GasManager(ABC, Generic[UserOperationType]):
@@ -136,6 +138,7 @@ class GasManager(ABC, Generic[UserOperationType]):
         self,
         user_operation: UserOperationType,
         entrypoint: str,
+        latest_block_number_hex: str = "latest",
         preverification_gas_percentage_coefficient: int = 100,
         preverification_gas_addition_constant: int = 0,
     ) -> int:
@@ -143,6 +146,28 @@ class GasManager(ABC, Generic[UserOperationType]):
             user_operation
         )
         l1_gas = 0
+        try:
+            # op chains (optimism, optimism sepolia, base, world chain)
+            if (
+                self.chain_id == 10 or  # op mainnet
+                self.chain_id == 11155420 or  # op sepolia
+                self.chain_id == 8453 or  # base
+                self.chain_id == 84532 or  # base sepolia
+                self.chain_id == 480 or  # world chain
+                self.chain_id == 4801  # world chain sepolia
+            ):
+                l1_gas = await self.calc_l1_gas_estimate_optimism(
+                    user_operation, latest_block_number_hex
+                )
+            # arbitrum One or arbitrum sepolia
+            if self.chain_id == 42161 or self.chain_id == 421614:
+                l1_gas = await self.calc_l1_gas_estimate_arbitrum(
+                    user_operation, entrypoint)
+        except Exception as excp:
+            logging.error(
+                f"L1 gas estimation failed.error: {str(excp)}."
+                f"useroperation hash: {user_operation.user_operation_hash}"
+            )
 
         calculated_preverification_gas = base_preverification_gas + l1_gas
 
@@ -157,6 +182,178 @@ class GasManager(ABC, Generic[UserOperationType]):
 
         return adjusted_preverification_gas
 
+    async def calc_l1_gas_estimate_optimism(
+        self, user_operation: UserOperationType,
+        block_number_hex: str,
+    ) -> int:
+        ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+        user_operations_list = [user_operation.to_list()]
+
+        # currently most bundles contains a singler useroperations
+        # so l1 fees is calculated for the full handleops transaction
+        user_op = user_operations_list[0]
+        if len(user_op) == 11:
+            # set random values for gas limits and gas prices for accurate gas estimation
+            if user_op[4] == 0:
+                user_op[4] = 0xab8621df9b
+            if user_op[5] == 0:
+                user_op[5] = 0xa51448df8c
+            if user_op[6] == 0:
+                user_op[6] = 0xa8d2755f7a
+            if user_op[7] == 0:
+                user_op[7] = 0xa4f91cbf5f
+            if user_op[8] == 0:
+                user_op[8] = 0xa76e216f4b
+            handleops_calldata = encode_handleops_calldata_v6(
+                user_operations_list, ZERO_ADDRESS
+            )
+        else:
+            # set random values for gas limits and gas prices for accurate gas estimation
+            if user_op[4] == (0).to_bytes(32):
+                user_op[4] = (0xab8621df9b).to_bytes(16) + (0xa51448df8c).to_bytes(16)
+            if user_op[5] == 0:
+                user_op[5] = 0xa8d2755f7a
+            if user_op[6] == (0).to_bytes(32):
+                user_op[6] = (0xa4f91cbf5f).to_bytes(16) + (0xa76e216f4b).to_bytes(16)
+            handleops_calldata = encode_handleops_calldata_v7v8(
+                user_operations_list, ZERO_ADDRESS
+            )
+
+        optimism_gas_oracle_contract_address = (
+            "0x420000000000000000000000000000000000000F"
+        )
+
+        function_selector = "0x49948e0e"  # getL1Fee
+        params = encode(
+            ["bytes"],
+            [bytes.fromhex(handleops_calldata[2:])]
+        )
+
+        call_data = function_selector + params.hex()
+
+        params = [
+            {
+                "from": ZERO_ADDRESS,
+                "to": optimism_gas_oracle_contract_address,
+                "data": call_data,
+            },
+            block_number_hex,
+        ]
+
+        eth_call_op = send_rpc_request_to_eth_client(
+            self.ethereum_node_url, "eth_call", params
+        )
+        block_max_fee_per_gas_op = send_rpc_request_to_eth_client(
+            self.ethereum_node_url, "eth_gasPrice"
+        )
+        tasks_arr = [eth_call_op, block_max_fee_per_gas_op]
+        tasks: Any = await asyncio.gather(*tasks_arr)
+        result = tasks[0]
+        block_max_fee_per_gas_hex = tasks[1]['result']
+        block_max_fee_per_gas = int(block_max_fee_per_gas_hex, 16)
+
+        l1_fee = decode(["uint256"], bytes.fromhex(result["result"][2:]))[0]
+        gas_estimate_for_l1 = math.ceil(l1_fee / block_max_fee_per_gas)
+
+        return gas_estimate_for_l1
+
+    async def calc_l1_gas_estimate_arbitrum(
+        self, user_operation: UserOperationType, entrypoint: str
+    ) -> int:
+        ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+        arbitrum_nodeInterface_address = (
+            "0x00000000000000000000000000000000000000C8"
+        )
+
+        is_init: bool = user_operation.nonce == 0
+
+        user_operations_list = [user_operation.to_list()]
+
+        # currently most bundles contains a singler useroperations
+        # so l1 fees is calculated for the full handleops transaction
+        user_op = user_operations_list[0]
+        if len(user_op) == 11:
+            # set random values for gas limits and gas prices for accurate gas estimation
+            if user_op[4] == 0:
+                user_op[4] = 0xab8621df9b
+            if user_op[5] == 0:
+                user_op[5] = 0xa51448df8c
+            if user_op[6] == 0:
+                user_op[6] = 0xa8d2755f7a
+            if user_op[7] == 0:
+                user_op[7] = 0xa4f91cbf5f
+            if user_op[8] == 0:
+                user_op[8] = 0xa76e216f4b
+            handleops_calldata = encode_handleops_calldata_v6(
+                user_operations_list, ZERO_ADDRESS
+            )
+        else:
+            # set random values for gas limits and gas prices for accurate gas estimation
+            if user_op[4] == (0).to_bytes(32):
+                user_op[4] = (0xab8621df9b).to_bytes(16) + (0xa51448df8c).to_bytes(16)
+            if user_op[5] == 0:
+                user_op[5] = 0xa8d2755f7a
+            if user_op[6] == (0).to_bytes(32):
+                user_op[6] = (0xa4f91cbf5f).to_bytes(16) + (0xa76e216f4b).to_bytes(16)
+            handleops_calldata = encode_handleops_calldata_v7v8(
+                user_operations_list, ZERO_ADDRESS
+            )
+
+        call_data = encode_gasEstimateL1Component_calldata(
+            entrypoint, is_init, handleops_calldata
+        )
+
+        params = [
+            {
+                "from": ZERO_ADDRESS,
+                "to": arbitrum_nodeInterface_address,
+                "data": call_data,
+            },
+            "latest",
+        ]
+
+        result = await send_rpc_request_to_eth_client(
+            self.ethereum_node_url, "eth_call", params
+        )
+
+        raw_gas_results = result["result"]
+
+        gas_estimate_for_l1 = decode_gasEstimateL1Component_result(
+            raw_gas_results
+        )
+
+        return gas_estimate_for_l1
+
     @abstractmethod
     def calc_base_preverification_gas(self, user_operation: UserOperationType) -> int:
         pass
+
+
+@staticmethod
+def encode_gasEstimateL1Component_calldata(
+    entrypoint: str, is_init: bool, handleops_calldata: str
+) -> str:
+    function_selector = "0x77d488a2"  # gasEstimateL1Component
+    params = encode(
+        ["address", "bool", "bytes"],  # to  # contractCreation  # data
+        [entrypoint, is_init, bytes.fromhex(handleops_calldata[2:])],
+    )
+
+    call_data = function_selector + params.hex()
+    return call_data
+
+
+@staticmethod
+def decode_gasEstimateL1Component_result(raw_gas_results: str) -> int:
+    decoded_results = decode(
+        [
+            "uint64",  # gasEstimateForL1
+            "uint256",  # baseFee
+            "uint256",  # l1BaseFeeEstimate
+        ],
+        bytes.fromhex(raw_gas_results[2:]),
+    )
+
+    gas_estimate_for_l1 = decoded_results[0]
+
+    return gas_estimate_for_l1

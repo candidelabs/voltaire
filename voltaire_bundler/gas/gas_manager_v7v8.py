@@ -386,55 +386,6 @@ class GasManagerV7V8(GasManager):
 
         return block_max_fee_per_gas_hex
 
-    async def verify_preverification_gas_and_verification_gas_limit(
-        self,
-        user_operation: UserOperationV7V8,
-        entrypoint: str,
-    ) -> None:
-        expected_preverification_gas = await self.get_preverification_gas(
-            user_operation,
-            entrypoint,
-        )
-
-        if user_operation.pre_verification_gas < expected_preverification_gas:
-            raise ValidationException(
-                ValidationExceptionCode.SimulateValidation,
-                "Preverification gas is too low. it should be minimum : " +
-                f"{hex(expected_preverification_gas)}",
-            )
-
-        if user_operation.verification_gas_limit > self.max_verification_gas:
-            raise ValidationException(
-                ValidationExceptionCode.SimulateValidation,
-                "Verification gas is too high. it should be maximum : " +
-                f"{hex(self.max_verification_gas)}",
-            )
-
-    async def get_preverification_gas(
-        self,
-        user_operation: UserOperationV7V8,
-        entrypoint: str,
-        preverification_gas_percentage_coefficient: int = 100,
-        preverification_gas_addition_constant: int = 0,
-    ) -> int:
-        base_preverification_gas = GasManagerV7V8.calc_base_preverification_gas(
-            user_operation
-        )
-        l1_gas = 0
-
-        calculated_preverification_gas = base_preverification_gas + l1_gas
-
-        adjusted_preverification_gas = math.ceil(
-            (
-                calculated_preverification_gas
-                * preverification_gas_percentage_coefficient
-                / 100
-            )
-            + preverification_gas_addition_constant
-        )
-
-        return adjusted_preverification_gas
-
     @staticmethod
     def calc_base_preverification_gas(user_operation: UserOperationV7V8) -> int:
         user_operation_list = user_operation.to_list()
