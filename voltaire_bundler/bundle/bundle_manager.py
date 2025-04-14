@@ -646,6 +646,10 @@ class BundlerManager:
                 }
             ]
         )
+        # the bundler performs the third validation of the entire UserOperations
+        # bundle. If any of the UserOperations fail validation,
+        # the bundler drops them, and updates their reputation,
+        # as described in ERC-7562 in detail.
         if "error" in result:
             if "message" in result["error"]:
                 if (

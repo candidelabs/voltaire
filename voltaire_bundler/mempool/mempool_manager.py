@@ -432,6 +432,10 @@ class LocalMempoolManager():
         dict[str, str | dict[str, str]] | None,
     ]:
         try:
+            # second validation: the bundler takes UserOperations from the mempool
+            # and runs the second validation of a single UserOperation on each of them.
+            # If it succeeds, it is scheduled for inclusion in the next bundle,
+            # and dropped otherwise.
             (
                 _, _, _, _, _,
                 associated_addresses,
