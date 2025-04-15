@@ -88,8 +88,8 @@ contract EntryPointSimulationsModV7 is EntryPoint, IEntryPointSimulations {
 
     function initSenderCreator() internal virtual {
         //this is the address of the first contract created with CREATE by this address.
-        address createdObj = address(uint160(uint256(keccak256(abi.encodePacked(hex"d694", address(this), hex"01")))));
-        _senderCreator = SenderCreator(createdObj);
+        //address createdObj = address(uint160(uint256(keccak256(abi.encodePacked(hex"d694", address(this), hex"01")))));
+        _senderCreator = SenderCreator(0xEFC2c1444eBCC4Db75e7613d20C6a62fF67A167C);
     }
 
     function senderCreator() internal view virtual override returns (SenderCreator) {

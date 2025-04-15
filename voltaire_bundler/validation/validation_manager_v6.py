@@ -369,7 +369,7 @@ class ValidationManagerV6(ValidationManager):
         user_operation: UserOperationV6, min_block_number: str | None = None
     ) -> str:
         # simulateValidation(entrypoint solidity function) will always revert
-        function_selector = "0x6b5e3767"
+        function_selector = "0x8b43a566"
         params = encode(
             [
                 "(address,uint256,bytes,bytes,uint256,uint256,uint256,uint256,uint256,bytes,bytes)",

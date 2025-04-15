@@ -1,7 +1,3 @@
-/**
- ** Account-Abstraction (EIP-4337) singleton EntryPoint implementation.
- ** Only one instance required on each chain.
- **/
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity ^0.8.12;
 
@@ -19,11 +15,11 @@ import "https://github.com/eth-infinitism/account-abstraction/blob/releases/v0.6
 import "https://github.com/eth-infinitism/account-abstraction/blob/releases/v0.6/contracts/core/NonceManager.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-contract EntryPointMod is IEntryPoint, StakeManager, NonceManager, ReentrancyGuard {
+contract EntryPoint is IEntryPoint, StakeManager, NonceManager, ReentrancyGuard {
 
     using UserOperationLib for UserOperation;
 
-    SenderCreator private immutable senderCreator = new SenderCreator();
+    SenderCreator private immutable senderCreator = SenderCreator(0x7fc98430eAEdbb6070B35B39D798725049088348);
 
     // internal value used during simulation: need to query aggregator.
     address private constant SIMULATE_FIND_AGGREGATOR = address(1);
