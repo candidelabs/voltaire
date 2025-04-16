@@ -157,6 +157,7 @@ class LocalMempoolManager():
         else:
             self.update_all_seen_status(
                 user_operation.sender_address,
+                sender_stake_info,
                 user_operation.factory_address_lowercase,
                 user_operation.paymaster_address_lowercase,
             )
@@ -306,6 +307,7 @@ class LocalMempoolManager():
         else:
             self.update_all_seen_status(
                 user_operation.sender_address,
+                sender_stake_info,
                 user_operation.factory_address_lowercase,
                 user_operation.paymaster_address_lowercase,
             )
@@ -540,10 +542,14 @@ class LocalMempoolManager():
 
     def update_all_seen_status(
         self, sender_address: str,
+        sender_stake_info: StakeInfo,
         factory_address: str | None,
-        paymaster_address: str | None
+        paymaster_address: str | None,
     ) -> None:
-        self.reputation_manager.update_seen_status(sender_address)
+        is_sender_staked = self.is_staked(
+            sender_stake_info.stake, sender_stake_info.unstakeDelaySec)
+        if is_sender_staked:
+            self.reputation_manager.update_seen_status(sender_address)
 
         if factory_address is not None:
             self.reputation_manager.update_seen_status(factory_address)
