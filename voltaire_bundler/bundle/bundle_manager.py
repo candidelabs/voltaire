@@ -49,6 +49,8 @@ class BundlerManager:
     user_operations_to_monitor_v6: dict[str, UserOperationV6]
     user_operations_to_monitor_v7: dict[str, UserOperationV7V8]
     user_operations_to_monitor_v8: dict[str, UserOperationV7V8]
+    user_operations_to_ban: dict[
+        str, tuple[UserOperationV6 | UserOperationV7V8, str, Address]]
     gas_price_percentage_multiplier: int
 
     def __init__(
@@ -94,6 +96,7 @@ class BundlerManager:
         self.user_operations_to_monitor_v6 = {}
 
         self.gas_price_percentage_multiplier = 100
+        self.user_operations_to_ban = {}
 
     async def send_next_bundle(self) -> None:
         await self.update_send_queue_and_monitor_queue()
@@ -143,6 +146,14 @@ class BundlerManager:
                 )
             )
         await asyncio.gather(*tasks_arr)
+
+        useroperation_banning_ops = []
+        for user_operation, reason, entrypoint in self.user_operations_to_ban.values():
+            useroperation_banning_ops.append(
+                self.handle_useroperation_banning(user_operation, reason, entrypoint)
+            )
+        self.user_operations_to_ban = {}
+        await asyncio.gather(*useroperation_banning_ops)
 
     async def update_send_queue_and_monitor_queue(self) -> None:
         tasks_arr = [
@@ -580,7 +591,12 @@ class BundlerManager:
         entrypoint: Address,
         highest_verified_at_block: int,
         recursion_depth: int = 0
-    ) -> tuple[str | None, int | None, dict[str, str | dict[str, str]] | None, list]:
+    ) -> tuple[
+            str | None,
+            int | None,
+            dict[str, str | dict[str, str]] | None,
+            list,
+    ]:
         recursion_depth = recursion_depth + 1
         if recursion_depth > 100:
             # this shouldn't happen
@@ -600,22 +616,18 @@ class BundlerManager:
             call_data = encode_handleops_calldata_v7v8(
                 user_operations_list, self.bundler_address
             )
-            mempool_manager = self.local_mempool_manager_v8
         elif entrypoint == self.local_mempool_manager_v7.entrypoint:
             for user_operation in user_operations:
                 user_operations_list.append(user_operation.to_list())
             call_data = encode_handleops_calldata_v7v8(
                 user_operations_list, self.bundler_address
             )
-            mempool_manager = self.local_mempool_manager_v7
         else:
             for user_operation in user_operations:
                 user_operations_list.append(user_operation.to_list())
             call_data = encode_handleops_calldata_v6(
                 user_operations_list, self.bundler_address
             )
-            assert self.local_mempool_manager_v6 is not None
-            mempool_manager = self.local_mempool_manager_v6
 
         # see EntryPointMinBlock.sol
         entrypoint_proxy_bytecode = (
@@ -646,29 +658,56 @@ class BundlerManager:
                 }
             ]
         )
+        if "result" in result:
+            call_gas_limit = result["result"]
+
+            merged_storage_map = None
+            if self.conditional_rpc is not None:
+                senders_root_hashs_operations = list()
+                merged_storage_map = dict()
+                for user_operation in user_operations:
+                    if user_operation.storage_map is not None:
+                        merged_storage_map |= user_operation.storage_map
+                    senders_root_hashs_operations.append(
+                        send_rpc_request_to_eth_client(
+                            self.ethereum_node_url,
+                            "eth_getProof",
+                            [user_operation.sender_address, [], "latest"],
+                            None, "result"
+                        )
+                    )
+                senders_root_hashes = await asyncio.gather(
+                        *senders_root_hashs_operations)
+
+                for user_operation, root_hash_result in zip(
+                    user_operations, senders_root_hashes
+                ):
+                    merged_storage_map[
+                        user_operation.sender_address
+                    ] = root_hash_result["result"]["storageHash"]
+            return call_data, call_gas_limit, merged_storage_map, auth_list
         # the bundler performs the third validation of the entire UserOperations
         # bundle. If any of the UserOperations fail validation,
         # the bundler drops them, and updates their reputation,
         # as described in ERC-7562 in detail.
-        if "error" in result:
-            if "message" in result["error"]:
-                if (
-                    "current block number is not higher than minBlock" in
-                    result["error"]["message"]
-                ):
-                    # reattempt to estimate gas if current node is lagging
-                    # as we can't assume that the bundler is connected to the same
-                    # node during validation and bundle gas estimation
-                    logging.debug(
-                        "reattempt to estimate gas because of a lagging node."
-                        f"current node latest block is less than: {highest_verified_at_block}."
-                    )
-                    return await self.create_bundle_calldata_and_estimate_gas(
-                        user_operations,
-                        bundler,
-                        entrypoint,
-                        recursion_depth
-                    )
+        elif "error" in result:
+            if "message" in result["error"] and (
+                "current block number is not higher than minBlock" in
+                result["error"]["message"]
+            ):
+                # reattempt to estimate gas if current node is lagging
+                # as we can't assume that the bundler is connected to the same
+                # node during validation and bundle gas estimation
+                logging.debug(
+                    "reattempt to estimate gas because of a lagging node."
+                    f"current node latest block is less than: {highest_verified_at_block}."
+                )
+                return await self.create_bundle_calldata_and_estimate_gas(
+                    user_operations,
+                    bundler,
+                    entrypoint,
+                    recursion_depth
+                )
 
             if "data" in result["error"]:
                 error_data = result["error"]["data"]
@@ -693,143 +732,22 @@ class BundlerManager:
                     return None, None, None, []
 
                 user_operation = user_operations[operation_index]
-
                 if user_operation.number_of_add_to_mempool_attempts > 1:
                     logging.warning(
-                        "Dropping user operation that was already executed from bundle."
+                        "Not banning a useroperation that failed third validation "
+                        "after the first bundle attempt."
                         f"useroperation: {user_operation.user_operation_hash}"
                     )
-                    del user_operations[operation_index]
-
-                    if len(user_operations) > 0:
-                        return await self.create_bundle_calldata_and_estimate_gas(
-                            user_operations,
-                            bundler,
-                            entrypoint,
-                            recursion_depth
-                        )
-                    else:
-                        logging.info("No useroperations to bundle")
-                        return None, None, None, []
-
-                # check if userop was already executed if userop caused bundle
-                # gas estimation to fail
-                if user_operation.validated_at_block_hex is not None:
-                    earliest_block = user_operation.validated_at_block_hex
                 else:
-                    raise ValueError(
-                        "useroperation without validated_at_block_hex")
-
-                logs_res = await get_user_operation_logs_for_block_range(
-                    # not using the ethereum_node_eth_get_logs_url as the
-                    # block range can't be large and to role out the possibility
-                    # that the logs node is slightly behind/out of sync
-                    self.ethereum_node_url,
-                    user_operation.user_operation_hash,
-                    entrypoint,
-                    earliest_block,
-                    "latest"
-                )
-
-                # if there is a UserOperationEvent for the user_operation_hash,
-                # that means userop was already executed
-                if logs_res is not None:
-                    logging.warning(
-                        "Dropping user operation that was already executed from bundle."
-                        f"useroperation: {user_operation.user_operation_hash}"
-                    )
-                    del user_operations[operation_index]
-
-                    if len(user_operations) > 0:
-                        return await self.create_bundle_calldata_and_estimate_gas(
-                            user_operations,
-                            bundler,
-                            entrypoint,
-                            recursion_depth
-                        )
-                    else:
-                        logging.info("No useroperations to bundle")
-                        return None, None, None, []
-
-                entity_to_ban = None
-                if "AA3" in reason:
-                    (
-                        _, _, stake, unstake_delay_sec, _
-                    ) = await get_deposit_info(
-                        user_operation.sender_address,
-                        entrypoint,
-                        self.ethereum_node_url
-                    )
-                    is_sender_staked = mempool_manager.is_staked(
-                        stake, unstake_delay_sec)
-                    if is_sender_staked or user_operation.paymaster_address_lowercase is None:
-                        entity_to_ban = user_operation.sender_address
-                        reason_to_ban = (
-                            "Ban the sender if AA3 and "
-                            "(sender is staked or paymaster is None)"
-                        )
-                    else:
-                        entity_to_ban = user_operation.paymaster_address_lowercase
-                        reason_to_ban = (
-                            "Ban the paymaster if AA3 and "
-                            "(sender is not staked and paymaster is not None)"
-                        )
-                elif "AA2" in reason:
-                    if user_operation.factory_address_lowercase is not None:
-                        (
-                            _, _, stake, unstake_delay_sec, _
-                        ) = await get_deposit_info(
-                            user_operation.factory_address_lowercase,
-                            entrypoint,
-                            self.ethereum_node_url
-                        )
-
-                        is_factory_staked = mempool_manager.is_staked(
-                            stake, unstake_delay_sec)
-                        if is_factory_staked:
-                            entity_to_ban = user_operation.factory_address_lowercase
-                            reason_to_ban = (
-                                "Ban the factory if AA2 and "
-                                "factory is staked"
-                            )
-                        else:
-                            entity_to_ban = user_operation.sender_address
-                            reason_to_ban = (
-                                "Ban the sender if AA2 and  "
-                                "factory is not staked"
-                            )
-
-                    else:
-                        entity_to_ban = user_operation.sender_address
-                        reason_to_ban = (
-                            "Ban the sender if AA2 and "
-                            "factory is None"
-                        )
-                elif (
-                    "AA1" in reason
-                    and user_operation.factory_address_lowercase is not None
-                ):
-                    entity_to_ban = user_operation.factory_address_lowercase
-                    reason_to_ban = "Ban the factory if AA1"
-                else:
-                    logging.error(
-                        "FailedOp during bundle gas estimation with unexpected error."
-                        f"with error: {reason}"
-                    )
-                    reason_to_ban = None
-                if entity_to_ban is not None:
-                    logging.debug(
-                        f"banning {entity_to_ban} that caused bundle crash - "
-                        f"reason to ban:{reason_to_ban} - error: {reason}"
-                    )
-                    mempool_manager.reputation_manager.ban_entity(entity_to_ban)
+                    self.user_operations_to_ban[
+                        user_operation.user_operation_hash
+                    ] = (user_operation, reason, entrypoint)
 
                 logging.warning(
-                    "Dropping user operation that caused bundle crash - "
-                    f"error: {reason}"
+                    "Dropping user operation that failed third validation."
+                    f"useroperation: {user_operation.user_operation_hash}"
                 )
                 del user_operations[operation_index]
-
                 if len(user_operations) > 0:
                     return await self.create_bundle_calldata_and_estimate_gas(
                         user_operations,
@@ -840,37 +758,130 @@ class BundlerManager:
                 else:
                     logging.info("No useroperations to bundle")
                     return None, None, None, []
+
+        logging.error(
+            "Unexpected error during gas estimation for bundle." +
+            "Dropping all user operations."
+            + str(result["error"])
+        )
+        return None, None, None, []
+
+    async def handle_useroperation_banning(
+        self,
+        user_operation: UserOperationV6 | UserOperationV7V8,
+        reason: str,
+        entrypoint: Address
+    ):
+        if entrypoint == self.local_mempool_manager_v8.entrypoint:
+            mempool_manager = self.local_mempool_manager_v8
+        elif entrypoint == self.local_mempool_manager_v7.entrypoint:
+            mempool_manager = self.local_mempool_manager_v7
+        else:
+            mempool_manager = self.local_mempool_manager_v6
+
+        # check if userop was already executed if userop caused bundle
+        # gas estimation to fail
+        if user_operation.validated_at_block_hex is not None:
+            earliest_block = user_operation.validated_at_block_hex
+        else:
+            raise ValueError(
+                "useroperation without validated_at_block_hex")
+
+        logs_res = await get_user_operation_logs_for_block_range(
+            # not using the ethereum_node_eth_get_logs_url as the
+            # block range can't be large and to role out the possibility
+            # that the logs node is slightly behind/out of sync
+            self.ethereum_node_url,
+            user_operation.user_operation_hash,
+            entrypoint,
+            earliest_block,
+            "latest"
+        )
+
+        # if there is a UserOperationEvent for the user_operation_hash,
+        # that means userop was already executed
+        if logs_res is not None:
+            logging.warning(
+                "Not banning a useroperation that was already included."
+                f"useroperation: {user_operation.user_operation_hash}"
+            )
+            return
+        if entrypoint == self.local_mempool_manager_v8.entrypoint:
+            mempool_manager = self.local_mempool_manager_v8
+        elif entrypoint == self.local_mempool_manager_v7.entrypoint:
+            mempool_manager = self.local_mempool_manager_v7
+        else:
+            assert self.local_mempool_manager_v6 is not None
+            mempool_manager = self.local_mempool_manager_v6
+        entity_to_ban = None
+        if "AA3" in reason:
+            (
+                _, _, stake, unstake_delay_sec, _
+            ) = await get_deposit_info(
+                user_operation.sender_address,
+                entrypoint,
+                self.ethereum_node_url
+            )
+            is_sender_staked = mempool_manager.is_staked(
+                stake, unstake_delay_sec)
+            if is_sender_staked or user_operation.paymaster_address_lowercase is None:
+                entity_to_ban = user_operation.sender_address
+                reason_to_ban = (
+                    "Ban the sender if AA3 and "
+                    "(sender is staked or paymaster is None)"
+                )
             else:
-                logging.error(
-                    "Unexpected error during gas estimation for bundle." +
-                    "Dropping all user operations."
-                    + str(result["error"])
+                entity_to_ban = user_operation.paymaster_address_lowercase
+                reason_to_ban = (
+                    "Ban the paymaster if AA3 and "
+                    "(sender is not staked and paymaster is not None)"
                 )
-                return None, None, None, []
+        elif "AA2" in reason:
+            if user_operation.factory_address_lowercase is not None:
+                (
+                    _, _, stake, unstake_delay_sec, _
+                ) = await get_deposit_info(
+                    user_operation.factory_address_lowercase,
+                    entrypoint,
+                    self.ethereum_node_url
+                )
 
-        call_gas_limit = result["result"]
-
-        merged_storage_map = None
-        if self.conditional_rpc is not None:
-            senders_root_hashs_operations = list()
-            merged_storage_map = dict()
-            for user_operation in user_operations:
-                if user_operation.storage_map is not None:
-                    merged_storage_map |= user_operation.storage_map
-                senders_root_hashs_operations.append(
-                    send_rpc_request_to_eth_client(
-                        self.ethereum_node_url,
-                        "eth_getProof",
-                        [user_operation.sender_address, [], "latest"],
-                        None, "result"
+                is_factory_staked = mempool_manager.is_staked(
+                    stake, unstake_delay_sec)
+                if is_factory_staked:
+                    entity_to_ban = user_operation.factory_address_lowercase
+                    reason_to_ban = (
+                        "Ban the factory if AA2 and "
+                        "factory is staked"
                     )
-                )
-            senders_root_hashes = await asyncio.gather(
-                    *senders_root_hashs_operations)
+                else:
+                    entity_to_ban = user_operation.sender_address
+                    reason_to_ban = (
+                        "Ban the sender if AA2 and  "
+                        "factory is not staked"
+                    )
 
-            for user_operation, root_hash_result in zip(
-                user_operations, senders_root_hashes
-            ):
-                merged_storage_map[
-                    user_operation.sender_address] = root_hash_result["result"]["storageHash"]
-        return call_data, call_gas_limit, merged_storage_map, auth_list 
+            else:
+                entity_to_ban = user_operation.sender_address
+                reason_to_ban = (
+                    "Ban the sender if AA2 and "
+                    "factory is None"
+                )
+        elif (
+            "AA1" in reason
+            and user_operation.factory_address_lowercase is not None
+        ):
+            entity_to_ban = user_operation.factory_address_lowercase
+            reason_to_ban = "Ban the factory if AA1"
+        else:
+            logging.error(
+                "FailedOp during bundle gas estimation with unexpected error."
+                f"with error: {reason}"
+            )
+            reason_to_ban = None
+        if entity_to_ban is not None:
+            logging.debug(
+                f"banning {entity_to_ban} that caused bundle crash - "
+                f"reason to ban:{reason_to_ban} - error: {reason}"
+            )
+            mempool_manager.reputation_manager.ban_entity(entity_to_ban)
