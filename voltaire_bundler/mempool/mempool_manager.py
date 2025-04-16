@@ -453,7 +453,7 @@ class LocalMempoolManager():
         except ValidationException as err:
             if (
                 user_operation.paymaster_address_lowercase is not None and
-                "AA21" not in err.message  # not the paymaster
+                "AA3" not in err.message  # not the paymaster
             ):
                 # EREP-015: special case: if it is account/factory failure
                 # then decreases paymaster's opsSeen
