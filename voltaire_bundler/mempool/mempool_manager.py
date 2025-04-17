@@ -778,10 +778,10 @@ class LocalMempoolManager():
             ]
 
             result: Any = await send_rpc_request_to_eth_client(
-                self.ethereum_node_url, "eth_call", params
+                self.ethereum_node_url, "eth_call", params, None, "result"
             )
             if "result" in result:
-                balance = decode(["uint256"], bytes.fromhex(result["result"][2:]))[0]
+                balance = int(result["result"], 16) if result["result"] != "0x" else 0
                 self.paymaster_deposits_cache[paymaster] = balance
                 return balance
             else:
