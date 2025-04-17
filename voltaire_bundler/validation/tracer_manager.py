@@ -38,10 +38,6 @@ class TracerManager():
         raw_tracer_result: Any,
     ) -> tuple[list[str], dict[str, dict[str, str]]]:
         entrypoint_lowercase = Address(entrypoint.lower())
-
-        # [OP-052], [OP-053], [OP-054], [OP-061]
-        validate_call_stack(raw_tracer_result["calls"], entrypoint_lowercase)
-
         sender_lowercase = Address(user_operation.sender_address.lower())
         factory_lowercase = None
         paymaster_lowercase = None
@@ -63,6 +59,16 @@ class TracerManager():
                 sender_creator_lowercase = "0xefc2c1444ebcc4db75e7613d20c6a62ff67a167c"
             else:
                 sender_creator_lowercase = "0x449ed7c3e6fee6a97311d4b55475df59c44add33"
+
+        # [OP-052], [OP-053], [OP-054], [OP-061]
+        validate_call_stack(
+            raw_tracer_result["calls"],
+            entrypoint_lowercase,
+            sender_lowercase,
+            factory_lowercase,
+            paymaster_lowercase,
+            is_factory_staked
+        )
 
         (
             sender_data,
@@ -139,37 +145,116 @@ class TracerManager():
         return result["error"]["data"]
 
 
-def validate_call_stack(calls: Any, entrypoint_lowecase: Address) -> None:
+def validate_call_stack(
+    calls: Any,
+    entrypoint_lowecase: Address,
+    sender_address_lowercase: Address,
+    factory_address_lowercase: Address | None,
+    paymaster_address_lowercase: Address | None,
+    is_factory_staked: bool | None
+) -> None:
+    create2_count = 0
+    called_from_account = []
+    called_from_factory = []
+    called_from_paymaster = []
+
     for call in calls:
-        to = call.get("to")
-        From = call.get("from")
-        method = call.get("method")
-        value = call.get("value")
+        call_to = call.get("to")
+        call_from = call.get("from")
+        call_method = call.get("method")
+        call_value = call.get("value")
+        call_type = call.get("type")
 
         # [OP-052], [OP-053], [OP-054]
         if (
-            to == entrypoint_lowecase and
-            From != entrypoint_lowecase and
+            call_to == entrypoint_lowecase and
+            call_from != entrypoint_lowecase and
             (
-                method != "0x" and
-                method != "0xb760faf9"  # depositTo
+                call_method != "0x" and
+                call_method != "0xb760faf9"  # depositTo
             )
         ):
             raise ValidationException(
                 ValidationExceptionCode.OpcodeValidation,
-                f"illegal call into EntryPoint during validation to method: {method}"
+                f"illegal call into EntryPoint during validation to method: {call_method}"
             )
 
         # [OP-061]
         if (
-            value is not None and
-            int(value) > 0 and
-            to != entrypoint_lowecase
+            call_value is not None and
+            int(call_value) > 0 and
+            call_to != entrypoint_lowecase
         ):
             raise ValidationException(
                 ValidationExceptionCode.OpcodeValidation,
                 "May not may CALL with value"
             )
+        is_nested = False
+        if call_from == sender_address_lowercase:
+            opcode_source = 'account'
+            called_from_account.append(call_to)
+        elif call_from in called_from_account:
+            opcode_source = 'account'
+            is_nested = True
+        elif call_from == factory_address_lowercase:
+            opcode_source = 'factory'
+            called_from_factory.append(call_to)
+        elif call_from in called_from_factory:
+            opcode_source = 'factory'
+            is_nested = True
+        elif call_from == paymaster_address_lowercase or call_from in called_from_paymaster:
+            opcode_source = 'paymaster'
+            called_from_paymaster.append(call_to)
+        else:
+            opcode_source = call_from
+
+        if "CREATE" == call_type:
+            is_banned = True
+            if (
+                not is_nested and
+                (opcode_source == 'account' or opcode_source == 'factory') and
+                is_factory_staked is not None  # check if factory by checking if None
+            ):
+                # [OP-032] If there is a `factory` (even unstaked),
+                # the `sender` contract is allowed to use `CREATE` opcode
+                if opcode_source == 'account':
+                    is_banned = False
+                # [EREP-060] If the factory is staked, either the factory
+                # itself or the sender may use the CREATE2 and CREATE opcode
+                if (
+                    is_factory_staked and  # check if factory by checking if None
+                    (opcode_source == 'account' or opcode_source == 'factory')
+                ):
+                    is_banned = False
+            if is_banned:
+                raise ValidationException(
+                    ValidationExceptionCode.OpcodeValidation,
+                    opcode_source + " uses banned opcode: " + "CREATE",
+                )
+        if "CREATE2" in call_type:
+            create2_count += 1
+            is_banned = True
+            # check if factory by checking if None
+            if is_factory_staked is not None and not is_nested:
+                # [OP-031] `CREATE2` is allowed exactly once in the deployment
+                # phase and must deploy code for the "sender" address.
+                if (
+                    create2_count == 1 and
+                    opcode_source == 'factory'
+                ):
+                    is_banned = False
+                # [EREP-060] If the factory is staked, either the factory
+                # itself or the sender may use the CREATE2 and CREATE opcode
+                if (
+                    is_factory_staked and  # check if factory by checking if None
+                    (opcode_source == 'account' or opcode_source == 'factory')
+                ):
+                    is_banned = False
+            if is_banned:
+                raise ValidationException(
+                    ValidationExceptionCode.OpcodeValidation,
+                    opcode_source + " uses banned opcode: " + "CREATE2",
+                )
 
 
 def validate_entity_banned_opcodes(
@@ -205,28 +290,6 @@ def validate_entity_banned_opcodes(
             ValidationExceptionCode.OpcodeValidation,
             opcode_source + " uses banned opcode: " + opcodes_str,
         )
-    if "CREATE" in opcodes and (
-        (opcode_source != 'account' and opcode_source != 'factory') or
-        (
-            opcode_source == 'account' and
-            is_factory_staked is None  # check if factory by checking if None
-        )
-    ):
-        raise ValidationException(
-            ValidationExceptionCode.OpcodeValidation,
-            opcode_source + " uses banned opcode: " + "CREATE",
-        )
-
-    if "CREATE2" in opcodes and (
-        (opcodes["CREATE2"] > 1) or
-        (opcode_source != 'account' and opcode_source != 'factory') or
-        (opcode_source == 'account' and not is_factory_staked)
-    ):
-        raise ValidationException(
-            ValidationExceptionCode.OpcodeValidation,
-            opcode_source + " uses banned opcode: " + "CREATE2",
-        )
-
     # opcodes allowed in staked entities [OP-080]
     if "BALANCE" in opcodes and not is_entity_staked:
         raise ValidationException(
