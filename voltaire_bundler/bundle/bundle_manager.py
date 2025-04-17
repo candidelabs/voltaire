@@ -772,6 +772,13 @@ class BundlerManager:
         reason: str,
         entrypoint: Address
     ):
+        if "AA25 invalid account nonce" == reason:
+            logging.warning(
+                "Not banning a useroperation for invalid nonce."
+                f"useroperation: {user_operation.user_operation_hash}"
+            )
+            return
+
         if entrypoint == self.local_mempool_manager_v8.entrypoint:
             mempool_manager = self.local_mempool_manager_v8
         elif entrypoint == self.local_mempool_manager_v7.entrypoint:
