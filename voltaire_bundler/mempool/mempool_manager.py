@@ -13,7 +13,7 @@ from voltaire_bundler.bundle.exceptions import \
 from voltaire_bundler.mempool.reputation_manager import \
         ReputationManager, ReputationStatus
 from voltaire_bundler.user_operation.models import StakeInfo
-from voltaire_bundler.user_operation.user_operation_handler import UserOperationHandler
+from voltaire_bundler.user_operation.user_operation_handler import UserOperationHandler, get_deposit_info
 from voltaire_bundler.event_bus_manager.endpoint import RequestEvent
 from voltaire_bundler.validation.validation_manager import ValidationManager
 from voltaire_bundler.typing import Address, MempoolId
@@ -453,14 +453,27 @@ class LocalMempoolManager():
             )
             return True, associated_addresses, storage_map
         except ValidationException as err:
-            if (
-                user_operation.paymaster_address_lowercase is not None and
-                "AA3" not in err.message  # not the paymaster
-            ):
-                # EREP-015: special case: if it is account/factory failure
-                # then decreases paymaster's opsSeen
-                self.reputation_manager.update_seen_status(
-                    user_operation.paymaster_address_lowercase, -1)
+            if user_operation.paymaster_address_lowercase is not None:
+                if "AA3" in err.message:  # caused by the paymaster
+                    # staked account should be blamed instead of paymaster
+                    (
+                        _, _, stake, unstake_delay_sec, _
+                    ) = await get_deposit_info(
+                        user_operation.sender_address,
+                        self.entrypoint,
+                        self.ethereum_node_url
+                    )
+                    is_sender_staked = self.is_staked(
+                        stake, unstake_delay_sec)
+                    if is_sender_staked:
+                        self.reputation_manager.update_seen_status(
+                            user_operation.paymaster_address_lowercase, -1)
+                else:
+                    # EREP-015: special case: if it is account/factory failure
+                    # then decreases paymaster's opsSeen
+                    self.reputation_manager.update_seen_status(
+                        user_operation.paymaster_address_lowercase, -1)
+
             logging.debug(
                 "user operation dropped because it failed second validation: "
                 + str(err.message) +
