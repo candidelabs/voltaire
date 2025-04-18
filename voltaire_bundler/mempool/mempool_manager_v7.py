@@ -26,7 +26,6 @@ class LocalMempoolManagerV7(LocalMempoolManager):
         is_legacy_mode: bool,
         ethereum_node_debug_trace_call_url: str,
         reputation_whitelist: list[str],
-        reputation_blacklist: list[str]
         reputation_blacklist: list[str],
         min_stake: int,
         min_unstake_delay: int

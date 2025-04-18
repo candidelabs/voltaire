@@ -72,7 +72,7 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             init_data.logs_number_of_ranges,
             init_data.reputation_whitelist,
             init_data.reputation_blacklist,
-            init_data.is_eip7702
+            init_data.is_eip7702,
             init_data.min_stake,
             init_data.min_unstake_delay
         )

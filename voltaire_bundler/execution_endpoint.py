@@ -77,7 +77,7 @@ class ExecutionEndpoint(Endpoint):
         logs_number_of_ranges: int,
         reputation_whitelist: list[str],
         reputation_blacklist: list[str],
-        is_eip7702: bool
+        is_eip7702: bool,
         min_stake: int,
         min_unstake_delay: int
     ):
@@ -124,7 +124,6 @@ class ExecutionEndpoint(Endpoint):
             is_legacy_mode,
             ethereum_node_debug_trace_call_url,
             reputation_whitelist,
-            reputation_blacklist
             reputation_blacklist,
             min_stake,
             min_unstake_delay
@@ -158,7 +157,6 @@ class ExecutionEndpoint(Endpoint):
                 is_legacy_mode,
                 ethereum_node_debug_trace_call_url,
                 reputation_whitelist,
-                reputation_blacklist
                 reputation_blacklist,
                 min_stake,
                 min_unstake_delay

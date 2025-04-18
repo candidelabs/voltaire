@@ -789,7 +789,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.health_check_interval,
         args.reputation_whitelist,
         args.reputation_blacklist,
-        args.eip7702
+        args.eip7702,
         args.p2p_canonical_mempool_id_07,
         args.p2p_canonical_mempool_id_06,
         args.min_stake,
