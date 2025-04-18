@@ -9,9 +9,9 @@ DEFAULT_MEMPOOL_INFO = {
         11155111: "QmdDwVFoEEcgv5qnaTB8ncnXGMnqrhnA5nYpRr4ouWe4AT",  # sepolia
         421614: "QmVwhF77aVNzRUkMJNLDkeF9BtQMHLnfDY5ePpZ81uKLzA",  # arbitrum sepolia
     },
-    #dummy v0.07 mempool id's for now
+    #v0.07 mempool id's for now
     "0x0000000071727De22E5E9d8BAf0edAc6f37da032": {
-        1337: "Qmf7P3CuhzSbpJa8LqXPwRzfPqsvoQ6RG7aXvthYTzGxb1",  # dev
+        1337: "QmcBcc4nxdGiKyM6RC7fZAUtsYNaAYqfzf9wfNxYmdT9Fc",  # dev
         1: "Qma9Fv7qSahePTd5ACCFG8Jsd3qJqtFUqGmmGKoVqriajp",  # ethereum
         5: "QmTmj4cizhWpEFCCqk5dP67yws7R2PPgCtb2bd2RgVPCb1",  # goerli
         10: "QmcBcc4nxdGiKyM6RC7fZAUtsYNaAYqfzf9wfNxYmdT9Fc",  # optimism
