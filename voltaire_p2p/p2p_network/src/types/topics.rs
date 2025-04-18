@@ -7,7 +7,7 @@ use strum::AsRefStr;
 // For example /eth2/beacon_block/ssz
 pub const TOPIC_PREFIX: &str = "account_abstraction";
 pub const SSZ_SNAPPY_ENCODING_POSTFIX: &str = "ssz_snappy";
-pub const USER_OPS_WITH_ENTRY_POINT: &str = "user_operations";
+pub const USER_OPS_WITH_ENTRY_POINT: &str = "user_operation";
 
 pub const BASE_CORE_TOPICS: [GossipKind; 2] = [
     GossipKind::VerifiedUserOperationV07,
