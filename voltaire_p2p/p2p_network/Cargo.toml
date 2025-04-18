@@ -7,7 +7,6 @@ edition = "2021"
 [dependencies]
 discv5 = { version = "0.3.1", features = ["libp2p"] }
 unsigned-varint = { version = "0.6.0", features = ["codec"] }
-types = { path =  "./types" }
 ssz_types = "0.5.3"
 serde = { version = "1.0.116", features = ["derive"] }
 serde_derive = "1.0.116"

@@ -1,22 +1,19 @@
 //! Helper functions and an extension trait for Ethereum 2 ENRs.
 
-pub use discv5::enr::{self, CombinedKey, EnrBuilder};
-use types::eth_spec::EthSpec;
+pub use discv5::enr::{CombinedKey, EnrBuilder};
 
 use super::enr_ext::CombinedKeyExt;
 use super::ENR_FILENAME;
-use crate::types::{Enr, EnrSyncCommitteeBitfield, MempoolNetsBitfield};
+use crate::types::Enr;
 use crate::NetworkConfig;
 use discv5::enr::EnrKey;
 use libp2p::identity::Keypair;
 use slog::{debug, warn};
-use ssz::{Decode, Encode};
-use ssz_types::BitVector;
+use ssz::Encode;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
 use std::str::FromStr;
-use types::{EnrForkId};
 
 use super::enr_ext::{EnrExt, QUIC6_ENR_KEY, QUIC_ENR_KEY};
 
@@ -83,7 +80,7 @@ pub fn use_or_load_enr(
 ///
 /// If an ENR exists, with the same NodeId, this function checks to see if the loaded ENR from
 /// disk is suitable to use, otherwise we increment our newly generated ENR's sequence number.
-pub fn build_or_load_enr<T: EthSpec>(
+pub fn build_or_load_enr(
     local_key: Keypair,
     config: &NetworkConfig,
     // enr_fork_id: &EnrForkId,
@@ -93,7 +90,7 @@ pub fn build_or_load_enr<T: EthSpec>(
     // Note: Discovery should update the ENR record's IP to the external IP as seen by the
     // majority of our peers, if the CLI doesn't expressly forbid it.
     let enr_key = CombinedKey::from_libp2p(local_key)?;
-    let mut local_enr = build_enr::<T>(&enr_key, config/*, enr_fork_id*/)?;
+    let mut local_enr = build_enr(&enr_key, config)?;
 
     use_or_load_enr(&enr_key, &mut local_enr, config, log)?;
     Ok(local_enr)
@@ -163,7 +160,7 @@ pub fn create_enr_builder_from_config<T: EnrKey>(
 }
 
 /// Builds a voltaire ENR given a `NetworkConfig`.
-pub fn build_enr<T: EthSpec>(
+pub fn build_enr(
     enr_key: &CombinedKey,
     config: &NetworkConfig,
     // enr_fork_id: &EnrForkId,

@@ -4,8 +4,6 @@ use crate::rpc::methods::ErrorType;
 use crate::rpc::{InboundRequest, OutboundRequest, RPCCodedResponse, RPCResponse};
 use libp2p::bytes::BufMut;
 use libp2p::bytes::BytesMut;
-use types::eth_spec::EthSpec;
-use std::marker::PhantomData;
 use tokio_util::codec::{Decoder, Encoder};
 // use types::EthSpec;
 
@@ -21,53 +19,45 @@ pub trait OutboundCodec<TItem>: Encoder<TItem> + Decoder {
 /* Global Inbound Codec */
 // This deals with Decoding RPC Requests from other peers and encoding our responses
 
-pub struct BaseInboundCodec<TCodec, TSpec>
+pub struct BaseInboundCodec<TCodec>
 where
     TCodec: Encoder<RPCCodedResponse> + Decoder,
-    TSpec: EthSpec,
 {
     /// Inner codec for handling various encodings
     inner: TCodec,
-    phantom: PhantomData<TSpec>,
 }
 
-impl<TCodec, TSpec> BaseInboundCodec<TCodec, TSpec>
+impl<TCodec> BaseInboundCodec<TCodec>
 where
     TCodec: Encoder<RPCCodedResponse> + Decoder,
-    TSpec: EthSpec,
 {
     pub fn new(codec: TCodec) -> Self {
         BaseInboundCodec {
             inner: codec,
-            phantom: PhantomData,
         }
     }
 }
 
 /* Global Outbound Codec */
 // This deals with Decoding RPC Responses from other peers and encoding our requests
-pub struct BaseOutboundCodec<TOutboundCodec, TSpec>
+pub struct BaseOutboundCodec<TOutboundCodec>
 where
-    TOutboundCodec: OutboundCodec<OutboundRequest<TSpec>>,
-    TSpec: EthSpec,
+    TOutboundCodec: OutboundCodec<OutboundRequest>,
 {
     /// Inner codec for handling various encodings.
     inner: TOutboundCodec,
     /// Keeps track of the current response code for a chunk.
     current_response_code: Option<u8>,
-    phantom: PhantomData<TSpec>,
 }
 
-impl<TOutboundCodec, TSpec> BaseOutboundCodec<TOutboundCodec, TSpec>
+impl<TOutboundCodec> BaseOutboundCodec<TOutboundCodec>
 where
-    TSpec: EthSpec,
-    TOutboundCodec: OutboundCodec<OutboundRequest<TSpec>>,
+    TOutboundCodec: OutboundCodec<OutboundRequest>,
 {
     pub fn new(codec: TOutboundCodec) -> Self {
         BaseOutboundCodec {
             inner: codec,
             current_response_code: None,
-            phantom: PhantomData,
         }
     }
 }
@@ -77,9 +67,8 @@ where
 /* Base Inbound Codec */
 
 // This Encodes RPC Responses sent to external peers
-impl<TCodec, TSpec> Encoder<RPCCodedResponse> for BaseInboundCodec<TCodec, TSpec>
+impl<TCodec> Encoder<RPCCodedResponse> for BaseInboundCodec<TCodec>
 where
-    TSpec: EthSpec,
     TCodec: Decoder + Encoder<RPCCodedResponse>,
 {
     type Error = <TCodec as Encoder<RPCCodedResponse>>::Error;
@@ -100,12 +89,11 @@ where
 }
 
 // This Decodes RPC Requests from external peers
-impl<TCodec, TSpec> Decoder for BaseInboundCodec<TCodec, TSpec>
+impl<TCodec> Decoder for BaseInboundCodec<TCodec>
 where
-    TSpec: EthSpec,
-    TCodec: Encoder<RPCCodedResponse> + Decoder<Item = InboundRequest<TSpec>>,
+    TCodec: Encoder<RPCCodedResponse> + Decoder<Item = InboundRequest>,
 {
-    type Item = InboundRequest<TSpec>;
+    type Item = InboundRequest;
     type Error = <TCodec as Decoder>::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -116,16 +104,15 @@ where
 /* Base Outbound Codec */
 
 // This Encodes RPC Requests sent to external peers
-impl<TCodec, TSpec> Encoder<OutboundRequest<TSpec>> for BaseOutboundCodec<TCodec, TSpec>
+impl<TCodec> Encoder<OutboundRequest> for BaseOutboundCodec<TCodec>
 where
-    TSpec: EthSpec,
-    TCodec: OutboundCodec<OutboundRequest<TSpec>> + Encoder<OutboundRequest<TSpec>>,
+    TCodec: OutboundCodec<OutboundRequest> + Encoder<OutboundRequest>,
 {
-    type Error = <TCodec as Encoder<OutboundRequest<TSpec>>>::Error;
+    type Error = <TCodec as Encoder<OutboundRequest>>::Error;
 
     fn encode(
         &mut self,
-        item: OutboundRequest<TSpec>,
+        item: OutboundRequest,
         dst: &mut BytesMut,
     ) -> Result<(), Self::Error> {
         self.inner.encode(item, dst)
@@ -133,10 +120,9 @@ where
 }
 
 // This decodes RPC Responses received from external peers
-impl<TCodec, TSpec> Decoder for BaseOutboundCodec<TCodec, TSpec>
+impl<TCodec> Decoder for BaseOutboundCodec<TCodec>
 where
-    TSpec: EthSpec,
-    TCodec: OutboundCodec<OutboundRequest<TSpec>, CodecErrorType = ErrorType>
+    TCodec: OutboundCodec<OutboundRequest, CodecErrorType = ErrorType>
         + Decoder<Item = RPCResponse>,
 {
     type Item = RPCCodedResponse;

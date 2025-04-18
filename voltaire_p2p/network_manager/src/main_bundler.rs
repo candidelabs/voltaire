@@ -1,6 +1,6 @@
 use std::{path::Path, fs};
 
-use p2p_voltaire_network::{types::VerifiedUserOperation, rpc::methods::{PooledUserOpHashesRequest, PooledUserOpsByHashRequest, PooledUserOpHashes, PooledUserOpsByHash}};
+use p2p_voltaire_network::{rpc::{methods::{PooledUserOpHashes, PooledUserOpHashesRequest, PooledUserOpsByHashRequest, PooledUserOpsByHashV06, PooledUserOpsByHashV07}, StatusMessage}, types::{VerifiedUserOperationV06, VerifiedUserOperationV07}};
 use tokio::{net::{UnixListener, UnixStream}, io::{AsyncWriteExt, Interest}};
 use serde::{Serialize, Deserialize};
 use slog::error;
@@ -16,9 +16,21 @@ pub static P2P_ENDPOINT_SOCKET_PATH: &'static str = "p2p_endpoint.ipc";
     Serialize,
     Deserialize,
 )]
-pub struct GossibMessageToReceiveFromMainBundler {
+pub struct GossibMessageToReceiveFromMainBundlerV07 {
     pub topics: Vec<String>,
-    pub verified_useroperation: VerifiedUserOperation,
+    pub verified_useroperation: VerifiedUserOperationV07,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+)]
+pub struct GossibMessageToReceiveFromMainBundlerV06 {
+    pub topics: Vec<String>,
+    pub verified_useroperation: VerifiedUserOperationV06,
 }
 
 #[derive(
@@ -56,7 +68,8 @@ pub struct PooledUserOpsByHashRequestFromBundler {
 )]
 #[serde(untagged)] 
 pub enum MessageTypeFromBundler  {
-    GossibMessageFromBundler(GossibMessageToReceiveFromMainBundler),
+    GossibMessageFromBundlerV07(GossibMessageToReceiveFromMainBundlerV07),
+    GossibMessageFromBundlerV06(GossibMessageToReceiveFromMainBundlerV06),
     PooledUserOpHashesRequestFromBundler(PooledUserOpHashesRequestFromBundler),
     PooledUserOpsByHashRequestFromBundler(PooledUserOpsByHashRequestFromBundler),
 }
@@ -112,10 +125,23 @@ async fn listen_to_stream(result_length:usize, stream:&UnixStream, log: &slog::L
     Serialize,
     Deserialize,
 )]
-pub struct GossibMessageToSendToMainBundler {
+pub struct GossibMessageToSendToMainBundlerV07 {
     pub peer_id: String,
     pub topic: String,
-    pub verified_useroperation: VerifiedUserOperation,
+    pub verified_useroperation: VerifiedUserOperationV07,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+)]
+pub struct GossibMessageToSendToMainBundlerV06 {
+    pub peer_id: String,
+    pub topic: String,
+    pub verified_useroperation: VerifiedUserOperationV06,
 }
 
 #[derive(
@@ -133,17 +159,32 @@ pub struct PooledUserOpHashesAndPeerId {
 #[derive(
     Debug,
     Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+)]
+pub struct StatusMessageAndPeerId {
+    pub peer_id: String,
+    pub status_message: StatusMessage,
+}
+
+#[derive(
+    Debug,
+    Clone,
     Serialize,
     Deserialize,
 )]
 #[serde(untagged)] 
 pub enum MessageTypeToBundler  {
-    GossibMessageToBundler(GossibMessageToSendToMainBundler),
+    GossibMessageToBundlerV07(GossibMessageToSendToMainBundlerV07),
+    GossibMessageToBundlerV06(GossibMessageToSendToMainBundlerV06),
     PooledUserOpHashesRequestToBundler(PooledUserOpHashesRequest),
     PooledUserOpsByHashRequestToBundler(PooledUserOpsByHashRequest),
     PooledUserOpHashesResponseToBundler(PooledUserOpHashesAndPeerId),
-    PooledUserOpsByHashResponseToBundler(PooledUserOpsByHash),
-    Status()
+    PooledUserOpsByHashResponseToBundlerV07(PooledUserOpsByHashV07),
+    PooledUserOpsByHashResponseToBundlerV06(PooledUserOpsByHashV06),
+    StatusToBundler(),
+    StatusResponseToBundler(StatusMessageAndPeerId)
 }
 
 
@@ -158,7 +199,7 @@ pub struct BundlerGossibRequest {
     pub request_arguments:MessageTypeToBundler,
 }
 
-pub async fn broadcast_to_main_bundler(message_to_send:BundlerGossibRequest,log: &slog::Logger) {//-> Result<String,serde_pickle::Error>{
+pub async fn broadcast_to_main_bundler(message_to_send:BundlerGossibRequest,_log: &slog::Logger) {//-> Result<String,serde_pickle::Error>{
     let socket = Path::new(BUNDLER_ENDPOINT_SOCKET_PATH);
     let mut stream = match UnixStream::connect(&socket).await {
         Err(_) => panic!("server is not running"),

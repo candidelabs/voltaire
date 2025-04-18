@@ -4,7 +4,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use crate::types::GossipKind;
 use crate::GossipTopic;
 
 use tokio_util::time::delay_queue::{DelayQueue, Key};

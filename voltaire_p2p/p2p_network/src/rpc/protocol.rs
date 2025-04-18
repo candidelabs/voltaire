@@ -8,7 +8,6 @@ use futures::prelude::{AsyncRead, AsyncWrite};
 use futures::{FutureExt, StreamExt};
 use libp2p::core::{InboundUpgrade, UpgradeInfo};
 use ssz::Encode;
-use types::eth_spec::EthSpec;
 use std::io;
 use std::marker::PhantomData;
 use std::time::Duration;
@@ -54,9 +53,13 @@ pub enum Protocol {
     #[strum(serialize = "pooled_user_op_hashes")]
     PooledUserOpHashes,
 
-    /// The `PooledUserOpsByHash` protocol name.
-    #[strum(serialize = "pooled_user_ops_by_hash")]
-    PooledUserOpsByHash,
+    /// The `PooledUserOpsByHashV07` protocol name.
+    #[strum(serialize = "pooled_user_ops_by_hashV07")]
+    PooledUserOpsByHashV07,
+
+    /// The `PooledUserOpsByHashV06` protocol name.
+    #[strum(serialize = "pooled_user_ops_by_hashV06")]
+    PooledUserOpsByHashV06,
 }
 
 /// RPC Encondings supported.
@@ -73,7 +76,8 @@ pub enum SupportedProtocol {
     PingV1,
     MetaDataV1,
     PooledUserOpHashesV1,
-    PooledUserOpsByHashV1,
+    PooledUserOpsByHashV07,
+    PooledUserOpsByHashV06,
 }
 
 impl SupportedProtocol {
@@ -84,7 +88,8 @@ impl SupportedProtocol {
             SupportedProtocol::PingV1 => "1",
             SupportedProtocol::MetaDataV1 => "1",
             SupportedProtocol::PooledUserOpHashesV1 => "1",
-            SupportedProtocol::PooledUserOpsByHashV1 => "1",
+            SupportedProtocol::PooledUserOpsByHashV07 => "1",
+            SupportedProtocol::PooledUserOpsByHashV06 => "1",
         }
     }
 
@@ -95,7 +100,8 @@ impl SupportedProtocol {
             SupportedProtocol::PingV1 => Protocol::Ping,
             SupportedProtocol::MetaDataV1 => Protocol::MetaData,
             SupportedProtocol::PooledUserOpHashesV1 => Protocol::PooledUserOpHashes,
-            SupportedProtocol::PooledUserOpsByHashV1 => Protocol::PooledUserOpsByHash,
+            SupportedProtocol::PooledUserOpsByHashV07 => Protocol::PooledUserOpsByHashV07,
+            SupportedProtocol::PooledUserOpsByHashV06 => Protocol::PooledUserOpsByHashV06,
         }
     }
 
@@ -106,7 +112,8 @@ impl SupportedProtocol {
             ProtocolId::new(Self::PingV1, Encoding::SSZSnappy),
             ProtocolId::new(Self::MetaDataV1, Encoding::SSZSnappy),
             ProtocolId::new(Self::PooledUserOpHashesV1, Encoding::SSZSnappy),
-            ProtocolId::new(Self::PooledUserOpsByHashV1, Encoding::SSZSnappy),
+            ProtocolId::new(Self::PooledUserOpsByHashV07, Encoding::SSZSnappy),
+            ProtocolId::new(Self::PooledUserOpsByHashV06, Encoding::SSZSnappy),
         ]
     }
 }
@@ -121,15 +128,14 @@ impl std::fmt::Display for Encoding {
 }
 
 #[derive(Debug, Clone)]
-pub struct RPCProtocol<TSpec: EthSpec> {
+pub struct RPCProtocol {
     // pub fork_context: Arc<ForkContext>,
     pub max_rpc_size: usize,
     // pub enable_light_client_server: bool,
-    pub phantom: PhantomData<TSpec>,
     pub ttfb_timeout: Duration,
 }
 
-impl<TSpec: EthSpec> UpgradeInfo for RPCProtocol<TSpec> {
+impl UpgradeInfo for RPCProtocol {
     type Info = ProtocolId;
     type InfoIter = Vec<Self::Info>;
 
@@ -161,7 +167,6 @@ impl RpcLimits {
     /// Returns true if the given length is greater than `max_rpc_size` or out of
     /// bounds for the given ssz type, returns false otherwise.
     pub fn is_out_of_bounds(&self, length: usize, max_rpc_size: usize) -> bool {
-        // println!("self max : {} self min {}", self.max, self.min);
         length > std::cmp::min(self.max, max_rpc_size) || length < self.min
     }
 }
@@ -206,7 +211,11 @@ impl ProtocolId {
                 0,
                 10485761048576,
             ),
-            Protocol::PooledUserOpsByHash =>  RpcLimits::new(
+            Protocol::PooledUserOpsByHashV07 =>  RpcLimits::new(
+                0,
+                10485761048576,
+            ),
+            Protocol::PooledUserOpsByHashV06 =>  RpcLimits::new(
                 0,
                 10485761048576,
             ), // Metadata requests are empty
@@ -214,7 +223,7 @@ impl ProtocolId {
     }
 
     /// Returns min and max size for messages of given protocol id responses.
-    pub fn rpc_response_limits<T: EthSpec>(&self, /*fork_context: &ForkContext*/) -> RpcLimits {
+    pub fn rpc_response_limits(&self, /*fork_context: &ForkContext*/) -> RpcLimits {
         match self.versioned_protocol.protocol() {
             Protocol::Status => RpcLimits::new(
                 0,
@@ -233,7 +242,11 @@ impl ProtocolId {
                 0,
                 1048576,
             ),
-            Protocol::PooledUserOpsByHash => RpcLimits::new(
+            Protocol::PooledUserOpsByHashV07 => RpcLimits::new(
+                0,
+                1048576,
+            ),
+            Protocol::PooledUserOpsByHashV06 => RpcLimits::new(
                 0,
                 1048576,
             ),
@@ -245,7 +258,8 @@ impl ProtocolId {
     pub fn has_context_bytes(&self) -> bool {
         match self.versioned_protocol {
             SupportedProtocol::PooledUserOpHashesV1
-            | SupportedProtocol::PooledUserOpsByHashV1
+            | SupportedProtocol::PooledUserOpsByHashV07
+            | SupportedProtocol::PooledUserOpsByHashV06
             | SupportedProtocol::StatusV1
             | SupportedProtocol::PingV1
             | SupportedProtocol::MetaDataV1
@@ -277,16 +291,15 @@ impl ProtocolId {
 // The inbound protocol reads the request, decodes it and returns the stream to the protocol
 // handler to respond to once ready.
 
-pub type InboundOutput<TSocket, TSpec> = (InboundRequest<TSpec>, InboundFramed<TSocket, TSpec>);
-pub type InboundFramed<TSocket, TSpec> =
-    Framed<std::pin::Pin<Box<TimeoutStream<Compat<TSocket>>>>, InboundCodec<TSpec>>;
+pub type InboundOutput<TSocket> = (InboundRequest, InboundFramed<TSocket>);
+pub type InboundFramed<TSocket> =
+    Framed<std::pin::Pin<Box<TimeoutStream<Compat<TSocket>>>>, InboundCodec>;
 
-impl<TSocket, TSpec> InboundUpgrade<TSocket> for RPCProtocol<TSpec>
+impl<TSocket> InboundUpgrade<TSocket> for RPCProtocol
 where
     TSocket: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-    TSpec: EthSpec,
 {
-    type Output = InboundOutput<TSocket, TSpec>;
+    type Output = InboundOutput<TSocket>;
     type Error = RPCError;
     type Future = BoxFuture<'static, Result<Self::Output, Self::Error>>;
 
@@ -338,17 +351,17 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum InboundRequest<TSpec: EthSpec> {
+pub enum InboundRequest {
     Status(StatusMessage),
     Goodbye(GoodbyeReason),
     Ping(Ping),
-    MetaData(MetadataRequest<TSpec>),
+    MetaData(MetadataRequest),
     PooledUserOpHashes(PooledUserOpHashesRequest),
     PooledUserOpsByHash(PooledUserOpsByHashRequest),
 }
 
 /// Implements the encoding per supported protocol for `RPCRequest`.
-impl<TSpec: EthSpec> InboundRequest<TSpec> {
+impl InboundRequest {
     /* These functions are used in the handler for stream management */
 
     /// Number of responses expected for this request.
@@ -371,7 +384,7 @@ impl<TSpec: EthSpec> InboundRequest<TSpec> {
             InboundRequest::Ping(_) => SupportedProtocol::PingV1,
             InboundRequest::MetaData(_) => SupportedProtocol::MetaDataV1,
             InboundRequest::PooledUserOpHashes(_) => SupportedProtocol::PooledUserOpHashesV1,
-            InboundRequest::PooledUserOpsByHash(_) => SupportedProtocol::PooledUserOpsByHashV1,
+            InboundRequest::PooledUserOpsByHash(_) => SupportedProtocol::PooledUserOpsByHashV07,
         }
     }
 
@@ -481,7 +494,7 @@ impl std::error::Error for RPCError {
     }
 }
 
-impl<TSpec: EthSpec> std::fmt::Display for InboundRequest<TSpec> {
+impl std::fmt::Display for InboundRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             InboundRequest::Status(status) => write!(f, "Status Message: {}", status),

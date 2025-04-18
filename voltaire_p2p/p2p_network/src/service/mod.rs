@@ -9,13 +9,12 @@ use crate::peer_manager::{
     ConnectionDirection, PeerManager, PeerManagerEvent,
 };
 use crate::peer_manager::{MIN_OUTBOUND_ONLY_FACTOR, PEER_EXCESS_FACTOR, PRIORITY_PEER_EXCESS};
-use crate::rpc::methods::{MetadataRequest, PooledUserOpHashesRequest, PooledUserOpsByHashRequest};
+use crate::rpc::methods::{MetadataRequest, PooledUserOpHashesRequest};
 use crate::{rpc::*, NetworkConfig as Config};
 use crate::service::behaviour::BehaviourEvent;
 pub use crate::service::behaviour::Gossipsub;
 use crate::types::{
-    // fork_core_topics, 
-    subnet_from_topic_hash, GossipEncoding, GossipKind, GossipTopic,
+    GossipEncoding, GossipKind, GossipTopic,
     SnappyTransform, Subnet, SubnetDiscovery,
 };
 use crate::EnrExt;
@@ -23,7 +22,6 @@ use crate::EnrExt;
 use crate::{error, metrics, Enr, NetworkGlobals, PubsubMessage, TopicHash};
 use api_types::{PeerRequestId, Request, RequestId, Response};
 use ethereum_types::H256;
-use futures::io::empty;
 use futures::stream::StreamExt;
 use gossipsub_scoring_parameters::{voltaire_gossip_thresholds, PeerScoreSettings};
 use libp2p::bandwidth::BandwidthSinks;
@@ -35,10 +33,7 @@ use libp2p::multiaddr::{Multiaddr, Protocol as MProtocol};
 use libp2p::swarm::{Swarm, SwarmBuilder, SwarmEvent};
 use libp2p::PeerId;
 use slog::{crit, debug, info, o, trace, warn};
-use ssz_types::typenum::U46;
 use ssz_types::{typenum::U32, FixedVector};
-use types::chain_spec::ChainSpec;
-use types::eth_spec::EthSpec;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::time::Duration;
@@ -120,8 +115,8 @@ pub enum NetworkEvent<AppReqId: ReqId> {
 /// Builds the network behaviour that manages the core protocols of eth2.
 /// This core behaviour is managed by `Behaviour` which adds peer management to all core
 /// behaviours.
-pub struct Network<AppReqId: ReqId, TSpec: EthSpec> {
-    swarm: libp2p::swarm::Swarm<Behaviour<AppReqId, TSpec>>,
+pub struct Network<AppReqId: ReqId> {
+    swarm: libp2p::swarm::Swarm<Behaviour<AppReqId>>,
     /* Auxiliary Fields */
     /// A collections of variables accessible outside the network service.
     network_globals: Arc<NetworkGlobals>,
@@ -133,7 +128,7 @@ pub struct Network<AppReqId: ReqId, TSpec: EthSpec> {
     network_dir: PathBuf,
     // fork_context: Arc<ForkContext>,
     /// Gossipsub score parameters.
-    score_settings: PeerScoreSettings<TSpec>,
+    score_settings: PeerScoreSettings,
     /// The interval for updating gossipsub scores
     update_gossipsub_scores: tokio::time::Interval,
     gossip_cache: GossipCache,
@@ -146,7 +141,7 @@ pub struct Network<AppReqId: ReqId, TSpec: EthSpec> {
 }
 
 /// Implements the combined behaviour for the libp2p service.
-impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
+impl<AppReqId: ReqId> Network<AppReqId> {
     pub async fn new(
         executor: task_executor::TaskExecutor,
         // ctx: ServiceContext<'_>,
@@ -165,11 +160,9 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
         // set up a collection of variables accessible outside of the network crate
         let network_globals = {
             // Create an ENR or load from disk if appropriate
-            let enr = crate::discovery::enr::build_or_load_enr::<TSpec>(
+            let enr = crate::discovery::enr::build_or_load_enr(
                 local_keypair.clone(),
                 &config,
-                // &ctx.enr_fork_id,
-                // &EnrForkId {fork_digest:[1,2,3,4],next_fork_version:[1,2,3,4]},
                 &log,
             )?;
             // Construct the metadata
@@ -196,7 +189,7 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
         //     .eth2()
         //     .expect("Local ENR must have a fork id");
 
-        let score_settings = PeerScoreSettings::new(&ChainSpec::minimal(), &config.gs_config);
+        let score_settings = PeerScoreSettings::new(&config.gs_config);
 
         let gossip_cache = {
             let slot_duration = std::time::Duration::from_secs(10);
@@ -527,8 +520,10 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
         let mut subscribed_topics: Vec<GossipKind> = vec![];
 
         for topic_kind in &config.topics {
-            if self.subscribe_kind(GossipKind::VerifiedUserOperation, topic_kind.to_string()) {
-                subscribed_topics.push(GossipKind::VerifiedUserOperation);
+            if self.subscribe_kind(GossipKind::VerifiedUserOperationV07, topic_kind.to_string()) {
+                subscribed_topics.push(GossipKind::VerifiedUserOperationV07);
+            }else if self.subscribe_kind(GossipKind::VerifiedUserOperationV06, topic_kind.to_string()) {
+                subscribed_topics.push(GossipKind::VerifiedUserOperationV06);
             } else {
                 warn!(self.log, "Could not subscribe to topic"; "topic" => %topic_kind);
             }
@@ -548,7 +543,7 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
         &mut self.swarm.behaviour_mut().gossipsub
     }
     /// The Eth2 RPC specified in the wire-0 protocol.
-    pub fn eth2_rpc_mut(&mut self) -> &mut RPC<RequestId<AppReqId>, TSpec> {
+    pub fn eth2_rpc_mut(&mut self) -> &mut RPC<RequestId<AppReqId>> {
         &mut self.swarm.behaviour_mut().eth2_rpc
     }
     /// Discv5 Discovery protocol.
@@ -569,7 +564,7 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
         &self.swarm.behaviour().gossipsub
     }
     /// The Eth2 RPC specified in the wire-0 protocol.
-    pub fn eth2_rpc(&self) -> &RPC<RequestId<AppReqId>, TSpec> {
+    pub fn eth2_rpc(&self) -> &RPC<RequestId<AppReqId>> {
         &self.swarm.behaviour().eth2_rpc
     }
     /// Discv5 Discovery protocol.
@@ -993,13 +988,13 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
     //     let local_mempool_nets = self
     //         .discovery_mut()
     //         .local_enr()
-    //         .mempools_bitfield::<TSpec>()
+    //         .mempools_bitfield::()
     //         .expect("Local discovery must have attestation bitfield");
 
     //     // let local_syncnets = self
     //     //     .discovery_mut()
     //     //     .local_enr()
-    //     //     .sync_committee_bitfield::<TSpec>()
+    //     //     .sync_committee_bitfield::()
     //     //     .expect("Local discovery must have sync committee bitfield");
 
     //     {
@@ -1052,7 +1047,7 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
     /// Sends a METADATA response to a peer.
     fn send_meta_data_response(
         &mut self,
-        req: MetadataRequest<TSpec>,
+        req: MetadataRequest,
         id: PeerRequestId,
         peer_id: PeerId,
     ) {
@@ -1090,7 +1085,13 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
                             response,
                         })
                     },
-                    Response::PooledUserOpsByHash(_) => {
+                    Response::PooledUserOpsByHashV07(_) => {
+                        Some(NetworkEvent::ResponseReceivedFromInternal {
+                            peer_id,
+                            response,
+                        })
+                    },
+                    Response::PooledUserOpsByHashV06(_) => {
                         Some(NetworkEvent::ResponseReceivedFromInternal {
                             peer_id,
                             response,
@@ -1166,6 +1167,10 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
         &mut self,
         event: gossipsub::Event,
     ) -> Option<NetworkEvent<AppReqId>> {
+        let subscriptions = self.network_globals.gossipsub_subscriptions.read().clone();
+        let mut subscriptions_iter = subscriptions.iter();
+        let topic_v07 = subscriptions_iter.next().unwrap();
+        let topic_v06 = subscriptions_iter.next().unwrap();
         match event {
             gossipsub::Event::Message {
                 propagation_source,
@@ -1174,7 +1179,7 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
             } => {
                 // Note: We are keeping track here of the peer that sent us the message, not the
                 // peer that originally published the message.
-                match PubsubMessage::decode(&gs_msg.topic, &gs_msg.data/*, &self.fork_context*/) {
+                match PubsubMessage::decode(&gs_msg.topic, &gs_msg.data, topic_v07, topic_v06) {
                     Err(e) => {
                         debug!(self.log, "Could not decode gossipsub message"; "topic" => ?gs_msg.topic,"error" => e);
                         //reject the message
@@ -1198,7 +1203,7 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
                 }
             }
             gossipsub::Event::Subscribed { peer_id, topic } => {
-                if let Ok(topic) = GossipTopic::decode(topic.as_str()) {
+                if let Ok(topic) = GossipTopic::decode(topic.as_str(), topic_v07, topic_v06) {
                     // if let Some(subnet_id) = topic.subnet_id() {
                     //     self.network_globals
                     //         .peers
@@ -1239,12 +1244,12 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
                 }
             }
             gossipsub::Event::Unsubscribed { peer_id, topic } => {
-                if let Some(subnet_id) = subnet_from_topic_hash(&topic) {
-                    // self.network_globals
-                    //     .peers
-                    //     .write()
-                    //     .remove_subscription(&peer_id, &subnet_id);
-                }
+                // if let Some(subnet_id) = subnet_from_topic_hash(&topic) {
+                //     self.network_globals
+                //         .peers
+                //         .write()
+                //         .remove_subscription(&peer_id, &subnet_id);
+                // }
             }
             gossipsub::Event::GossipsubNotSupported { peer_id } => {
                 debug!(self.log, "Peer does not support gossipsub"; "peer_id" => %peer_id);
@@ -1263,7 +1268,7 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
     /// Handle an RPC event.
     fn inject_rpc_event(
         &mut self,
-        event: RPCMessage<RequestId<AppReqId>, TSpec>,
+        event: RPCMessage<RequestId<AppReqId>>,
     ) -> Option<NetworkEvent<AppReqId>> {
         let peer_id = event.peer_id;
 
@@ -1389,20 +1394,22 @@ impl<AppReqId: ReqId, TSpec: EthSpec> Network<AppReqId, TSpec> {
                     RPCResponse::PooledUserOpHashes(pooled_user_op_hashes) => {
                         self.build_response(id, peer_id, Response::PooledUserOpHashes(Some(pooled_user_op_hashes)))
                     }
-                    RPCResponse::PooledUserOpsByHash(resp) => {
-                        self.build_response(id, peer_id, Response::PooledUserOpsByHash(Some(resp)))
+                    RPCResponse::PooledUserOpsByHashV07(resp) => {
+                        self.build_response(id, peer_id, Response::PooledUserOpsByHashV07(Some(resp)))
+                    }
+                    RPCResponse::PooledUserOpsByHashV06(resp) => {
+                        self.build_response(id, peer_id, Response::PooledUserOpsByHashV06(Some(resp)))
                     }
                 }
             }
             Ok(RPCReceived::EndOfStream(id, termination)) => {
+
+                let response = match termination {
+                    ResponseTermination::PooledUserOpHashes => Response::PooledUserOpHashes(None),
+                    ResponseTermination::PooledUserOpsByHashV07 => Response::PooledUserOpsByHashV07(None),
+                    ResponseTermination::PooledUserOpsByHashV06 => Response::PooledUserOpsByHashV06(None),
+                };
               
-                let response = Response::Status(
-                    StatusMessage { 
-                        chain_id: 0,
-                        block_hash: H256::default(),
-                        block_number: 0,
-                    }
-                );//TODO
                 self.build_response(id, peer_id, response)
             }
         }

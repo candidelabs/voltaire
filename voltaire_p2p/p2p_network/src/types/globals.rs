@@ -6,7 +6,6 @@ use crate::Client;
 use crate::EnrExt;
 use crate::{Enr, GossipTopic, Multiaddr, PeerId};
 use parking_lot::RwLock;
-use types::eth_spec::EthSpec;
 use std::collections::HashSet;
 // use types::EthSpec;
 

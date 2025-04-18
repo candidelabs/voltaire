@@ -3,7 +3,7 @@ use ssz_types::{FixedVector, typenum::U46};
 #[macro_use]
 extern crate lazy_static;
 
-/// This crate provides the network server for Voltaire.
+/// This crate provides the network server for Voltaire p2p.
 pub mod error;
 #[allow(clippy::mutable_key_type)] // PeerId in hashmaps are no longer permitted by clippy
 pub mod service;
@@ -12,8 +12,6 @@ pub mod service;
 mod metrics;
 mod nat;
 
-mod router;
-mod status;
 pub mod main_bundler;
 
 pub type FV46 = FixedVector::<u8, U46>;

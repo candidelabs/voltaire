@@ -10,11 +10,9 @@ use snap::read::FrameDecoder;
 use snap::write::FrameEncoder;
 use ssz::{Decode, Encode};
 use ssz_types::VariableList;
-use types::eth_spec::EthSpec;
 use std::io::Cursor;
 use std::io::ErrorKind;
 use std::io::{Read, Write};
-use std::marker::PhantomData;
 use tokio_util::codec::{Decoder, Encoder};
 use unsigned_varint::codec::Uvi;
 
@@ -25,21 +23,18 @@ const ERROR_TYPE_MIN: usize = 1;
 
 /* Inbound Codec */
 
-pub struct SSZSnappyInboundCodec<TSpec: EthSpec> {
+pub struct SSZSnappyInboundCodec {
     protocol: ProtocolId,
     inner: Uvi<usize>,
     len: Option<usize>,
     /// Maximum bytes that can be sent in one req/resp chunked responses.
     max_packet_size: usize,
-    // fork_context: Arc<ForkContext>,
-    phantom: PhantomData<TSpec>,
 }
 
-impl<T: EthSpec> SSZSnappyInboundCodec<T> {
+impl SSZSnappyInboundCodec {
     pub fn new(
         protocol: ProtocolId,
         max_packet_size: usize,
-        // fork_context: Arc<ForkContext>,
     ) -> Self {
         let uvi_codec = Uvi::default();
         // this encoding only applies to ssz_snappy.
@@ -49,15 +44,13 @@ impl<T: EthSpec> SSZSnappyInboundCodec<T> {
             inner: uvi_codec,
             protocol,
             len: None,
-            phantom: PhantomData,
-            // fork_context,
             max_packet_size,
         }
     }
 }
 
 // Encoder for inbound streams: Encodes RPC Responses sent to peers.
-impl<TSpec: EthSpec> Encoder<RPCCodedResponse> for SSZSnappyInboundCodec<TSpec> {
+impl Encoder<RPCCodedResponse> for SSZSnappyInboundCodec {
     type Error = RPCError;
 
     fn encode(
@@ -69,7 +62,8 @@ impl<TSpec: EthSpec> Encoder<RPCCodedResponse> for SSZSnappyInboundCodec<TSpec> 
             RPCCodedResponse::Success(resp) => match &resp {
                 RPCResponse::Status(res) => res.as_ssz_bytes(),
                 RPCResponse::PooledUserOpHashes(res) => res.as_ssz_bytes(),
-                RPCResponse::PooledUserOpsByHash(res) => res.as_ssz_bytes(),
+                RPCResponse::PooledUserOpsByHashV07(res) => res.as_ssz_bytes(),
+                RPCResponse::PooledUserOpsByHashV06(res) => res.as_ssz_bytes(),
                 RPCResponse::Pong(res) => res.data.as_ssz_bytes(),
                 RPCResponse::MetaData(res) =>
                 // Encode the correct version of the MetaData response based on the negotiated version.
@@ -119,8 +113,8 @@ impl<TSpec: EthSpec> Encoder<RPCCodedResponse> for SSZSnappyInboundCodec<TSpec> 
 }
 
 // Decoder for inbound streams: Decodes RPC requests from peers
-impl<TSpec: EthSpec> Decoder for SSZSnappyInboundCodec<TSpec> {
-    type Item = InboundRequest<TSpec>;
+impl Decoder for SSZSnappyInboundCodec {
+    type Item = InboundRequest;
     type Error = RPCError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -166,19 +160,15 @@ impl<TSpec: EthSpec> Decoder for SSZSnappyInboundCodec<TSpec> {
 }
 
 /* Outbound Codec: Codec for initiating RPC requests */
-pub struct SSZSnappyOutboundCodec<TSpec: EthSpec> {
+pub struct SSZSnappyOutboundCodec {
     inner: Uvi<usize>,
     len: Option<usize>,
     protocol: ProtocolId,
     /// Maximum bytes that can be sent in one req/resp chunked responses.
     max_packet_size: usize,
-//     /// The fork name corresponding to the received context bytes.
-//     fork_name: Option<ForkName>,
-//     fork_context: Arc<ForkContext>,
-    phantom: PhantomData<TSpec>,
 }
 
-impl<TSpec: EthSpec> SSZSnappyOutboundCodec<TSpec> {
+impl SSZSnappyOutboundCodec {
     pub fn new(
         protocol: ProtocolId,
         max_packet_size: usize,
@@ -193,20 +183,17 @@ impl<TSpec: EthSpec> SSZSnappyOutboundCodec<TSpec> {
             protocol,
             max_packet_size,
             len: None,
-            // fork_name: None,
-            // fork_context,
-            phantom: PhantomData,
         }
     }
 }
 
 // Encoder for outbound streams: Encodes RPC Requests to peers
-impl<TSpec: EthSpec> Encoder<OutboundRequest<TSpec>> for SSZSnappyOutboundCodec<TSpec> {
+impl Encoder<OutboundRequest> for SSZSnappyOutboundCodec {
     type Error = RPCError;
 
     fn encode(
         &mut self,
-        item: OutboundRequest<TSpec>,
+        item: OutboundRequest,
         dst: &mut BytesMut,
     ) -> Result<(), Self::Error> {
         let bytes = match item {
@@ -245,7 +232,7 @@ impl<TSpec: EthSpec> Encoder<OutboundRequest<TSpec>> for SSZSnappyOutboundCodec<
 // The majority of the decoding has now been pushed upstream due to the changing specification.
 // We prefer to decode blocks and attestations with extra knowledge about the chain to perform
 // faster verification checks before decoding entire blocks/attestations.
-impl<TSpec: EthSpec> Decoder for SSZSnappyOutboundCodec<TSpec> {
+impl Decoder for SSZSnappyOutboundCodec {
     type Item = RPCResponse;
     type Error = RPCError;
 
@@ -273,7 +260,7 @@ impl<TSpec: EthSpec> Decoder for SSZSnappyOutboundCodec<TSpec> {
         // packet size for ssz container corresponding to `self.protocol`.
         let ssz_limits = self
             .protocol
-            .rpc_response_limits::<TSpec>(/*&self.fork_context*/);
+            .rpc_response_limits();
         if ssz_limits.is_out_of_bounds(length, self.max_packet_size) {
             return Err(RPCError::InvalidData(format!(
                 "RPC response length is out of bounds, length {}",
@@ -304,7 +291,7 @@ impl<TSpec: EthSpec> Decoder for SSZSnappyOutboundCodec<TSpec> {
     }
 }
 
-impl<TSpec: EthSpec> OutboundCodec<OutboundRequest<TSpec>> for SSZSnappyOutboundCodec<TSpec> {
+impl OutboundCodec<OutboundRequest> for SSZSnappyOutboundCodec {
     type CodecErrorType = ErrorType;
 
     fn decode_error(
@@ -400,10 +387,10 @@ fn handle_length(
 /// Decodes an `InboundRequest` from the byte stream.
 /// `decoded_buffer` should be an ssz-encoded bytestream with
 // length = length-prefix received in the beginning of the stream.
-fn handle_rpc_request<T: EthSpec>(
+fn handle_rpc_request(
     versioned_protocol: SupportedProtocol,
     decoded_buffer: &[u8],
-) -> Result<Option<InboundRequest<T>>, RPCError> {
+) -> Result<Option<InboundRequest>, RPCError> {
     match versioned_protocol {
         SupportedProtocol::StatusV1 => Ok(Some(InboundRequest::Status(
             StatusMessage::from_ssz_bytes(decoded_buffer)?,
@@ -414,7 +401,10 @@ fn handle_rpc_request<T: EthSpec>(
         SupportedProtocol::PooledUserOpHashesV1 => Ok(Some(InboundRequest::PooledUserOpHashes(
             PooledUserOpHashesRequest::from_ssz_bytes(decoded_buffer)?,
         ))),
-        SupportedProtocol::PooledUserOpsByHashV1 => Ok(Some(InboundRequest::PooledUserOpsByHash(
+        SupportedProtocol::PooledUserOpsByHashV07 => Ok(Some(InboundRequest::PooledUserOpsByHash(
+            PooledUserOpsByHashRequest::from_ssz_bytes(decoded_buffer)?,
+        ))),
+        SupportedProtocol::PooledUserOpsByHashV06 => Ok(Some(InboundRequest::PooledUserOpsByHash(
             PooledUserOpsByHashRequest::from_ssz_bytes(decoded_buffer)?,
         ))),
         SupportedProtocol::PingV1 => Ok(Some(InboundRequest::Ping(Ping {
@@ -455,8 +445,11 @@ fn handle_rpc_response(
         SupportedProtocol::PooledUserOpHashesV1 => Ok(Some(RPCResponse::PooledUserOpHashes(
             PooledUserOpHashes::from_ssz_bytes(decoded_buffer)?,
         ))),
-        SupportedProtocol::PooledUserOpsByHashV1 => Ok(Some(RPCResponse::PooledUserOpsByHash(
-            PooledUserOpsByHash::from_ssz_bytes(decoded_buffer)?,
+        SupportedProtocol::PooledUserOpsByHashV07 => Ok(Some(RPCResponse::PooledUserOpsByHashV07(
+            PooledUserOpsByHashV07::from_ssz_bytes(decoded_buffer)?,
+        ))),
+        SupportedProtocol::PooledUserOpsByHashV06 => Ok(Some(RPCResponse::PooledUserOpsByHashV06(
+            PooledUserOpsByHashV06::from_ssz_bytes(decoded_buffer)?,
         ))),
     }
 }

@@ -290,5 +290,12 @@ pub fn cli_app<'a, 'b>() -> App<'a, 'b> {
                 // .max_values(2)
                 // .default_value("0.0.0.0")
                 .takes_value(true)
+        ).arg(
+            Arg::with_name("enable-private-discovery")
+                .long("enable-private-discovery")
+                .help("Lighthouse by default does not discover private IP addresses. Set this flag to enable connection attempts to local addresses.")
+                // .action(ArgAction::SetTrue)
+                // .help_heading(FLAG_HEADER)
+                // .display_order(0)
         )
 }

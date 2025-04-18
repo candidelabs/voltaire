@@ -5,7 +5,6 @@ use p2p_voltaire_network::{NetworkConfig, ListenAddress, Multiaddr, multiaddr::P
 use network_manager::NetworkService;
 use task_executor::TaskExecutor;
 use tokio::runtime;
-use types::eth_spec::MinimalEthSpec;
 use tokio::runtime::Runtime;
 use slog::{Drain, o, Logger, warn};
 pub mod cli_args;
@@ -22,7 +21,6 @@ pub fn build_log(level: slog::Level, enabled: bool) -> slog::Logger {
     }
 }
 
-type EthSpec = MinimalEthSpec;
 
 fn main(){
 
@@ -55,7 +53,7 @@ fn main(){
     config.topics.append(&mut topics_str.map(|x| x.to_string()).collect());
 
     let _ = handle.block_on( async move{
-         let _ = NetworkService::<EthSpec>::start(
+         let _ = NetworkService::start(
             &config,
             task_executor.clone(),
         ).await

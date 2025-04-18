@@ -2,7 +2,6 @@
 
 use crate::discovery::enr_ext::EnrExt;
 use crate::rpc::{GoodbyeReason, MetaData, Protocol, RPCError, RPCResponseErrorCode};
-use crate::service::TARGET_SUBNET_PEERS;
 use crate::{error, metrics, Gossipsub};
 use crate::{NetworkGlobals, PeerId};
 use crate::{Subnet, SubnetDiscovery};
@@ -14,15 +13,11 @@ use peerdb::{client::ClientKind, BanOperation, BanResult, ScoreUpdateResult};
 use rand::seq::SliceRandom;
 use slog::{debug, error, trace, warn};
 use smallvec::SmallVec;
-use types::eth_spec::EthSpec;
-use types::subnet_id::SubnetId;
-use types::sync_subnet_id::SyncSubnetId;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
 use strum::IntoEnumIterator;
-// use types::{EthSpec, SyncSubnetId};
 
 pub use libp2p::core::Multiaddr;
 pub use libp2p::identity::Keypair;
@@ -35,7 +30,7 @@ pub use peerdb::peer_info::{
 };
 use peerdb::score::{PeerAction, ReportSource};
 // pub use peerdb::sync_status::{SyncInfo, SyncStatus};
-use std::collections::{hash_map::Entry, HashMap};
+use std::collections::HashMap;
 use std::net::IpAddr;
 pub mod config;
 mod network_behaviour;
@@ -96,11 +91,6 @@ pub struct PeerManager {
     // to update and clear the cache. Therefore the PEER_RECONNECTION_TIMEOUT only has a resolution
     // of the HEARTBEAT_INTERVAL.
     temporary_banned_peers: LRUTimeCache<PeerId>,
-    /// A collection of sync committee subnets that we need to stay subscribed to.
-    /// Sync committee subnets are longer term (256 epochs). Hence, we need to re-run
-    /// discovery queries for subnet peers if we disconnect from existing sync
-    /// committee subnet peers.
-    sync_committee_subnets: HashMap<SyncSubnetId, Instant>,
     /// The heartbeat interval to perform routine maintenance.
     heartbeat: tokio::time::Interval,
     /// Keeps track of whether the discovery service is enabled or not.
@@ -166,7 +156,6 @@ impl PeerManager {
             status_peers: HashSetDelay::new(Duration::from_secs(status_interval)),
             target_peers: target_peer_count,
             temporary_banned_peers: LRUTimeCache::new(PEER_RECONNECTION_TIMEOUT),
-            sync_committee_subnets: Default::default(),
             heartbeat,
             discovery_enabled,
             metrics_enabled,
@@ -355,21 +344,6 @@ impl PeerManager {
         self.status_peers.insert(*peer_id);
     }
 
-    /// Insert the sync subnet into list of long lived sync committee subnets that we need to
-    /// maintain adequate number of peers for.
-    pub fn add_sync_subnet(&mut self, subnet_id: SyncSubnetId, min_ttl: Instant) {
-        match self.sync_committee_subnets.entry(subnet_id) {
-            Entry::Vacant(_) => {
-                self.sync_committee_subnets.insert(subnet_id, min_ttl);
-            }
-            Entry::Occupied(old) => {
-                if *old.get() < min_ttl {
-                    self.sync_committee_subnets.insert(subnet_id, min_ttl);
-                }
-            }
-        }
-    }
-
     /// The maximum number of peers we allow to connect to us. This is `target_peers` * (1 +
     /// PEER_EXCESS_FACTOR)
     fn max_peers(&self) -> usize {
@@ -547,7 +521,8 @@ impl PeerManager {
                 RPCResponseErrorCode::RateLimited => match protocol {
                     Protocol::Ping => PeerAction::MidToleranceError,
                     Protocol::PooledUserOpHashes => PeerAction::MidToleranceError,
-                    Protocol::PooledUserOpsByHash => PeerAction::MidToleranceError,
+                    Protocol::PooledUserOpsByHashV07 => PeerAction::MidToleranceError,
+                    Protocol::PooledUserOpsByHashV06 => PeerAction::MidToleranceError,
                     Protocol::Goodbye => PeerAction::LowToleranceError,
                     Protocol::MetaData => PeerAction::LowToleranceError,
                     Protocol::Status => PeerAction::LowToleranceError,
@@ -562,7 +537,8 @@ impl PeerManager {
                 match protocol {
                     Protocol::Ping => PeerAction::Fatal,
                     Protocol::PooledUserOpHashes => return,
-                    Protocol::PooledUserOpsByHash => return,
+                    Protocol::PooledUserOpsByHashV07 => return,
+                    Protocol::PooledUserOpsByHashV06 => return,
                     Protocol::Goodbye => return,
                     Protocol::MetaData => PeerAction::Fatal,
                     Protocol::Status => PeerAction::Fatal,
@@ -577,7 +553,8 @@ impl PeerManager {
                 ConnectionDirection::Outgoing => match protocol {
                     Protocol::Ping => PeerAction::LowToleranceError,
                     Protocol::PooledUserOpHashes => PeerAction::MidToleranceError,
-                    Protocol::PooledUserOpsByHash => PeerAction::MidToleranceError,
+                    Protocol::PooledUserOpsByHashV07 => PeerAction::MidToleranceError,
+                    Protocol::PooledUserOpsByHashV06 => PeerAction::MidToleranceError,
                     Protocol::Goodbye => return,
                     Protocol::MetaData => return,
                     Protocol::Status => return,
@@ -1021,13 +998,6 @@ impl PeerManager {
             // Of our connected peers, build a map from subnet_id -> Vec<(PeerId, PeerInfo)>
             let mut subnet_to_peer: HashMap<Subnet, Vec<(PeerId, PeerInfo)>> =
                 HashMap::new();
-            // These variables are used to track if a peer is in a long-lived sync-committee as we
-            // may wish to retain this peer over others when pruning.
-            let mut sync_committee_peer_count: HashMap<SyncSubnetId, u64> = HashMap::new();
-            let mut peer_to_sync_committee: HashMap<
-                PeerId,
-                std::collections::HashSet<SyncSubnetId>,
-            > = HashMap::new();
 
             for (peer_id, info) in self.network_globals.peers.read().connected_peers() {
                 // Ignore peers we trust or that we are already pruning
@@ -1092,26 +1062,6 @@ impl PeerManager {
                                 continue;
                             }
 
-                            // Check the sync committee
-                            if let Some(subnets) = peer_to_sync_committee.get(candidate_peer) {
-                                // The peer is subscribed to some long-lived sync-committees
-                                // Of all the subnets this peer is subscribed too, the minimum
-                                // peer count of all of them is min_subnet_count
-                                if let Some(min_subnet_count) = subnets
-                                    .iter()
-                                    .filter_map(|v| sync_committee_peer_count.get(v).copied())
-                                    .min()
-                                {
-                                    // If the minimum count is our target or lower, we
-                                    // shouldn't remove this peer, because it drops us lower
-                                    // than our target
-                                    if min_subnet_count <= MIN_SYNC_COMMITTEE_PEERS {
-                                        // Do not drop this peer in this pruning interval
-                                        continue;
-                                    }
-                                }
-                            }
-
                             if info.is_outbound_only() {
                                 outbound_peers_pruned += 1;
                             }
@@ -1130,19 +1080,7 @@ impl PeerManager {
                             for subnet_peers in subnet_to_peer.values_mut() {
                                 subnet_peers.retain(|(peer_id, _)| peer_id != &candidate_peer);
                             }
-                            // Remove pruned peers from all sync-committee counts
-                            if let Some(known_sync_committes) =
-                                peer_to_sync_committee.get(&candidate_peer)
-                            {
-                                for sync_committee in known_sync_committes {
-                                    if let Some(sync_committee_count) =
-                                        sync_committee_peer_count.get_mut(sync_committee)
-                                    {
-                                        *sync_committee_count =
-                                            sync_committee_count.saturating_sub(1);
-                                    }
-                                }
-                            }
+                         
                             peers_to_prune.insert(candidate_peer);
                         } else {
                             peers_on_subnet.clear();
@@ -1215,7 +1153,6 @@ impl PeerManager {
         self.outbound_ping_peers.shrink_to(5);
         self.status_peers.shrink_to(5);
         self.temporary_banned_peers.shrink_to_fit();
-        self.sync_committee_subnets.shrink_to_fit();
     }
 
     // Update metrics related to peer scoring.

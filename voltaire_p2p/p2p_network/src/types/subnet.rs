@@ -1,8 +1,5 @@
 use serde::Serialize;
-use ssz_types::{typenum::U32, FixedVector};
-use types::subnet_id::SubnetId;
 use std::time::Instant;
-// use types::{SubnetId, SyncSubnetId};
 
 /// Represents a subnet on an attestation or sync committee `SubnetId`.
 ///

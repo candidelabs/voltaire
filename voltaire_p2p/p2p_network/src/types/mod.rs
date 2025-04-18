@@ -4,36 +4,23 @@ mod pubsub;
 mod subnet;
 mod topics;
 mod verified_useroperation;
-
+mod optional_hex_var_list;
 
 #[macro_use]
 mod macros;
-
-
-// pub type PublicKey = GenericPublicKey<milagro_bls::PublicKey>;
-// pub type PublicKeyBytes = GenericPublicKeyBytes<PublicKey>;
-// use types::{BitVector, EthSpec};
-
-pub type MempoolNetsBitfield<T> = BitVector<<T as EthSpec>::MempoolNetsBitfieldLength>;
-pub type EnrSyncCommitteeBitfield<T> = BitVector<<T as EthSpec>::SyncCommitteeSubnetCount>;
 
 pub type Enr = discv5::enr::Enr<discv5::enr::CombinedKey>;
 
 pub use globals::NetworkGlobals;
 pub use pubsub::{PubsubMessage, SnappyTransform};
-use ssz_types::BitVector;
 pub use subnet::{Subnet, SubnetDiscovery};
-// pub use sync_state::{BackFillState, SyncState};
 pub use topics::{
-    // core_topics_to_subscribe, fork_core_topics, 
-    subnet_from_topic_hash, GossipEncoding, GossipKind,
+    GossipEncoding, GossipKind,
     GossipTopic, 
-    //LIGHT_CLIENT_GOSSIP_TOPICS,
 };
 pub use verified_useroperation::*;
 
-use ethereum_types::{H160, H256};
-use types::eth_spec::EthSpec;
+use ethereum_types::H256;
 
 pub type Hash256 = H256;
 

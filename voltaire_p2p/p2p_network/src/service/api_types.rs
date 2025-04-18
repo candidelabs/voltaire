@@ -1,11 +1,9 @@
 use libp2p::swarm::ConnectionId;
-use types::eth_spec::EthSpec;
-
 
 use crate::rpc::{
     methods::{
         RPCCodedResponse, RPCResponse, ResponseTermination, StatusMessage,
-        PooledUserOpHashes,PooledUserOpsByHash, PooledUserOpHashesRequest, PooledUserOpsByHashRequest
+        PooledUserOpHashes,PooledUserOpsByHashV07,PooledUserOpsByHashV06, PooledUserOpHashesRequest, PooledUserOpsByHashRequest
     },
     OutboundRequest, SubstreamId,
 };
@@ -35,8 +33,8 @@ pub enum Request {
     PooledUserOpsByHash(PooledUserOpsByHashRequest),
 }
 
-impl<TSpec: EthSpec> std::convert::From<Request> for OutboundRequest<TSpec> {
-    fn from(req: Request) -> OutboundRequest<TSpec> {
+impl std::convert::From<Request> for OutboundRequest {
+    fn from(req: Request) -> OutboundRequest {
         match req {
             Request::PooledUserOpHashes(r) => OutboundRequest::PooledUserOpHashes(r),
             Request::PooledUserOpsByHash(r) => OutboundRequest::PooledUserOpsByHash(r),
@@ -58,7 +56,8 @@ pub enum Response {
     /// A response to a get PooledUserOpHashes request.
     PooledUserOpHashes(Option<PooledUserOpHashes>),
     /// A response to a get PooledUserOpsByHash request.
-    PooledUserOpsByHash(Option<PooledUserOpsByHash>),
+    PooledUserOpsByHashV07(Option<PooledUserOpsByHashV07>),
+    PooledUserOpsByHashV06(Option<PooledUserOpsByHashV06>),
 }
 
 impl std::convert::From<Response> for RPCCodedResponse {
@@ -68,9 +67,13 @@ impl std::convert::From<Response> for RPCCodedResponse {
                 Some(b) => RPCCodedResponse::Success(RPCResponse::PooledUserOpHashes(b)),
                 None => RPCCodedResponse::StreamTermination(ResponseTermination::PooledUserOpHashes),
             },
-            Response::PooledUserOpsByHash(r) => match r {
-                Some(b) => RPCCodedResponse::Success(RPCResponse::PooledUserOpsByHash(b)),
-                None => RPCCodedResponse::StreamTermination(ResponseTermination::PooledUserOpsByHash),
+            Response::PooledUserOpsByHashV07(r) => match r {
+                Some(b) => RPCCodedResponse::Success(RPCResponse::PooledUserOpsByHashV07(b)),
+                None => RPCCodedResponse::StreamTermination(ResponseTermination::PooledUserOpsByHashV07),
+            },
+            Response::PooledUserOpsByHashV06(r) => match r {
+                Some(b) => RPCCodedResponse::Success(RPCResponse::PooledUserOpsByHashV06(b)),
+                None => RPCCodedResponse::StreamTermination(ResponseTermination::PooledUserOpsByHashV06),
             },
             Response::Status(s) => RPCCodedResponse::Success(RPCResponse::Status(s)),
         }

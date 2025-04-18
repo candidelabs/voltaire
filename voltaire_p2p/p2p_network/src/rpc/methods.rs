@@ -1,17 +1,17 @@
 //! Available RPC methods types and ids.
 
-use crate::types::{UserOperation};
+use crate::types::UserOperationV07;
+use crate::types::UserOperationV06;
 
 use ethereum_types::H256;
 use regex::bytes::Regex;
 use serde::{Serialize, Deserialize};
 use ssz_derive::{Decode, Encode};
 use ssz_types::{
-    typenum::{U1024, U256, U46,U4096, U66, U34, U32, U64},
+    typenum::{U1024, U256, U4096, U32},
     VariableList, FixedVector,
 };
-use types::eth_spec::EthSpec;
-use std::{marker::PhantomData, fmt::{Debug, self}};
+use std::fmt::Debug;
 use std::ops::Deref;
 use strum::IntoStaticStr;
 
@@ -84,26 +84,17 @@ pub struct Ping {
 //     variant_attributes(derive(Clone, Debug, PartialEq, Serialize),)
 // )]
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct MetadataRequest<T: EthSpec> {
-    _phantom_data: PhantomData<T>,
+pub struct MetadataRequest {
 }
 
-impl<T: EthSpec> MetadataRequest<T> {
+impl MetadataRequest {
     pub fn new() -> Self {
         MetadataRequest {
-            _phantom_data: PhantomData,
         }
     }
 }
 
 /// The METADATA response structure.
-// #[superstruct(
-//     variants(V1, V2),
-//     variant_attributes(
-//         derive(Encode, Decode, Clone, Debug, PartialEq, Serialize),
-//         serde(bound = "T: EthSpec", deny_unknown_fields),
-//     )
-// )]
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Serialize)]
 pub struct MetaData {
     /// A sequential counter indicating when data gets modified.
@@ -238,9 +229,23 @@ impl PooledUserOpHashesRequest {
 /// The STATUS request/response handshake message.
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[ssz(struct_behaviour = "transparent")]
-pub struct PooledUserOpsByHash {
+pub struct PooledUserOpsByHashV07 {
     /// The fork version of the chain we are broadcasting.
-    pub list: VariableList<UserOperation, MaxOpsPerRequest>,
+    pub list: VariableList<UserOperationV07, MaxOpsPerRequest>,
+}
+
+/// The STATUS request/response handshake message.
+#[derive(Encode, Decode, Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[ssz(struct_behaviour = "transparent")]
+pub struct PooledUserOpsByHashV06 {
+    /// The fork version of the chain we are broadcasting.
+    pub list: VariableList<UserOperationV06, MaxOpsPerRequest>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum PooledUserOpsByHash {
+    PooledUserOpsByHashV07(PooledUserOpsByHashV07),
+    PooledUserOpsByHashV06(PooledUserOpsByHashV06)
 }
 
 /// Request a number of beacon block bodies from a peer.
@@ -268,7 +273,10 @@ pub enum RPCResponse {
     PooledUserOpHashes(PooledUserOpHashes),
 
     /// A PooledUserOpsByHash response to a PooledUserOpsByHash request.
-    PooledUserOpsByHash(PooledUserOpsByHash),
+    PooledUserOpsByHashV07(PooledUserOpsByHashV07),
+
+    /// A PooledUserOpsByHash response to a PooledUserOpsByHash request.
+     PooledUserOpsByHashV06(PooledUserOpsByHashV06),
 
     /// A PONG response to a PING request.
     Pong(Ping),
@@ -283,8 +291,11 @@ pub enum ResponseTermination {
     /// PooledUserOpHashes stream termination.
     PooledUserOpHashes,
 
-    /// PooledUserOpsByHash stream termination.
-    PooledUserOpsByHash,
+    /// PooledUserOpsByHashV07 stream termination.
+    PooledUserOpsByHashV07,
+
+    /// PooledUserOpsByHashV06 stream termination.
+    PooledUserOpsByHashV06,
 }
 
 /// The structured response containing a result/code indicating success or failure
@@ -345,7 +356,8 @@ impl RPCCodedResponse {
             RPCCodedResponse::Success(resp) => match resp {
                 RPCResponse::Status(_) => false,
                 RPCResponse::PooledUserOpHashes(_) => false,
-                RPCResponse::PooledUserOpsByHash(_) => false,
+                RPCResponse::PooledUserOpsByHashV07(_) => false,
+                RPCResponse::PooledUserOpsByHashV06(_) => false,
                 RPCResponse::Pong(_) => false,
                 RPCResponse::MetaData(_) => false,
             },
@@ -379,7 +391,8 @@ impl RPCResponse {
         match self {
             RPCResponse::Status(_) => Protocol::Status,
             RPCResponse::PooledUserOpHashes(_) => Protocol::PooledUserOpHashes,
-            RPCResponse::PooledUserOpsByHash(_) => Protocol::PooledUserOpsByHash,
+            RPCResponse::PooledUserOpsByHashV07(_) => Protocol::PooledUserOpsByHashV07,
+            RPCResponse::PooledUserOpsByHashV06(_) => Protocol::PooledUserOpsByHashV06,
             RPCResponse::Pong(_) => Protocol::Ping,
             RPCResponse::MetaData(_) => Protocol::MetaData,
         }
@@ -418,8 +431,11 @@ impl std::fmt::Display for RPCResponse {
             RPCResponse::PooledUserOpHashes(pooled_user_op_hashes) => {
                 write!(f, "PooledUserOpHashes: next_cursor: {}, Hashes: {:?}", std::str::from_utf8(&pooled_user_op_hashes.next_cursor.to_vec()).unwrap(), pooled_user_op_hashes.hashes)
             }
-            RPCResponse::PooledUserOpsByHash(pooled_user_ops_by_hash) => {
-                write!(f, "PooledUserOpsByHash: List: {:?}", pooled_user_ops_by_hash.list)
+            RPCResponse::PooledUserOpsByHashV07(pooled_user_ops_by_hash) => {
+                write!(f, "PooledUserOpsByHashV07: List: {:?}", pooled_user_ops_by_hash.list)
+            }
+            RPCResponse::PooledUserOpsByHashV06(pooled_user_ops_by_hash) => {
+                write!(f, "PooledUserOpsByHashV06: List: {:?}", pooled_user_ops_by_hash.list)
             }
             RPCResponse::Pong(ping) => write!(f, "Pong: {}", ping.data),
             RPCResponse::MetaData(metadata) => write!(f, "Metadata: {}", metadata.seq_number),
@@ -479,7 +495,6 @@ impl slog::KV for StatusMessage {
         record: &slog::Record,
         serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
-        use slog::Value;
         serializer.emit_arguments("chain_id", &format_args!("{:?}", self.chain_id))?;
         serializer.emit_arguments("block_hash", &format_args!("{:?}", self.block_hash))?;
         serializer.emit_arguments("block_number", &format_args!("{:?}", self.block_number))?;

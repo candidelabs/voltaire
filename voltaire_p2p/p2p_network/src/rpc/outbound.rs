@@ -1,18 +1,17 @@
+use super::codec::OutboundCodec;
 use super::methods::*;
 use super::protocol::ProtocolId;
 use super::protocol::SupportedProtocol;
 use super::RPCError;
 use crate::rpc::protocol::Encoding;
 use crate::rpc::{
-    codec::{base::BaseOutboundCodec, ssz_snappy::SSZSnappyOutboundCodec, OutboundCodec},
+    codec::{base::BaseOutboundCodec, ssz_snappy::SSZSnappyOutboundCodec},
     methods::ResponseTermination,
 };
 use futures::future::BoxFuture;
 use futures::prelude::{AsyncRead, AsyncWrite};
 use futures::{FutureExt, SinkExt};
 use libp2p::core::{OutboundUpgrade, UpgradeInfo};
-use types::eth_spec::EthSpec;
-use std::sync::Arc;
 use tokio_util::{
     codec::Framed,
     compat::{Compat, FuturesAsyncReadCompatExt},
@@ -24,23 +23,23 @@ use tokio_util::{
 // `OutboundUpgrade`
 
 #[derive(Debug, Clone)]
-pub struct OutboundRequestContainer<TSpec: EthSpec> {
-    pub req: OutboundRequest<TSpec>,
+pub struct OutboundRequestContainer {
+    pub req: OutboundRequest,
     // pub fork_context: Arc<ForkContext>,
     pub max_rpc_size: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum OutboundRequest<TSpec: EthSpec> {
+pub enum OutboundRequest {
     Status(StatusMessage),
     Goodbye(GoodbyeReason),
     PooledUserOpHashes(PooledUserOpHashesRequest),
     PooledUserOpsByHash(PooledUserOpsByHashRequest),
     Ping(Ping),
-    MetaData(MetadataRequest<TSpec>),
+    MetaData(MetadataRequest),
 }
 
-impl<TSpec: EthSpec> UpgradeInfo for OutboundRequestContainer<TSpec> {
+impl UpgradeInfo for OutboundRequestContainer {
     type Info = ProtocolId;
     type InfoIter = Vec<Self::Info>;
 
@@ -51,7 +50,7 @@ impl<TSpec: EthSpec> UpgradeInfo for OutboundRequestContainer<TSpec> {
 }
 
 /// Implements the encoding per supported protocol for `RPCRequest`.
-impl<TSpec: EthSpec> OutboundRequest<TSpec> {
+impl OutboundRequest {
     pub fn supported_protocols(&self) -> Vec<ProtocolId> {
         match self {
             // add more protocols when versions/encodings are supported
@@ -68,7 +67,11 @@ impl<TSpec: EthSpec> OutboundRequest<TSpec> {
                 Encoding::SSZSnappy,
             )],
             OutboundRequest::PooledUserOpsByHash(_) => vec![ProtocolId::new(
-                SupportedProtocol::PooledUserOpsByHashV1,
+                SupportedProtocol::PooledUserOpsByHashV07,
+                Encoding::SSZSnappy,
+            )],
+            OutboundRequest::PooledUserOpsByHash(_) => vec![ProtocolId::new(
+                SupportedProtocol::PooledUserOpsByHashV06,
                 Encoding::SSZSnappy,
             )],
             OutboundRequest::Ping(_) => vec![ProtocolId::new(
@@ -101,7 +104,7 @@ impl<TSpec: EthSpec> OutboundRequest<TSpec> {
             OutboundRequest::Status(_) => SupportedProtocol::StatusV1,
             OutboundRequest::Goodbye(_) => SupportedProtocol::GoodbyeV1,
             OutboundRequest::PooledUserOpHashes(_) => SupportedProtocol::PooledUserOpHashesV1,
-            OutboundRequest::PooledUserOpsByHash(_) => SupportedProtocol::PooledUserOpsByHashV1,
+            OutboundRequest::PooledUserOpsByHash(_) => SupportedProtocol::PooledUserOpsByHashV07,
             OutboundRequest::Ping(_) => SupportedProtocol::PingV1,
             OutboundRequest::MetaData(req) => SupportedProtocol::MetaDataV1,
         }
@@ -114,7 +117,7 @@ impl<TSpec: EthSpec> OutboundRequest<TSpec> {
             // this only gets called after `multiple_responses()` returns true. Therefore, only
             // variants that have `multiple_responses()` can have values.
             OutboundRequest::PooledUserOpHashes(_) => ResponseTermination::PooledUserOpHashes,
-            OutboundRequest::PooledUserOpsByHash(_) => ResponseTermination::PooledUserOpsByHash,
+            OutboundRequest::PooledUserOpsByHash(_) => ResponseTermination::PooledUserOpsByHashV07,
             OutboundRequest::Status(_) => unreachable!(),
             OutboundRequest::Goodbye(_) => unreachable!(),
             OutboundRequest::Ping(_) => unreachable!(),
@@ -127,14 +130,13 @@ impl<TSpec: EthSpec> OutboundRequest<TSpec> {
 
 /* Outbound upgrades */
 
-pub type OutboundFramed<TSocket, TSpec> = Framed<Compat<TSocket>, OutboundCodec<TSpec>>;
+pub type OutboundFramed<TSocket> = Framed<Compat<TSocket>, OutboundCodec>;
 
-impl<TSocket, TSpec> OutboundUpgrade<TSocket> for OutboundRequestContainer<TSpec>
+impl<TSocket> OutboundUpgrade<TSocket> for OutboundRequestContainer
 where
-    TSpec: EthSpec + Send + 'static,
     TSocket: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    type Output = OutboundFramed<TSocket, TSpec>;
+    type Output = OutboundFramed<TSocket>;
     type Error = RPCError;
     type Future = BoxFuture<'static, Result<Self::Output, Self::Error>>;
 
@@ -163,7 +165,7 @@ where
     }
 }
 
-impl<TSpec: EthSpec> std::fmt::Display for OutboundRequest<TSpec> {
+impl std::fmt::Display for OutboundRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             OutboundRequest::Status(status) => write!(f, "Status Message: {}", status),

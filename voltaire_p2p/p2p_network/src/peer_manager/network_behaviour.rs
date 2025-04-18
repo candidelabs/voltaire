@@ -10,7 +10,6 @@ use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use libp2p::swarm::dummy::ConnectionHandler;
 use libp2p::swarm::{ConnectionId, NetworkBehaviour, PollParameters, ToSwarm};
 use slog::{debug, error};
-use types::eth_spec::EthSpec;
 
 use crate::discovery::enr_ext::EnrExt;
 use crate::rpc::GoodbyeReason;

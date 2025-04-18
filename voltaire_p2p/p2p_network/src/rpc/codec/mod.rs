@@ -7,19 +7,17 @@ use crate::rpc::protocol::RPCError;
 use crate::rpc::{InboundRequest, OutboundRequest, RPCCodedResponse};
 use libp2p::bytes::BytesMut;
 use tokio_util::codec::{Decoder, Encoder};
-// use types::EthSpec;
-use types::eth_spec::EthSpec;
 
 // Known types of codecs
-pub enum InboundCodec<TSpec: EthSpec> {
-    SSZSnappy(BaseInboundCodec<SSZSnappyInboundCodec<TSpec>, TSpec>),
+pub enum InboundCodec {
+    SSZSnappy(BaseInboundCodec<SSZSnappyInboundCodec>),
 }
 
-pub enum OutboundCodec<TSpec: EthSpec> {
-    SSZSnappy(BaseOutboundCodec<SSZSnappyOutboundCodec<TSpec>, TSpec>),
+pub enum OutboundCodec {
+    SSZSnappy(BaseOutboundCodec<SSZSnappyOutboundCodec>),
 }
 
-impl<T: EthSpec> Encoder<RPCCodedResponse> for InboundCodec<T> {
+impl Encoder<RPCCodedResponse> for InboundCodec {
     type Error = RPCError;
 
     fn encode(&mut self, item: RPCCodedResponse, dst: &mut BytesMut) -> Result<(), Self::Error> {
@@ -29,8 +27,8 @@ impl<T: EthSpec> Encoder<RPCCodedResponse> for InboundCodec<T> {
     }
 }
 
-impl<TSpec: EthSpec> Decoder for InboundCodec<TSpec> {
-    type Item = InboundRequest<TSpec>;
+impl Decoder for InboundCodec {
+    type Item = InboundRequest;
     type Error = RPCError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -40,12 +38,12 @@ impl<TSpec: EthSpec> Decoder for InboundCodec<TSpec> {
     }
 }
 
-impl<TSpec: EthSpec> Encoder<OutboundRequest<TSpec>> for OutboundCodec<TSpec> {
+impl Encoder<OutboundRequest> for OutboundCodec {
     type Error = RPCError;
 
     fn encode(
         &mut self,
-        item: OutboundRequest<TSpec>,
+        item: OutboundRequest,
         dst: &mut BytesMut,
     ) -> Result<(), Self::Error> {
         match self {
@@ -54,7 +52,7 @@ impl<TSpec: EthSpec> Encoder<OutboundRequest<TSpec>> for OutboundCodec<TSpec> {
     }
 }
 
-impl<T: EthSpec> Decoder for OutboundCodec<T> {
+impl Decoder for OutboundCodec {
     type Item = RPCCodedResponse;
     type Error = RPCError;
 

@@ -7,14 +7,15 @@ use snap::raw::{decompress_len, Decoder, Encoder};
 use ssz::{Decode, Encode};
 use std::boxed::Box;
 use std::io::{Error, ErrorKind};
-use std::sync::Arc;
 
-use super::verified_useroperation::VerifiedUserOperation;
+use super::verified_useroperation::VerifiedUserOperationV06;
+use super::verified_useroperation::VerifiedUserOperationV07;
 
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PubsubMessage {
-    VerifiedUserOperation(Box<VerifiedUserOperation>),
+    VerifiedUserOperationV07(Box<VerifiedUserOperationV07>),
+    VerifiedUserOperationV06(Box<VerifiedUserOperationV06>),
 }
 
 // Implements the `DataTransform` trait of gossipsub to employ snappy compression
@@ -89,7 +90,8 @@ impl PubsubMessage {
     /// Returns the kind of gossipsub topic associated with the message.
     pub fn kind(&self) -> GossipKind {
         match self {
-            PubsubMessage::VerifiedUserOperation(_) => GossipKind::VerifiedUserOperation,
+            PubsubMessage::VerifiedUserOperationV07(_) => GossipKind::VerifiedUserOperationV07,
+            PubsubMessage::VerifiedUserOperationV06(_) => GossipKind::VerifiedUserOperationV06,
         }
     }
 
@@ -100,10 +102,12 @@ impl PubsubMessage {
     pub fn decode(
         topic: &TopicHash,
         data: &[u8],
+        topic_v07: &GossipTopic,
+        topic_v06: &GossipTopic,
         // fork_context: &ForkContext,
     ) -> Result<Self, String> {
-        match GossipTopic::decode(topic.as_str()) {
-            Err(_) => Err(format!("Unknown gossipsub topic: {:?}", topic)),
+        match GossipTopic::decode(topic.as_str(), topic_v07, topic_v06) {
+            Err(err) => Err(format!("Unknown gossipsub topic: {:?}, with error: {}", topic, err)),
             Ok(gossip_topic) => {
                 // All topics are currently expected to be compressed and decompressed with snappy.
                 // This is done in the `SnappyTransform` struct.
@@ -112,11 +116,16 @@ impl PubsubMessage {
 
                 // the ssz decoders
                 match gossip_topic.kind() {
-                    GossipKind::VerifiedUserOperation => {
-                        let proposer_slashing = VerifiedUserOperation::from_ssz_bytes(data)
+                    GossipKind::VerifiedUserOperationV07 => {
+                        let verified_useroperation = VerifiedUserOperationV07::from_ssz_bytes(data)
                             .map_err(|e| format!("{:?}", e))?;
-                        Ok(PubsubMessage::VerifiedUserOperation(Box::new(proposer_slashing)))
-                    }
+                        Ok(PubsubMessage::VerifiedUserOperationV07(Box::new(verified_useroperation)))
+                    },
+                    GossipKind::VerifiedUserOperationV06 => {
+                        let verified_useroperation = VerifiedUserOperationV06::from_ssz_bytes(data)
+                            .map_err(|e| format!("{:?}", e))?;
+                        Ok(PubsubMessage::VerifiedUserOperationV06(Box::new(verified_useroperation)))
+                    },
                 }
             }
         }
@@ -130,7 +139,8 @@ impl PubsubMessage {
         // Also note, that the compression is handled by the `SnappyTransform` struct. Gossipsub will compress the
         // messages for us.
         match &self {
-            PubsubMessage::VerifiedUserOperation(data) => data.as_ssz_bytes(),
+            PubsubMessage::VerifiedUserOperationV07(data) => data.as_ssz_bytes(),
+            PubsubMessage::VerifiedUserOperationV06(data) => data.as_ssz_bytes(),
         }
     }
 }
@@ -138,7 +148,8 @@ impl PubsubMessage {
 impl std::fmt::Display for PubsubMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PubsubMessage::VerifiedUserOperation(_data) => write!(f, "UserOperations With EntryPoint"),
+            PubsubMessage::VerifiedUserOperationV07(_data) => write!(f, "UserOperations With EntryPointv0.07"),
+            PubsubMessage::VerifiedUserOperationV06(_data) => write!(f, "UserOperations With EntryPointv0.06"),
         }
     }
 }

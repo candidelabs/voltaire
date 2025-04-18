@@ -9,8 +9,6 @@ use libp2p::{swarm::NotifyHandler, PeerId};
 use slog::{crit, debug, Logger};
 use smallvec::SmallVec;
 use tokio_util::time::DelayQueue;
-use types::eth_spec::EthSpec;
-// use types::EthSpec;
 
 use super::{
     config::OutboundRateLimiterConfig,
@@ -20,22 +18,22 @@ use super::{
 
 /// A request that was rate limited or waiting on rate limited requests for the same peer and
 /// protocol.
-struct QueuedRequest<Id: ReqId, TSpec: EthSpec> {
-    req: OutboundRequest<TSpec>,
+struct QueuedRequest<Id: ReqId> {
+    req: OutboundRequest,
     request_id: Id,
 }
 
-pub(crate) struct SelfRateLimiter<Id: ReqId, TSpec: EthSpec> {
+pub(crate) struct SelfRateLimiter<Id: ReqId> {
     /// Requests queued for sending per peer. This requests are stored when the self rate
     /// limiter rejects them. Rate limiting is based on a Peer and Protocol basis, therefore
     /// are stored in the same way.
-    delayed_requests: HashMap<(PeerId, Protocol), VecDeque<QueuedRequest<Id, TSpec>>>,
+    delayed_requests: HashMap<(PeerId, Protocol), VecDeque<QueuedRequest<Id>>>,
     /// The delay required to allow a peer's outbound request per protocol.
     next_peer_request: DelayQueue<(PeerId, Protocol)>,
     /// Rate limiter for our own requests.
     limiter: RateLimiter,
     /// Requests that are ready to be sent.
-    ready_requests: SmallVec<[BehaviourAction<Id, TSpec>; 3]>,
+    ready_requests: SmallVec<[BehaviourAction<Id>; 3]>,
     /// Slog logger.
     log: Logger,
 }
@@ -49,7 +47,7 @@ pub enum Error {
     RateLimited,
 }
 
-impl<Id: ReqId, TSpec: EthSpec> SelfRateLimiter<Id, TSpec> {
+impl<Id: ReqId> SelfRateLimiter<Id> {
     /// Creates a new [`SelfRateLimiter`] based on configration values.
     pub fn new(config: OutboundRateLimiterConfig, log: Logger) -> Result<Self, &'static str> {
         debug!(log, "Using self rate limiting params"; "config" => ?config);
@@ -71,8 +69,8 @@ impl<Id: ReqId, TSpec: EthSpec> SelfRateLimiter<Id, TSpec> {
         &mut self,
         peer_id: PeerId,
         request_id: Id,
-        req: OutboundRequest<TSpec>,
-    ) -> Result<BehaviourAction<Id, TSpec>, Error> {
+        req: OutboundRequest,
+    ) -> Result<BehaviourAction<Id>, Error> {
         let protocol = req.versioned_protocol().protocol();
         // First check that there are not already other requests waiting to be sent.
         if let Some(queued_requests) = self.delayed_requests.get_mut(&(peer_id, protocol)) {
@@ -102,9 +100,9 @@ impl<Id: ReqId, TSpec: EthSpec> SelfRateLimiter<Id, TSpec> {
         limiter: &mut RateLimiter,
         peer_id: PeerId,
         request_id: Id,
-        req: OutboundRequest<TSpec>,
+        req: OutboundRequest,
         log: &Logger,
-    ) -> Result<BehaviourAction<Id, TSpec>, (QueuedRequest<Id, TSpec>, Duration)> {
+    ) -> Result<BehaviourAction<Id>, (QueuedRequest<Id>, Duration)> {
         match limiter.allows(&peer_id, &req) {
             Ok(()) => Ok(BehaviourAction::NotifyHandler {
                 peer_id,
@@ -161,7 +159,7 @@ impl<Id: ReqId, TSpec: EthSpec> SelfRateLimiter<Id, TSpec> {
         }
     }
 
-    pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<BehaviourAction<Id, TSpec>> {
+    pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<BehaviourAction<Id>> {
         // First check the requests that were self rate limited, since those might add events to
         // the queue. Also do this this before rate limiter prunning to avoid removing and
         // immediately adding rate limiting keys.
