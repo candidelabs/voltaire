@@ -80,6 +80,8 @@ class InitData:
     is_eip7702: bool
     p2p_canonical_mempool_id_07: str | None
     p2p_canonical_mempool_id_06: str | None
+    min_stake: int
+    min_unstake_delay: int
 
 
 def address(ep: str):
@@ -550,7 +552,19 @@ def initialize_argument_parser() -> ArgumentParser:
         const=None,
         default=None,
     )
+    parser.add_argument(
+        "--min_stake",
+        type=unsigned_int,
+        help="minimum stake.",
+        default=1,
+    )
 
+    parser.add_argument(
+        "--min_unstake_delay",
+        type=unsigned_int,
+        help="minimum unstake delay.",
+        default=1,
+    )
     return parser
 
 
@@ -778,6 +792,8 @@ async def get_init_data(args: Namespace) -> InitData:
         args.eip7702
         args.p2p_canonical_mempool_id_07,
         args.p2p_canonical_mempool_id_06,
+        args.min_stake,
+        args.min_unstake_delay,
     )
 
     if args.verbose:

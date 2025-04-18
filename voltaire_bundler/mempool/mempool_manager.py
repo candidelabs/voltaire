@@ -91,8 +91,8 @@ class LocalMempoolManager():
             self.entrypoint,
             None,
             None,
-            self.MIN_STAKE,
-            self.MIN_UNSTAKE_DELAY
+            self.min_stake,
+            self.min_unstake_delay
         )
 
         # EREP-050
@@ -226,8 +226,8 @@ class LocalMempoolManager():
                 self.entrypoint,
                 None,
                 None,
-                self.MIN_STAKE,
-                self.MIN_UNSTAKE_DELAY
+                self.min_stake,
+                self.min_unstake_delay
             )
 
             # EREP-050
@@ -262,9 +262,6 @@ class LocalMempoolManager():
                     self.entrypoint,
                     verified_at_block_hash,
                     None,
-                    self.MIN_STAKE,
-                    self.MIN_UNSTAKE_DELAY
-                    latest_block_timestamp,
                     self.min_stake,
                     self.min_unstake_delay
                 )
@@ -453,8 +450,8 @@ class LocalMempoolManager():
                 self.entrypoint,
                 None,
                 user_operation.validated_at_block_hex,
-                self.MIN_STAKE,
-                self.MIN_UNSTAKE_DELAY
+                self.min_stake,
+                self.min_unstake_delay
             )
             return True, associated_addresses, storage_map
         except ValidationException as err:
