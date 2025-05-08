@@ -510,7 +510,7 @@ class BundlerManager:
             if user_operation_log is not None:
                 logging.info(
                     f"user operation: {user_operation.user_operation_hash} "
-                    "was included onchain after adding to mempool for"
+                    "was included onchain after adding to mempool for "
                     f"{user_operation.number_of_add_to_mempool_attempts} times"
                 )
                 user_operations_hashes_to_remove_from_monitoring.append(
