@@ -31,6 +31,7 @@ from ..mempool.reputation_manager import ReputationManager
 
 class BundlerManager:
     ethereum_node_url: str
+    bundle_node_url: str
     bundler_private_key: str
     bundler_address: Address
     local_mempool_manager_v6: LocalMempoolManagerV6 | None
@@ -59,6 +60,7 @@ class BundlerManager:
         local_mempool_manager_v7: LocalMempoolManagerV7,
         local_mempool_manager_v8: LocalMempoolManagerV8,
         ethereum_node_url: str,
+        bundle_node_url: str,
         bundler_private_key: str,
         bundler_address: Address,
         chain_id: int,
@@ -72,6 +74,7 @@ class BundlerManager:
         self.local_mempool_manager_v7 = local_mempool_manager_v7
         self.local_mempool_manager_v8 = local_mempool_manager_v8
         self.ethereum_node_url = ethereum_node_url
+        self.bundle_node_url = bundle_node_url
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
         self.chain_id = chain_id
@@ -338,7 +341,7 @@ class BundlerManager:
             else:
                 method = "pfl_sendRawTransactionConditional"
             result = await send_rpc_request_to_eth_client(
-                self.ethereum_node_url,
+                self.bundle_node_url,
                 method,
                 [
                     raw_transaction,
@@ -357,7 +360,7 @@ class BundlerManager:
             )
         else:
             result = await send_rpc_request_to_eth_client(
-                self.ethereum_node_url,
+                self.bundle_node_url,
                 "eth_sendRawTransaction",
                 [
                     raw_transaction

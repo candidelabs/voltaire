@@ -3,13 +3,14 @@ import logging
 import traceback
 import math
 import os
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from voltaire_bundler.bundle.exceptions import \
     ExecutionException, OtherJsonRpcErrorCode, OtherJsonRpcErrorException, \
     UserOpFoundException, UserOpReceiptFoundException, ValidationException, ValidationExceptionCode
 from voltaire_bundler.cli_manager import ConditionalRpc
 from voltaire_bundler.event_bus_manager.endpoint import Client, Endpoint
+from voltaire_bundler.mempool.mempool_manager import encode_address, encode_uint256
 from voltaire_bundler.typing import Address
 from voltaire_bundler.user_operation.user_operation_handler import \
         get_deposit_info
@@ -55,6 +56,7 @@ class ExecutionEndpoint(Endpoint):
     def __init__(
         self,
         ethereum_node_url: str,
+        bundle_node_url: str,
         bundler_private_key: str,
         bundler_address: Address,
         chain_id: int,
@@ -167,6 +169,7 @@ class ExecutionEndpoint(Endpoint):
             self.local_mempool_manager_v7,
             self.local_mempool_manager_v8,
             ethereum_node_url,
+            bundle_node_url,
             bundler_private_key,
             bundler_address,
             chain_id,

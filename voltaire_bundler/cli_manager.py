@@ -43,6 +43,7 @@ class InitData:
     rpc_url: str
     rpc_port: int
     ethereum_node_url: str
+    bundle_node_url: str
     bundler_pk: str
     bundler_address: Address
     chain_id: int
@@ -193,6 +194,18 @@ def initialize_argument_parser() -> ArgumentParser:
         nargs="?",
         const="http://0.0.0.0:8545",
         default=_get_env_or_default("VOLTAIRE_ETHEREUM_NODE_URL", "http://0.0.0.0:8545", str),
+    )
+
+    parser.add_argument(
+        "--bundle_node_url",
+        type=str,
+        help=(
+            "Eth Client JSON-RPC Url for sending bundle only- "
+            "useful for clients that offer mev protection"
+        ),
+        nargs="?",
+        const=None,
+        default=_get_env_or_default("VOLTAIRE_BUNDLE_NODE_URL", None, str),
     )
 
     parser.add_argument(
@@ -579,6 +592,8 @@ async def parse_args(cmd_args: [str]) -> InitData:
     # Non-required mutually exclusive arguments
     if args.conditional_rpc and args.flashbots_protect_node_url:
         argument_parser.error("You can only specify either --conditional_rpc or --flashbots_protect_node_url but not both at the same time")
+    if args.bundle_node_url and args.flashbots_protect_node_url:
+        argument_parser.error("You can only specify either --bundle_node_url or --flashbots_protect_node_url but not both at the same time")
     if args.ethereum_node_debug_trace_call_url and args.unsafe:
         argument_parser.error("You can only specify either --ethereum_node_debug_trace_call_url or --unsafe but not both at the same time")
     if args.legacy_mode and args.eip7702:
@@ -691,10 +706,25 @@ async def get_init_data(args: Namespace) -> InitData:
 
     bundler_address, bundler_pk = init_bundler_address_and_secret(args)
 
+    if args.bundle_node_url is None:
+        args.bundle_node_url = args.ethereum_node_url
     if args.ethereum_node_debug_trace_call_url is None:
         args.ethereum_node_debug_trace_call_url = args.ethereum_node_url
     if args.ethereum_node_eth_get_logs_url is None:
         args.ethereum_node_eth_get_logs_url = args.ethereum_node_url
+
+    if args.bundle_node_url != args.ethereum_node_url:
+        ethereum_node_debug_chain_id_hex = (
+            await check_valid_ethereum_rpc_and_get_chain_id(
+                args.bundle_node_url
+            )
+        )
+        if ethereum_node_chain_id_hex != ethereum_node_debug_chain_id_hex:
+            logging.critical(
+                f"Eth node chain id {ethereum_node_chain_id_hex} not eqaul " +
+                f"Eth node debug chain id {ethereum_node_debug_chain_id_hex}"
+            )
+            sys.exit(1)
 
     if args.ethereum_node_debug_trace_call_url != args.ethereum_node_url:
         ethereum_node_debug_chain_id_hex = (
@@ -755,6 +785,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.rpc_url,
         args.rpc_port,
         args.ethereum_node_url,
+        args.bundle_node_url,
         bundler_pk,
         bundler_address,
         args.chain_id,
