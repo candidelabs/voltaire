@@ -429,8 +429,24 @@ class ExecutionEndpoint(Endpoint):
             await local_mempool.add_user_operation(user_operation)
         )
         if not self.disable_p2p:
+            if (input_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase):
+                user_operation_json = user_operation.get_user_operation_json()
+            else:
+                user_operation_json = cast(
+                    dict[str, Address | str | dict[str, str] | None],
+                    user_operation.get_user_operation_json()
+                )
+                eip7702_auth = user_operation.eip7702_auth
+                user_operation_json["eip7702Auth"] = None if eip7702_auth is None else {
+                    "chainId": encode_uint256(int(eip7702_auth["chainId"], 16)),
+                    "address": encode_address(eip7702_auth["address"]),
+                    "nonce": encode_uint256(int(eip7702_auth["nonce"], 16)),
+                    "yParity": encode_uint256(int(eip7702_auth["yParity"], 16)),
+                    "r": encode_uint256(int(eip7702_auth["r"], 16)),
+                    "s": encode_uint256(int(eip7702_auth["s"], 16)),
+                }
             local_mempool.queue_verified_useroperation_to_gossip_publish(
-                user_operation.get_user_operation_json(),
+                user_operation_json,
                 verified_at_block_hash,
                 valid_mempools,
             )
