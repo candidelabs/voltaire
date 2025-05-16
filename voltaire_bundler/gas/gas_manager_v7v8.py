@@ -8,7 +8,7 @@ from eth_abi import decode, encode
 from voltaire_bundler.bundle.exceptions import \
     (ExecutionException, ExecutionExceptionCode,
      ValidationException, ValidationExceptionCode)
-from voltaire_bundler.gas.gas_manager import GasManager
+from voltaire_bundler.gas.gas_manager import GasManager, calculate_deposit_slot_index
 from voltaire_bundler.user_operation.models import FailedOp, FailedOpWithRevert
 from voltaire_bundler.user_operation.user_operation_handler import \
     decode_failed_op_event, decode_failed_op_with_revert_event
@@ -201,16 +201,18 @@ class GasManagerV7V8(GasManager):
         }
         eip7702_auth = user_operation.eip7702_auth
 
-        if eip7702_auth is not None or user_operation.paymaster is not None:
-            default_state_overrides[user_operation.sender_address] = {}
-            if eip7702_auth is not None:
-                default_state_overrides[user_operation.sender_address][
-                    "code"] = "0xef0100" + eip7702_auth["address"][2:]
+        if eip7702_auth is not None:
+            default_state_overrides[user_operation.sender_address][
+                "code"] = "0xef0100" + eip7702_auth["address"][2:]
 
-            if user_operation.paymaster is not None:
-                default_state_overrides[user_operation.sender_address][
-                    "balance"] = "0x314dc6448d9338c15b0a00000000"
-
+        if user_operation.paymaster is not None:
+            slot_index = calculate_deposit_slot_index(
+                user_operation.paymaster_address_lowercase)
+            default_state_overrides[entrypoint]["stateDiff"] = {
+                # override paymaster deposit with max value as verificationgas
+                # is set to max value for estimation
+                slot_index: "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            }
         call_data = function_selector + call_data_params.hex()
         params: list[Any] = [
             {

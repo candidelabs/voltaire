@@ -6,7 +6,7 @@ from eth_abi import decode, encode
 
 from voltaire_bundler.bundle.exceptions import ExecutionException, \
         ExecutionExceptionCode, ValidationException, ValidationExceptionCode
-from voltaire_bundler.gas.gas_manager import GasManager
+from voltaire_bundler.gas.gas_manager import GasManager, calculate_deposit_slot_index
 from voltaire_bundler.user_operation.models import FailedOp
 from voltaire_bundler.user_operation.user_operation_handler import \
         decode_failed_op_event
@@ -197,10 +197,20 @@ class GasManagerV6(GasManager):
         call_data = function_selector + call_data_params.hex()
         # if there is no paymaster, override the sender's balance for gas estimation
         if len(user_operation.paymaster_and_data) == 0:
-            # if the target is zero, simulate_handle_op is called to estimate
-            # gas limits override the sender balance with the high value of 10^15 eth
             default_state_overrides[user_operation.sender_address] = {
+                # override the sender balance with the high value of 10^15 eth
+                # not needed as gas prices can be set to zero, but keeping as
+                # is for ep 0.6 only as changing it might be a breaking change
                 "balance": "0x314dc6448d9338c15b0a00000000"
+            }
+        else:
+            slot_index = calculate_deposit_slot_index(
+                    user_operation.paymaster_address_lowercase)
+            default_state_overrides[entrypoint]["stateDiff"] = {
+                # override paymaster deposit with max value as verificationgas
+                # is set to max value for estimation, this will override staked
+                # and stake values as well
+                slot_index: "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
             }
 
         params: list[Any] = [

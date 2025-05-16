@@ -3,7 +3,10 @@ import asyncio
 import logging
 import math
 from typing import Generic, Any
+from functools import cache
+
 from eth_abi import encode, decode
+from eth_utils import keccak
 
 from voltaire_bundler.user_operation.models import UserOperationType
 from voltaire_bundler.bundle.exceptions import \
@@ -299,3 +302,15 @@ class GasManager(ABC, Generic[UserOperationType]):
     @abstractmethod
     def calc_base_preverification_gas(self, user_operation: UserOperationType) -> int:
         pass
+
+
+@cache
+def calculate_deposit_slot_index(address: str) -> str:
+    # same deposit value slot for all entrypoints(for ep 0.6 this slot also has
+    # the staked and stake values)
+    return "0x" + keccak(
+        encode(
+            ["uint256", "uint256"],
+            [int(address, 16), 0]  # slot = 0
+        )
+    ).hex()
