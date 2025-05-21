@@ -3,11 +3,13 @@ use serde_derive::{Deserialize, Serialize};
 use ssz_derive::{Decode, Encode};
 use ssz_types::VariableList;
 use tree_hash_derive::TreeHash;
-use crate::types::optional_hex_var_list;
 
 use ssz_types::typenum::U1000000;
 use ethereum_types::U256;
 use ethereum_types::Address;
+use ethereum_types::H256;
+
+use super::optional::Optional;
 
 type MaxCallDataSize = U1000000;
 pub const MAX_CONTRACT_SIZE: usize = 24576;
@@ -74,6 +76,24 @@ pub struct VerifiedUserOperationV06 {
     pub verified_at_block_hash: U256
 }
 
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    Encode,
+    Decode,
+    TreeHash,
+)]
+pub struct Eip7702Auth {
+    pub chain: U256,
+    pub nonce: U256,
+    pub address: Address,
+    pub v: U256,
+    pub r: H256,
+    pub s: H256,
+}
 
 #[derive(
     Debug,
@@ -93,10 +113,9 @@ pub struct UserOperationV07 {
     /// Anti-replay parameter (see "Semi-abstracted Nonce Support" ).
     pub nonce: U256,
     /// Anti-replay parameter (see "Semi-abstracted Nonce Support" ).
-    pub factory: Option<Address>,
+    pub factory: Optional<Address>,
     /// Anti-replay parameter (see "Semi-abstracted Nonce Support" ).
-    #[serde(with = "optional_hex_var_list")]
-    pub factoryData: Option<VariableList<u8, MaxCallDataSize>>,
+    pub factoryData: Optional<VariableList<u8, MaxCallDataSize>>,
     /// The data to pass to the `sender` during the main execution call.
     #[serde(with = "ssz_types::serde_utils::hex_var_list")]
     pub callData: VariableList<u8, MaxCallDataSize>,
@@ -111,17 +130,17 @@ pub struct UserOperationV07 {
     ///  Maximum priority fee per gas.
     pub maxPriorityFeePerGas: U256,
     /// Anti-replay parameter (see "Semi-abstracted Nonce Support" ).
-    pub paymaster: Option<Address>,
+    pub paymaster: Optional<Address>,
     /// Anti-replay parameter (see "Semi-abstracted Nonce Support" ).
-    pub paymasterVerificationGasLimit: Option<U256>,
+    pub paymasterVerificationGasLimit: Optional<U256>,
     /// Anti-replay parameter (see "Semi-abstracted Nonce Support" ).
-    pub paymasterPostOpGasLimit: Option<U256>,
+    pub paymasterPostOpGasLimit: Optional<U256>,
     /// Address of paymaster sponsoring the transaction, followed by extra data to send to the paymaster (empty for self-sponsored transaction).
-    #[serde(with = "optional_hex_var_list")]
-    pub paymasterData: Option<VariableList<u8, MaxCallDataSize>>,
+    pub paymasterData: Optional<VariableList<u8, MaxCallDataSize>>,
     /// Data passed into the account along with the nonce during the verification step.
     #[serde(with = "ssz_types::serde_utils::hex_var_list")]
     pub signature: VariableList<u8, MaxCallDataSize>,
+    pub eip7702Auth: Optional<Eip7702Auth>,
 }
 
 #[derive(

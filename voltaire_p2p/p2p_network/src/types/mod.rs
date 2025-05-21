@@ -4,7 +4,7 @@ mod pubsub;
 mod subnet;
 mod topics;
 mod verified_useroperation;
-mod optional_hex_var_list;
+mod optional;
 
 #[macro_use]
 mod macros;
