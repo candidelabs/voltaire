@@ -9,7 +9,7 @@ def p2p_boot(
     p2p_enr_udp_port: int,
     p2p_target_peers_number: int,
     p2p_enr_address: str,
-    p2p_mempools_ids: list[list[MempoolId]],
+    p2p_mempools_ids: list[list[MempoolId | None]],
     p2p_boot_nodes_enr: str,
     p2p_upnp_enabled: bool,
     p2p_metrics_enabled: bool,

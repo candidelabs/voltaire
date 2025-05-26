@@ -31,7 +31,11 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             init_data.p2p_enr_udp_port,
             init_data.p2p_target_peers_number,
             init_data.p2p_enr_address,
-            [[init_data.p2p_canonical_mempool_id_07, init_data.p2p_canonical_mempool_id_06]],
+            [[
+                init_data.p2p_canonical_mempool_id_08,
+                init_data.p2p_canonical_mempool_id_07,
+                init_data.p2p_canonical_mempool_id_06
+            ]],
             init_data.p2p_boot_nodes_enr,
             init_data.p2p_upnp_enabled,
             init_data.p2p_metrics_enabled,

@@ -794,42 +794,36 @@ class ExecutionEndpoint(Endpoint):
 
         # full topic format /account_abstraction/mempool_id/Name/Encoding
         # sepolia example
-        # /account_abstraction/Qmf7P3CuhzSbpJa8LqXPwRzfPqsvoQ6RG7aXvthYTzGxb2/user_operations/ssz_snappy
+        # /account_abstraction/Qmf7P3CuhzSbpJa8LqXPwRzfPqsvoQ6RG7aXvthYTzGxb2/user_operation/ssz_snappy
         try:
+            user_operation = verified_useroperation["user_operation"]
             mempool_id = topic.split('/')[2]
-            if mempool_id == self.local_mempool_manager_v7.canonical_mempool_id:
-                user_operation_obj = UserOperationV7(verified_useroperation[
-                    "user_operation"])
+            if mempool_id == self.local_mempool_manager_v8.canonical_mempool_id:
+                user_operation_obj = UserOperationV7V8(user_operation)
+                local_mempool = self.local_mempool_manager_v8
+            elif mempool_id == self.local_mempool_manager_v7.canonical_mempool_id:
+                user_operation_obj = UserOperationV7V8(user_operation)
                 local_mempool = self.local_mempool_manager_v7
-                if entrypoint_lowercase != local_mempool.entrypoint_lowercase:
-                    logging.debug(
-                        "Dropping gossib from unsupported entrypoint : " +
-                        f"{entrypoint_lowercase}"
-                    )
-                    #local_mempool.reputation_manager
-                await local_mempool.add_user_operation_p2p(
-                    user_operation_obj, peer_id, verified_at_block_hash
-                )
             elif (
                     self.local_mempool_manager_v6 is not None and
                     mempool_id == self.local_mempool_manager_v6.canonical_mempool_id
             ):
-                user_operation_obj = UserOperationV6(verified_useroperation[
-                    "user_operation"])
+                user_operation_obj = UserOperationV6(user_operation)
                 local_mempool = self.local_mempool_manager_v6
-                if entrypoint_lowercase != local_mempool.entrypoint_lowercase:
-                    logging.debug(
-                        "Dropping gossib from unsupported entrypoint : " +
-                        f"{entrypoint_lowercase}"
-                    )
-                    #local_mempool.reputation_manager
-                await local_mempool.add_user_operation_p2p(
-                    user_operation_obj, peer_id, verified_at_block_hash
-                )
-
             else:
                 logging.debug(f"Dropping gossib from unsupported topic : {topic}")
                 return
+
+            if entrypoint_lowercase != local_mempool.entrypoint_lowercase:
+                logging.debug(
+                    "Dropping gossib from unsupported entrypoint : " +
+                    f"{entrypoint_lowercase}"
+                )
+                return
+            # local_mempool.reputation_manager
+            await local_mempool.add_user_operation_p2p(
+                user_operation_obj, peer_id, verified_at_block_hash
+            )
 
         except ValidationException:
             self.local_mempool_manager_v7.reputation_manager.ban_entity(peer_id)

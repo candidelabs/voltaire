@@ -79,8 +79,9 @@ class InitData:
     reputation_whitelist: list[str]
     reputation_blacklist: list[str]
     is_eip7702: bool
-    p2p_canonical_mempool_id_07: str | None
-    p2p_canonical_mempool_id_06: str | None
+    p2p_canonical_mempool_id_08: MempoolId | None
+    p2p_canonical_mempool_id_07: MempoolId | None
+    p2p_canonical_mempool_id_06: MempoolId | None
     min_stake: int
     min_unstake_delay: int
 
@@ -549,6 +550,15 @@ def initialize_argument_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
+        "--p2p_canonical_mempool_id_08",
+        type=str,
+        help="Canonical mempool id for entrypoint v0.08",
+        nargs="?",
+        const=None,
+        default=None,
+    )
+
+    parser.add_argument(
         "--p2p_canonical_mempool_id_07",
         type=str,
         help= "Canonical mempool id for entrypoint v0.07",
@@ -762,6 +772,18 @@ async def get_init_data(args: Namespace) -> InitData:
         await check_valid_entrypoints(args.ethereum_node_url, args.disable_v6)
 
     if not args.disable_p2p:
+        if args.p2p_canonical_mempool_id_08 is None:
+            if args.chain_id not in DEFAULT_MEMPOOL_INFO[
+                    "0x4337084d9e255ff0702461cf8895ce9e3b5ff108"]:
+                logging.warning(
+                    "p2p is disabled because p2p_canonical_mempool_id_08 "
+                    "not provided and no default value for the target chain."
+                )
+                args.disable_p2p = True
+            else:
+                args.p2p_canonical_mempool_id_08 = DEFAULT_MEMPOOL_INFO[
+                    "0x4337084d9e255ff0702461cf8895ce9e3b5ff108"][args.chain_id]
+
         if args.p2p_canonical_mempool_id_07 is None:
             if args.chain_id not in DEFAULT_MEMPOOL_INFO["0x0000000071727De22E5E9d8BAf0edAc6f37da032"]:
                 logging.warning(
@@ -771,6 +793,7 @@ async def get_init_data(args: Namespace) -> InitData:
                 args.disable_p2p = True
             else:
                 args.p2p_canonical_mempool_id_07 = DEFAULT_MEMPOOL_INFO["0x0000000071727De22E5E9d8BAf0edAc6f37da032"][args.chain_id]
+
         if not args.disable_v6 and args.p2p_canonical_mempool_id_06 is None:
             if args.chain_id not in DEFAULT_MEMPOOL_INFO["0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"]:
                 logging.warning(
@@ -821,6 +844,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.reputation_whitelist,
         args.reputation_blacklist,
         args.eip7702,
+        args.p2p_canonical_mempool_id_08,
         args.p2p_canonical_mempool_id_07,
         args.p2p_canonical_mempool_id_06,
         args.min_stake,
