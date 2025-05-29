@@ -1,11 +1,9 @@
-from functools import reduce
+import logging
 
 from eth_utils import to_checksum_address
 from eth_abi import decode
 from voltaire_bundler.bundle.exceptions import UserOpFoundException
-from voltaire_bundler.mempool.sender_mempool import \
-    VerifiedUserOperation
-from voltaire_bundler.user_operation.user_operation_handler import UserOperationHandler, get_transaction_by_hash
+from voltaire_bundler.user_operation.user_operation_handler import UserOperationHandler, del_user_operation_logs_cache_entry, get_transaction_by_hash
 from ..gas.gas_manager_v6 import GasManagerV6
 
 
@@ -69,7 +67,42 @@ class UserOperationHandlerV6(UserOperationHandler):
             transaction_hash
         )
         if transaction is None:
-            raise ValueError(f"Can't find transaction by hash:{transaction_hash}")
+            logging.error(
+                f"Can't find transaction by hash:{transaction_hash} "
+                f"for user operation hash: {user_operation_hash}. Retrying."
+            )
+            del_user_operation_logs_cache_entry(user_operation_hash, entrypoint)
+            event_log_info = await self.get_user_operation_event_log_info(
+                user_operation_hash, entrypoint
+            )
+            if event_log_info is None:
+                return None
+
+            (
+                log_object,
+                userOpHash,
+                sender,
+                paymaster,
+                nonce,
+                success,
+                actualGasCost,
+                actualGasUsed,
+                logs,
+            ) = event_log_info
+            assert userOpHash == user_operation_hash
+
+            transaction_hash = log_object.transactionHash
+            transaction = await get_transaction_by_hash(
+                self.ethereum_node_url,
+                transaction_hash
+            )
+            if transaction is None:
+                logging.error(
+                    f"Can't find transaction by hash:{transaction_hash} "
+                    f"for user operation hash: {user_operation_hash} "
+                    "for the second time."
+                )
+                return None
 
         block_hash = transaction["blockHash"]
         block_number = transaction["blockNumber"]
@@ -84,6 +117,12 @@ class UserOperationHandlerV6(UserOperationHandler):
             ):
                 return user_operation_list, block_number, block_hash, transaction_hash
 
+        logging.error(
+            f"Can't find user operation hash: {user_operation_hash} "
+            f"with sender: {sender} and nonce: {nonce} in list of user ops:"
+            f"{user_operations_lists} returned from transaction hash: {transaction_hash}"
+            " .This shouldn't happen."
+        )
         assert False  # should not be reached
 
     async def get_user_operation_by_hash_rpc(

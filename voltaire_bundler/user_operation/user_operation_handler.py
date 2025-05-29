@@ -306,6 +306,16 @@ user_operation_logs_cache: dict[str, dict[str, dict]] = {
 }
 
 
+def del_user_operation_logs_cache_entry(
+    user_operation_hash: str,
+    entrypoint: str,
+) -> None:
+    global user_operation_logs_cache
+    logs_cache = user_operation_logs_cache[entrypoint.lower()]
+    if user_operation_hash in logs_cache:
+        del logs_cache[user_operation_hash]
+
+
 async def get_user_operation_logs_for_block_range(
     ethereum_node_eth_get_logs_url: str,
     user_operation_hash: str,
