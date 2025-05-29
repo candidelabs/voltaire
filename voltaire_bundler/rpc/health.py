@@ -44,36 +44,44 @@ async def check_bundler_balance(
         "eth_getBalance",
         [bundler, "latest"],
     )
-    if "result" not in bundler_balance_res:
-        error_message = f"eth_getBalance failed {ethereum_node_url}"
-        logging.critical(error_message)
-        return False, {
-                "status": "ERROR",
-                "message": error_message
-            }
-    else:
-        bundler_balance = bundler_balance_res["result"]
-        if int(bundler_balance, 16) >= min_balance:
-            return True, {
-                "status": "OK",
-                "message": (
-                    f"Bundler {bundler} balance {bundler_balance}" +
-                    f" is equal or more than minimum balance {hex(min_balance)}"
-                 )
-            }
+    try:
+        if bundler_balance_res is None or "result" not in bundler_balance_res:
+            error_message = f"eth_getBalance failed {ethereum_node_url}"
+            logging.critical(error_message)
+            return False, {
+                    "status": "ERROR",
+                    "message": error_message
+                }
         else:
-            error_message = (
-                f"Bundler {bundler} balance {bundler_balance}" +
-                f" is less than minimum balance {hex(min_balance)}"
-            )
+            bundler_balance = bundler_balance_res["result"]
+            if int(bundler_balance, 16) >= min_balance:
+                return True, {
+                    "status": "OK",
+                    "message": (
+                        f"Bundler {bundler} balance {bundler_balance}" +
+                        f" is equal or more than minimum balance {hex(min_balance)}"
+                     )
+                }
+            else:
+                error_message = (
+                    f"Bundler {bundler} balance {bundler_balance}" +
+                    f" is less than minimum balance {hex(min_balance)}"
+                )
 
-            error_dict = {
-                "status": "ERROR",
-                "message": error_message
-            }
+                error_dict = {
+                    "status": "ERROR",
+                    "message": error_message
+                }
 
-            logging.warning(error_message)
-            return False, error_dict
+                logging.warning(error_message)
+                return False, error_dict
+    except:
+        error_message = f"eth_getBalance failed {ethereum_node_url}"
+        logging.critical(f"eth_getBalance failed {ethereum_node_url}")
+        return False, {
+            "status": "ERROR",
+            "message": error_message
+        }
 
 
 async def check_node_health(
