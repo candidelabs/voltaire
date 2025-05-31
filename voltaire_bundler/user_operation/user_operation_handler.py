@@ -283,7 +283,7 @@ async def get_deposit_info(
     ]
 
     result: Any = await send_rpc_request_to_eth_client(
-        node_url, "eth_call", params
+        node_url, "eth_call", params, None, "result"
     )
     if "result" in result:
         (deposit, staked, stake, unstake_delay_sec, withdraw_time) = decode(

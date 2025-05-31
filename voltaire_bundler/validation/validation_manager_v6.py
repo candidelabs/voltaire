@@ -237,7 +237,7 @@ class ValidationManagerV6(ValidationManager):
             state_overrides
         ]
         result: Any = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_call", params
+            self.ethereum_node_url, "eth_call", params, None, "error"
         )
         if ("error" not in result):
             # this should never happen

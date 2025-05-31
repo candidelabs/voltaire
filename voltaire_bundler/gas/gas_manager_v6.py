@@ -224,7 +224,7 @@ class GasManagerV6(GasManager):
         ]
 
         result: Any = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_call", params
+            self.ethereum_node_url, "eth_call", params, None, "error"
         )
 
         if "error" not in result:

@@ -237,10 +237,10 @@ class GasManager(ABC, Generic[UserOperationType]):
         ]
 
         eth_call_op = send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_call", params
+            self.ethereum_node_url, "eth_call", params, None, "result"
         )
         block_max_fee_per_gas_op = send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_gasPrice"
+            self.ethereum_node_url, "eth_gasPrice", None, None, "result"
         )
         tasks_arr = [eth_call_op, block_max_fee_per_gas_op]
         tasks: Any = await asyncio.gather(*tasks_arr)
@@ -282,7 +282,7 @@ class GasManager(ABC, Generic[UserOperationType]):
         ]
 
         result = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_call", params
+            self.ethereum_node_url, "eth_call", params, None, "result"
         )
 
         raw_gas_results = result["result"]
