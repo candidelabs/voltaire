@@ -10,13 +10,13 @@ from voltaire_bundler.validation.tracer_manager import TracerManager
 class ValidationManager(ABC, Generic[UserOperationType]):
     tracer_manager: TracerManager
     chain_id: int
-    ethereum_node_url: str
+    ethereum_node_urls: list[str]
     bundler_address: str
     bundler_collector_tracer: str
     is_unsafe: bool
     is_legacy_mode: bool
     enforce_gas_price_tolerance: int
-    ethereum_node_debug_trace_call_url: str
+    ethereum_node_debug_trace_call_urls: list[str]
 
     @abstractmethod
     async def validate_user_operation(

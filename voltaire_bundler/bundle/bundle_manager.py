@@ -30,8 +30,8 @@ from ..mempool.reputation_manager import ReputationManager
 
 
 class BundlerManager:
-    ethereum_node_url: str
-    bundle_node_url: str
+    ethereum_node_urls: list[str]
+    bundle_node_urls: list[str]
     bundler_private_key: str
     bundler_address: Address
     local_mempool_manager_v6: LocalMempoolManagerV6 | None
@@ -41,7 +41,7 @@ class BundlerManager:
     chain_id: int
     is_legacy_mode: bool
     conditional_rpc: ConditionalRpc | None
-    flashbots_protect_node_url: str | None
+    flashbots_protect_node_urls: list[str] | None
     max_fee_per_gas_percentage_multiplier: int
     max_priority_fee_per_gas_percentage_multiplier: int
     user_operations_to_send_v6: dict[str, UserOperationV6] | None
@@ -59,28 +59,28 @@ class BundlerManager:
         local_mempool_manager_v6: LocalMempoolManagerV6 | None,
         local_mempool_manager_v7: LocalMempoolManagerV7,
         local_mempool_manager_v8: LocalMempoolManagerV8,
-        ethereum_node_url: str,
-        bundle_node_url: str,
+        ethereum_node_urls: list[str],
+        bundle_node_urls: list[str],
         bundler_private_key: str,
         bundler_address: Address,
         chain_id: int,
         is_legacy_mode: bool,
         conditional_rpc: ConditionalRpc | None,
-        flashbots_protect_node_url: str | None,
+        flashbots_protect_node_urls: list[str] | None,
         max_fee_per_gas_percentage_multiplier: int,
         max_priority_fee_per_gas_percentage_multiplier: int,
     ):
         self.local_mempool_manager_v6 = local_mempool_manager_v6
         self.local_mempool_manager_v7 = local_mempool_manager_v7
         self.local_mempool_manager_v8 = local_mempool_manager_v8
-        self.ethereum_node_url = ethereum_node_url
-        self.bundle_node_url = bundle_node_url
+        self.ethereum_node_urls = ethereum_node_urls
+        self.bundle_node_urls = bundle_node_urls
         self.bundler_private_key = bundler_private_key
         self.bundler_address = bundler_address
         self.chain_id = chain_id
         self.is_legacy_mode = is_legacy_mode
         self.conditional_rpc = conditional_rpc
-        self.flashbots_protect_node_url = flashbots_protect_node_url
+        self.flashbots_protect_node_urls = flashbots_protect_node_urls
         self.max_fee_per_gas_percentage_multiplier = (
             max_fee_per_gas_percentage_multiplier
         )
@@ -228,11 +228,11 @@ class BundlerManager:
         )
 
         block_max_fee_per_gas_op = send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_gasPrice", None, None, "result"
+            self.ethereum_node_urls, "eth_gasPrice", None, None, "result"
         )
 
         nonce_op = send_rpc_request_to_eth_client(
-            self.ethereum_node_url,
+            self.ethereum_node_urls,
             "eth_getTransactionCount",
             [self.bundler_address, "latest"], None, "result"
         )
@@ -245,7 +245,7 @@ class BundlerManager:
 
         if not self.is_legacy_mode:
             block_max_priority_fee_per_gas_op = send_rpc_request_to_eth_client(
-                self.ethereum_node_url, "eth_maxPriorityFeePerGas",
+                self.ethereum_node_urls, "eth_maxPriorityFeePerGas",
                 None, None, "result"
             )
             tasks_arr.append(block_max_priority_fee_per_gas_op)
@@ -341,16 +341,16 @@ class BundlerManager:
             else:
                 method = "pfl_sendRawTransactionConditional"
             result = await send_rpc_request_to_eth_client(
-                self.bundle_node_url,
+                self.bundle_node_urls,
                 method,
                 [
                     raw_transaction,
                     {"knownAccounts": merged_storage_map}
                 ]
             )
-        elif self.flashbots_protect_node_url is not None:
+        elif self.flashbots_protect_node_urls is not None:
             result = await send_rpc_request_to_eth_client(
-                self.flashbots_protect_node_url,
+                self.flashbots_protect_node_urls,
                 "eth_sendPrivateRawTransaction",
                 [
                     raw_transaction,
@@ -360,7 +360,7 @@ class BundlerManager:
             )
         else:
             result = await send_rpc_request_to_eth_client(
-                self.bundle_node_url,
+                self.bundle_node_urls,
                 "eth_sendRawTransaction",
                 [
                     raw_transaction
@@ -487,10 +487,10 @@ class BundlerManager:
             assert user_operation.validated_at_block_hex is not None
             earliest_block = user_operation.validated_at_block_hex
             logs_res_op = get_user_operation_logs_for_block_range(
-                # not using the ethereum_node_eth_get_logs_url as the
+                # not using the ethereum_node_eth_get_logs_urls as the
                 # block range can't be large and to role out the possibility
                 # that the logs node is slightly behind/out of sync
-                self.ethereum_node_url,
+                self.ethereum_node_urls,
                 user_operation_hash,
                 entrypoint,
                 earliest_block,
@@ -649,7 +649,7 @@ class BundlerManager:
             params["authorizationList"] = auth_list
 
         result = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url,
+            self.ethereum_node_urls,
             "eth_estimateGas",
             [
                 params,
@@ -673,7 +673,7 @@ class BundlerManager:
                         merged_storage_map |= user_operation.storage_map
                     senders_root_hashs_operations.append(
                         send_rpc_request_to_eth_client(
-                            self.ethereum_node_url,
+                            self.ethereum_node_urls,
                             "eth_getProof",
                             [user_operation.sender_address, [], "latest"],
                             None, "result"
@@ -798,10 +798,10 @@ class BundlerManager:
                 "useroperation without validated_at_block_hex")
 
         logs_res = await get_user_operation_logs_for_block_range(
-            # not using the ethereum_node_eth_get_logs_url as the
+            # not using the ethereum_node_eth_get_logs_urls as the
             # block range can't be large and to role out the possibility
             # that the logs node is slightly behind/out of sync
-            self.ethereum_node_url,
+            self.ethereum_node_urls,
             user_operation.user_operation_hash,
             entrypoint,
             earliest_block,
@@ -830,7 +830,7 @@ class BundlerManager:
             ) = await get_deposit_info(
                 user_operation.sender_address,
                 entrypoint,
-                self.ethereum_node_url
+                self.ethereum_node_urls
             )
             is_sender_staked = mempool_manager.is_staked(
                 stake, unstake_delay_sec)
@@ -853,7 +853,7 @@ class BundlerManager:
                 ) = await get_deposit_info(
                     user_operation.factory_address_lowercase,
                     entrypoint,
-                    self.ethereum_node_url
+                    self.ethereum_node_urls
                 )
 
                 is_factory_staked = mempool_manager.is_staked(

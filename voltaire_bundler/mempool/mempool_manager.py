@@ -30,7 +30,7 @@ class LocalMempoolManager():
     validation_manager: ValidationManager
     user_operation_handler: UserOperationHandler
     reputation_manager: ReputationManager
-    ethereum_node_url: str
+    ethereum_node_urls: list[str]
     bundler_private_key: str
     bundler_address: str
     chain_id: int
@@ -463,7 +463,7 @@ class LocalMempoolManager():
                     ) = await get_deposit_info(
                         user_operation.sender_address,
                         self.entrypoint,
-                        self.ethereum_node_url
+                        self.ethereum_node_urls
                     )
                     is_sender_staked = self.is_staked(
                         stake, unstake_delay_sec)
@@ -793,7 +793,7 @@ class LocalMempoolManager():
             ]
 
             result: Any = await send_rpc_request_to_eth_client(
-                self.ethereum_node_url, "eth_call", params, None, "result"
+                self.ethereum_node_urls, "eth_call", params, None, "result"
             )
             if "result" in result:
                 balance = int(result["result"], 16) if result["result"] != "0x" else 0

@@ -36,23 +36,23 @@ class ValidationManagerV7V8(ValidationManager):
     def __init__(
         self,
         user_operation_handler: UserOperationHandlerV7V8,
-        ethereum_node_url: str,
+        ethereum_node_urls: list[str],
         bundler_address: str,
         chain_id: int,
         is_unsafe: bool,
         is_legacy_mode: bool,
         enforce_gas_price_tolerance: int,
-        ethereum_node_debug_trace_call_url: str,
+        ethereum_node_debug_trace_call_urls: list[str],
     ):
         self.user_operation_handler = user_operation_handler
-        self.tracer_manager = TracerManager(ethereum_node_url, bundler_address)
-        self.ethereum_node_url = ethereum_node_url
+        self.tracer_manager = TracerManager(ethereum_node_urls, bundler_address)
+        self.ethereum_node_urls = ethereum_node_urls
         self.bundler_address = bundler_address
         self.chain_id = chain_id
         self.is_unsafe = is_unsafe
         self.is_legacy_mode = is_legacy_mode
         self.enforce_gas_price_tolerance = enforce_gas_price_tolerance
-        self.ethereum_node_debug_trace_call_url = ethereum_node_debug_trace_call_url
+        self.ethereum_node_debug_trace_call_urls = ethereum_node_debug_trace_call_urls
 
         package_directory = os.path.dirname(os.path.abspath(voltaire_bundler.__file__))
         bundler_collector_tracer_file = os.path.join(
@@ -238,7 +238,7 @@ class ValidationManagerV7V8(ValidationManager):
         ]
 
         result: Any = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_call", params
+            self.ethereum_node_urls, "eth_call", params
         )
         if (
             "result" in result
@@ -344,7 +344,7 @@ class ValidationManagerV7V8(ValidationManager):
             }
         ]
         res: Any = await send_rpc_request_to_eth_client(
-            self.ethereum_node_debug_trace_call_url, "debug_traceCall", params
+            self.ethereum_node_debug_trace_call_urls, "debug_traceCall", params
         )
         if "result" in res:
             debug_data = res["result"]
@@ -466,13 +466,13 @@ class ValidationManagerV7V8(ValidationManager):
             )
 
         existing_code_op = send_rpc_request_to_eth_client(
-            self.ethereum_node_url,
+            self.ethereum_node_urls,
             "eth_getCode",
             [sender_address, "latest"],
             None, "result"
         )
         nonce_op = send_rpc_request_to_eth_client(
-            self.ethereum_node_url,
+            self.ethereum_node_urls,
             "eth_getTransactionCount",
             [sender_address, "latest"], None, "result"
         )

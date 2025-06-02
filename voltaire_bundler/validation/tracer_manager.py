@@ -14,16 +14,16 @@ from voltaire_bundler.utils.load_bytecode import load_bytecode
 
 
 class TracerManager():
-    ethereum_node_url: str
+    ethereum_node_urls: list[str]
     bundler_address: str
     bundler_helper_byte_code: str
 
     def __init__(
         self,
-        ethereum_node_url: str,
+        ethereum_node_urls: list[str],
         bundler_address: str,
     ):
-        self.ethereum_node_url = ethereum_node_url
+        self.ethereum_node_urls = ethereum_node_urls
         self.bundler_address = bundler_address
         self.bundler_helper_byte_code = load_bytecode(
             "BundlerHelper.json")
@@ -135,7 +135,7 @@ class TracerManager():
             block_number if block_number is not None else "latest",
         ]
         result: Any = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_call", params, None, "error"
+            self.ethereum_node_urls, "eth_call", params, None, "error"
         )
         if "error" not in result:
             # this should never happen

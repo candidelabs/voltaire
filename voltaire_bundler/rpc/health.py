@@ -29,7 +29,7 @@ async def periodic_health_check(
     bundler: Address,
     min_balance: int,
 ):
-    nodes_success, _ = await check_node_health(
+    nodes_success, _ = await check_nodes_health(
         node_urls_to_check, target_chain_id_hex)
     if nodes_success:
         await check_bundler_balance(
@@ -84,7 +84,7 @@ async def check_bundler_balance(
         }
 
 
-async def check_node_health(
+async def check_nodes_health(
     node_urls_to_check: list[str],
     target_chain_id_hex: str,
 ) -> tuple[bool, dict]:

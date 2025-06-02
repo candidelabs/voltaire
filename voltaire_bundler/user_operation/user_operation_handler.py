@@ -16,10 +16,10 @@ from .models import (Log, ReceiptInfo, UserOperationReceiptInfo)
 
 
 class UserOperationHandler(ABC):
-    ethereum_node_url: str
+    ethereum_node_urls: list[str]
     bundler_address: Address
     is_legacy_mode: bool
-    ethereum_node_eth_get_logs_url: str
+    ethereum_node_eth_get_logs_urls: list[str]
     gas_manager: GasManager
     logs_incremental_range: int
     logs_number_of_ranges: int
@@ -192,7 +192,7 @@ class UserOperationHandler(ABC):
     async def get_transaction_receipt(self, transaction_hash: str) -> dict:
         params = [transaction_hash]
         res: Any = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_getTransactionReceipt", params,
+            self.ethereum_node_urls, "eth_getTransactionReceipt", params,
             None, "result"
         )
         return res["result"]
@@ -206,7 +206,7 @@ class UserOperationHandler(ABC):
     ):
         if logs_incremental_range > 0:
             block_info = await get_latest_block_info(
-                self.ethereum_node_eth_get_logs_url)
+                self.ethereum_node_eth_get_logs_urls)
 
             latest_block_number = int(block_info[0], 16)
             earliest_block_number = latest_block_number - (
@@ -220,7 +220,7 @@ class UserOperationHandler(ABC):
                 if latest_block <= earliest_block:
                     break
                 res = await get_user_operation_logs_for_block_range(
-                    self.ethereum_node_eth_get_logs_url,
+                    self.ethereum_node_eth_get_logs_urls,
                     user_operation_hash,
                     entrypoint,
                     hex(earliest_block),
@@ -231,7 +231,7 @@ class UserOperationHandler(ABC):
             return None
         else:
             return await get_user_operation_logs_for_block_range(
-                self.ethereum_node_eth_get_logs_url,
+                self.ethereum_node_eth_get_logs_urls,
                 user_operation_hash,
                 entrypoint,
                 "earliest",
@@ -267,7 +267,7 @@ class UserOperationHandler(ABC):
 
 
 async def get_deposit_info(
-    address: Address, entrypoint: Address, node_url: str
+    address: Address, entrypoint: Address, node_urls: list[str]
 ) -> tuple[int, bool, int, int, int]:
     function_selector = "0x5287ce12"  # getDepositInfo
     params = encode(["address"], [address])
@@ -283,7 +283,7 @@ async def get_deposit_info(
     ]
 
     result: Any = await send_rpc_request_to_eth_client(
-        node_url, "eth_call", params, None, "result"
+        node_urls, "eth_call", params, None, "result"
     )
     if "result" in result:
         (deposit, staked, stake, unstake_delay_sec, withdraw_time) = decode(
@@ -317,7 +317,7 @@ def del_user_operation_logs_cache_entry(
 
 
 async def get_user_operation_logs_for_block_range(
-    ethereum_node_eth_get_logs_url: str,
+    ethereum_node_eth_get_logs_urls: list[str],
     user_operation_hash: str,
     entrypoint: str,
     from_block_hex: str,
@@ -343,7 +343,7 @@ async def get_user_operation_logs_for_block_range(
         }
     ]
     res = await send_rpc_request_to_eth_client(
-        ethereum_node_eth_get_logs_url, "eth_getLogs", params
+        ethereum_node_eth_get_logs_urls, "eth_getLogs", params
     )
     if "result" in res and len(res["result"]) > 0:
         # clear cache if bigger than 10_000
@@ -359,7 +359,7 @@ transactions_cache: dict[str, dict] = {}
 
 
 async def get_transaction_by_hash(
-    ethereum_node_url: str,
+    ethereum_node_urls: list[str],
     transaction_hash: str,
     recursion_depth: int = 0
 ) -> dict | None:
@@ -374,7 +374,7 @@ async def get_transaction_by_hash(
         return transactions_cache[transaction_hash]
     params = [transaction_hash]
     res: Any = await send_rpc_request_to_eth_client(
-        ethereum_node_url, "eth_getTransactionByHash", params
+        ethereum_node_urls, "eth_getTransactionByHash", params
     )
     if "result" in res:
         transaction = res['result']
@@ -387,7 +387,7 @@ async def get_transaction_by_hash(
             # if pending transaction, retry in one second
             await asyncio.sleep(1)
             transaction = await get_transaction_by_hash(
-                ethereum_node_url, transaction_hash, recursion_depth
+                ethereum_node_urls, transaction_hash, recursion_depth
             )
         else:
             # clear cache if bigger than 10_000

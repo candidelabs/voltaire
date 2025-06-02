@@ -16,7 +16,7 @@ from voltaire_bundler.utils.eth_client_utils import \
 
 
 class GasManager(ABC, Generic[UserOperationType]):
-    ethereum_node_url: str
+    ethereum_node_urls: list[str]
     chain_id: str
     is_legacy_mode: bool
     max_fee_per_gas_percentage_multiplier: int
@@ -34,14 +34,14 @@ class GasManager(ABC, Generic[UserOperationType]):
         max_priority_fee_per_gas = user_operation.max_priority_fee_per_gas
 
         block_max_fee_per_gas_op = send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_gasPrice", None, None, "result"
+            self.ethereum_node_urls, "eth_gasPrice", None, None, "result"
         )
 
         tasks_arr = [block_max_fee_per_gas_op]
 
         if not self.is_legacy_mode:
             block_max_priority_fee_per_gas_op = send_rpc_request_to_eth_client(
-                self.ethereum_node_url, "eth_maxPriorityFeePerGas", None, None, "result"
+                self.ethereum_node_urls, "eth_maxPriorityFeePerGas", None, None, "result"
             )
             tasks_arr.append(block_max_priority_fee_per_gas_op)
 
@@ -237,10 +237,10 @@ class GasManager(ABC, Generic[UserOperationType]):
         ]
 
         eth_call_op = send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_call", params, None, "result"
+            self.ethereum_node_urls, "eth_call", params, None, "result"
         )
         block_max_fee_per_gas_op = send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_gasPrice", None, None, "result"
+            self.ethereum_node_urls, "eth_gasPrice", None, None, "result"
         )
         tasks_arr = [eth_call_op, block_max_fee_per_gas_op]
         tasks: Any = await asyncio.gather(*tasks_arr)
@@ -282,7 +282,7 @@ class GasManager(ABC, Generic[UserOperationType]):
         ]
 
         result = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_call", params, None, "result"
+            self.ethereum_node_urls, "eth_call", params, None, "result"
         )
 
         raw_gas_results = result["result"]

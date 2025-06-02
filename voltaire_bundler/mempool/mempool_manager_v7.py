@@ -18,13 +18,13 @@ class LocalMempoolManagerV7(LocalMempoolManager):
     def __init__(
         self,
         user_operation_handler: UserOperationHandlerV7V8,
-        ethereum_node_url: str,
+        ethereum_node_urls: list[str],
         bundler_address: str,
         chain_id: int,
         is_unsafe: bool,
         enforce_gas_price_tolerance: int,
         is_legacy_mode: bool,
-        ethereum_node_debug_trace_call_url: str,
+        ethereum_node_debug_trace_call_urls: list[str],
         reputation_whitelist: list[str],
         reputation_blacklist: list[str],
         min_stake: int,
@@ -32,18 +32,18 @@ class LocalMempoolManagerV7(LocalMempoolManager):
     ):
         self.validation_manager = ValidationManagerV7V8(
             user_operation_handler,
-            ethereum_node_url,
+            ethereum_node_urls,
             bundler_address,
             chain_id,
             is_unsafe,
             is_legacy_mode,
             enforce_gas_price_tolerance,
-            ethereum_node_debug_trace_call_url,
+            ethereum_node_debug_trace_call_urls,
         )
         self.user_operation_handler = user_operation_handler
         self.reputation_manager = ReputationManager(
             reputation_whitelist, reputation_blacklist)
-        self.ethereum_node_url = ethereum_node_url
+        self.ethereum_node_urls = ethereum_node_urls
         self.bundler_address = bundler_address
         self.chain_id = chain_id
         self.is_unsafe = is_unsafe

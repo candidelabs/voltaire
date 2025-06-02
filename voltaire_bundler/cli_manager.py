@@ -42,8 +42,8 @@ class ConditionalRpc(Enum):
 class InitData:
     rpc_url: str
     rpc_port: int
-    ethereum_node_url: str
-    bundle_node_url: str
+    ethereum_node_url: list[str]
+    bundle_node_url: list[str]
     bundler_pk: str
     bundler_address: Address
     chain_id: int
@@ -51,15 +51,15 @@ class InitData:
     is_unsafe: bool
     is_legacy_mode: bool
     conditional_rpc: ConditionalRpc | None
-    flashbots_protect_node_url: str | None
+    flashbots_protect_node_url: list[str] | None
     bundle_interval: int
     max_fee_per_gas_percentage_multiplier: int
     max_priority_fee_per_gas_percentage_multiplier: int
     is_metrics: bool
     rpc_cors_domain: str
     enforce_gas_price_tolerance: int
-    ethereum_node_debug_trace_call_url: str
-    ethereum_node_eth_get_logs_url: str
+    ethereum_node_debug_trace_call_url: list[str]
+    ethereum_node_eth_get_logs_url: list[str]
     p2p_enr_address: str
     p2p_enr_tcp_port: int
     p2p_enr_udp_port: int
@@ -190,23 +190,21 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--ethereum_node_url",
-        type=str,
-        help="Eth Client JSON-RPC Url - defaults to http://0.0.0.0:8545",
-        nargs="?",
-        const="http://0.0.0.0:8545",
-        default=_get_env_or_default("VOLTAIRE_ETHEREUM_NODE_URL", "http://0.0.0.0:8545", str),
+        help="List of Eth clients JSON-RPC urls - defaults to http://0.0.0.0:8545",
+        nargs="+",
+        default=_get_env_or_default(
+            "VOLTAIRE_ETHEREUM_NODE_URL", ["http://0.0.0.0:8545"], list[str]),
     )
 
     parser.add_argument(
         "--bundle_node_url",
-        type=str,
         help=(
-            "Eth Client JSON-RPC Url for sending bundle only- "
+            "List of Eth client JSON-RPC urls for sending bundle only- "
             "useful for clients that offer mev protection"
         ),
-        nargs="?",
-        const=None,
-        default=_get_env_or_default("VOLTAIRE_BUNDLE_NODE_URL", None, str),
+        nargs="+",
+        default=_get_env_or_default(
+            "VOLTAIRE_BUNDLE_NODE_URL", None, list[str]),
     )
 
     parser.add_argument(
@@ -237,14 +235,13 @@ def initialize_argument_parser() -> ArgumentParser:
 
     group2.add_argument(
         "--ethereum_node_debug_trace_call_url",
-        type=str,
         help=(
-            "An Eth Client JSON-RPC Url for debug_traceCall only - "
+            "List of  Eth clients JSON-RPC urls for debug_traceCall only - "
             "defaults to ethereum_node_url value"
         ),
-        nargs="?",
-        const=None,
-        default=_get_env_or_default("VOLTAIRE_ETHEREUM_NODE_DEBUG_TRACE_CALL_URL", None, str),
+        nargs="+",
+        default=_get_env_or_default(
+            "VOLTAIRE_ETHEREUM_NODE_DEBUG_TRACE_CALL_URL", None, list[str]),
     )
 
     group2.add_argument(
@@ -260,14 +257,13 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--ethereum_node_eth_get_logs_url",
-        type=str,
         help=(
-            "An Eth Client JSON-RPC Url for eth_getLogs only - "
+            "List of  Eth clients JSON-RPC urls for eth_getLogs only - "
             "defaults to ethereum_node_url value"
         ),
-        nargs="?",
-        const=None,
-        default=_get_env_or_default("VOLTAIRE_ETHEREUM_NODE_ETH_GET_LOGS_URL", None, str),
+        nargs="+",
+        default=_get_env_or_default(
+            "VOLTAIRE_ETHEREUM_NODE_ETH_GET_LOGS_URL", None, list[str]),
     )
 
     parser.add_argument(
@@ -291,10 +287,10 @@ def initialize_argument_parser() -> ArgumentParser:
 
     group3.add_argument(
         "--flashbots_protect_node_url",
-        type=str,
-        help="Flashbots JSON-RPC Url",
-        nargs="?",
-        default=_get_env_or_default("VOLTAIRE_FLASHBOTS_PROTECT_NODE_URL", None, str),
+        help="List of Flashbots JSON-RPC urls",
+        nargs="+",
+        default=_get_env_or_default(
+            "VOLTAIRE_FLASHBOTS_PROTECT_NODE_URL", None, str),
     )
 
     parser.add_argument(
@@ -652,23 +648,38 @@ def check_if_valid_rpc_url_and_port(rpc_url, rpc_port) -> None:
         sys.exit(1)
 
 
-async def check_valid_ethereum_rpc_and_get_chain_id(ethereum_node_url) -> str:
+async def check_valid_ethereum_rpc_nodes_and_get_chain_id(
+    ethereum_node_urls: list[str]
+) -> str:
+    chain_id_hex: str | None = None
     try:
-        chain_id_hex = await send_rpc_request_to_eth_client_no_retry(
-            ethereum_node_url,
-            "eth_chainId",
-            [],
-        )
-        if "result" not in chain_id_hex:
-            logging.critical(f"Invalid Eth node {ethereum_node_url}")
-            sys.exit(1)
-        else:
-            return chain_id_hex["result"]
+        chosen_ethereum_node_url = None
+        for ethereum_node_url in ethereum_node_urls:
+            chosen_ethereum_node_url = ethereum_node_url
+            chain_id_hex_res = await send_rpc_request_to_eth_client_no_retry(
+                ethereum_node_url,
+                "eth_chainId",
+                [],
+            )
+            if "result" not in chain_id_hex_res:
+                logging.critical(f"Invalid Eth node {ethereum_node_url}")
+                sys.exit(1)
+            else:
+                if (
+                    chain_id_hex is not None and
+                    chain_id_hex != chain_id_hex_res["result"]
+                ):
+                    logging.critical(f"Invalid Eth node {ethereum_node_url}")
+                    sys.exit(1)
+
+                chain_id_hex = chain_id_hex_res["result"]
+        assert chain_id_hex is not None
+        return chain_id_hex
     except aiohttp.client_exceptions.ClientConnectorError:
-        logging.critical(f"Connection refused for Eth node {ethereum_node_url}")
+        logging.critical(f"Connection refused for Eth node {chosen_ethereum_node_url}")
         sys.exit(1)
     except Exception:
-        logging.critical(f"Error when connecting to Eth node {ethereum_node_url}")
+        logging.critical(f"Error when connecting to Eth node {chosen_ethereum_node_url}")
         sys.exit(1)
 
 
@@ -704,7 +715,7 @@ async def get_init_data(args: Namespace) -> InitData:
 
     check_if_valid_rpc_url_and_port(args.rpc_url, args.rpc_port)
 
-    ethereum_node_chain_id_hex = await check_valid_ethereum_rpc_and_get_chain_id(
+    ethereum_node_chain_id_hex = await check_valid_ethereum_rpc_nodes_and_get_chain_id(
         args.ethereum_node_url
     )
 
@@ -725,7 +736,7 @@ async def get_init_data(args: Namespace) -> InitData:
 
     if args.bundle_node_url != args.ethereum_node_url:
         ethereum_node_debug_chain_id_hex = (
-            await check_valid_ethereum_rpc_and_get_chain_id(
+            await check_valid_ethereum_rpc_nodes_and_get_chain_id(
                 args.bundle_node_url
             )
         )
@@ -738,7 +749,7 @@ async def get_init_data(args: Namespace) -> InitData:
 
     if args.ethereum_node_debug_trace_call_url != args.ethereum_node_url:
         ethereum_node_debug_chain_id_hex = (
-            await check_valid_ethereum_rpc_and_get_chain_id(
+            await check_valid_ethereum_rpc_nodes_and_get_chain_id(
                 args.ethereum_node_debug_trace_call_url
             )
         )
@@ -751,7 +762,7 @@ async def get_init_data(args: Namespace) -> InitData:
 
     if args.ethereum_node_eth_get_logs_url != args.ethereum_node_url:
         eth_get_logs_url_chain_id_hex = (
-            await check_valid_ethereum_rpc_and_get_chain_id(
+            await check_valid_ethereum_rpc_nodes_and_get_chain_id(
                 args.ethereum_node_eth_get_logs_url
             )
         )
@@ -769,7 +780,8 @@ async def get_init_data(args: Namespace) -> InitData:
         sys.exit(1)
 
     if not args.disable_entrypoints_code_check:
-        await check_valid_entrypoints(args.ethereum_node_url, args.disable_v6)
+        await check_valid_entrypoints(
+            args.ethereum_node_url[0], args.disable_v6)
 
     if not args.disable_p2p:
         if args.p2p_canonical_mempool_id_08 is None:

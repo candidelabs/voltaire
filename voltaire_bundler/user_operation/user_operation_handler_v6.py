@@ -12,10 +12,10 @@ class UserOperationHandlerV6(UserOperationHandler):
     def __init__(
         self,
         chain_id: int,
-        ethereum_node_url,
+        ethereum_node_urls,
         bundler_address,
         is_legacy_mode,
-        ethereum_node_eth_get_logs_url,
+        ethereum_node_eth_get_logs_urls,
         max_fee_per_gas_percentage_multiplier: int,
         max_priority_fee_per_gas_percentage_multiplier: int,
         max_verification_gas: int,
@@ -23,12 +23,12 @@ class UserOperationHandlerV6(UserOperationHandler):
         logs_incremental_range: int,
         logs_number_of_ranges: int,
     ):
-        self.ethereum_node_url = ethereum_node_url
+        self.ethereum_node_urls = ethereum_node_urls
         self.bundler_address = bundler_address
         self.is_legacy_mode = is_legacy_mode
-        self.ethereum_node_eth_get_logs_url = ethereum_node_eth_get_logs_url
+        self.ethereum_node_eth_get_logs_urls = ethereum_node_eth_get_logs_urls
         self.gas_manager = GasManagerV6(
-            self.ethereum_node_url,
+            self.ethereum_node_urls,
             chain_id,
             is_legacy_mode,
             max_fee_per_gas_percentage_multiplier,
@@ -63,7 +63,7 @@ class UserOperationHandlerV6(UserOperationHandler):
 
         transaction_hash = log_object.transactionHash
         transaction = await get_transaction_by_hash(
-            self.ethereum_node_url,
+            self.ethereum_node_urls,
             transaction_hash
         )
         if transaction is None:
@@ -93,7 +93,7 @@ class UserOperationHandlerV6(UserOperationHandler):
 
             transaction_hash = log_object.transactionHash
             transaction = await get_transaction_by_hash(
-                self.ethereum_node_url,
+                self.ethereum_node_urls,
                 transaction_hash
             )
             if transaction is None:

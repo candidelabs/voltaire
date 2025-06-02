@@ -83,11 +83,11 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
         )
         task_group.create_task(execution_endpoint.start_execution_endpoint())
 
-        node_urls_to_check = [init_data.ethereum_node_url]
+        node_urls_to_check = init_data.ethereum_node_url
         if init_data.ethereum_node_url != init_data.ethereum_node_debug_trace_call_url:
-            node_urls_to_check.append(init_data.ethereum_node_debug_trace_call_url)
+            node_urls_to_check += init_data.ethereum_node_debug_trace_call_url
         if init_data.ethereum_node_url != init_data.ethereum_node_eth_get_logs_url:
-            node_urls_to_check.append(init_data.ethereum_node_eth_get_logs_url)
+            node_urls_to_check += init_data.ethereum_node_eth_get_logs_url
 
         task_group.create_task(
             run_rpc_http_server(

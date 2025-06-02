@@ -26,8 +26,8 @@ def create_flashbots_signature(
 
 
 async def send_rpc_request_to_eth_client(
-    ethereum_node_url,
-    method,
+    nodes_urls: list[str],
+    method: str,
     params=None,
     flashbots_signer_private_key_pair: tuple[str, str] | None = None,
     expected_key: str | None = None
@@ -51,11 +51,16 @@ async def send_rpc_request_to_eth_client(
         )
     NUMBER_OF_RETRY_ATTEMPTS = 60
     json_result = None
+    nodes_len = len(nodes_urls)
     for i in range(NUMBER_OF_RETRY_ATTEMPTS):
+        node_index = i % nodes_len
+        if nodes_len > 1 and i > 0:
+            logging.info(f'retrying with node no: {node_index + 1}.')
+        chosen_node_url = nodes_urls[node_index]  # iterate through nodes
         try:
             async with ClientSession() as session:
                 async with session.post(
-                    ethereum_node_url,
+                    chosen_node_url,
                     json=json_request,
                     headers=headers
                 ) as response:
@@ -81,15 +86,38 @@ async def send_rpc_request_to_eth_client(
             logging.error(f"traceback: {str(traceback.format_exc())}")
             await asyncio.sleep(1)
         else:
-            if expected_key is not None and expected_key not in json_result:
-                logging.error(
-                    f"Attempt No. {i+1} to call node rpc failed."
-                    f"the request: {str(json_request)}"
-                    f"as the key {expected_key} is not in the result: {str(json_result)}"
-                )
-                continue
-            else:
-                return json_result
+            if "error" in json_result:
+                if "message" in json_result["error"]:
+                    err_message = json_result["error"]["message"]
+                else:
+                    err_message = ""
+                if (
+                    "code" in json_result["error"] and
+                    json_result["error"]["code"] != 3 and
+                    json_result["error"]["code"] != -32000 and
+                    json_result["error"]["code"] != -32603
+                ) or (
+                    # special case for erpc errors like:
+                    # "upstream circuit breaker open" or "upstream server errors"
+                    # assuming erpc is the first url in the node list
+                    "upstream" in err_message and node_index == 0
+                ):
+                    err_code = json_result["error"]["code"]
+                    logging.error(
+                        f"Attempt No. {i+1} to call node rpc failed."
+                        f"the request: {str(json_request)}"
+                        f" with error code: {err_code}"
+                        f" and error message: {err_message}."
+                    )
+                    continue
+                elif expected_key is not None and expected_key not in json_result:
+                    logging.error(
+                        f"Attempt No. {i+1} to call node rpc failed."
+                        f"the request: {str(json_request)}"
+                        f"as the key {expected_key} is not in the result: {str(json_result)}"
+                    )
+                    continue
+            return json_result
     raise ValueError("Failed rpc request to rpc node client")
 
 
@@ -135,9 +163,9 @@ async def send_rpc_request_to_eth_client_no_retry(
 
 
 async def get_latest_block_info(
-        ethereum_node_url) -> tuple[str, int, str, int, str]:
+        ethereum_node_urls) -> tuple[str, int, str, int, str]:
     raw_res: Any = await send_rpc_request_to_eth_client(
-        ethereum_node_url, "eth_getBlockByNumber", ["latest", False], None, "result"
+        ethereum_node_urls, "eth_getBlockByNumber", ["latest", False], None, "result"
     )
     latest_block = raw_res["result"]
 

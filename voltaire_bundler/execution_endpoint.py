@@ -39,7 +39,7 @@ user_operation_receipt_cache: dict[str, dict] = {}
 
 
 class ExecutionEndpoint(Endpoint):
-    ethereum_node_url: str
+    ethereum_node_urls: list[str]
     bundle_manager: BundlerManager
     user_operation_handler_v6: Optional[UserOperationHandlerV6]
     user_operation_handler_v7v8: UserOperationHandlerV7V8
@@ -55,8 +55,8 @@ class ExecutionEndpoint(Endpoint):
 
     def __init__(
         self,
-        ethereum_node_url: str,
-        bundle_node_url: str,
+        ethereum_node_urls: list[str],
+        bundle_node_urls: list[str],
         bundler_private_key: str,
         bundler_address: Address,
         chain_id: int,
@@ -64,13 +64,13 @@ class ExecutionEndpoint(Endpoint):
         is_debug: bool,
         is_legacy_mode: bool,
         conditional_rpc: ConditionalRpc | None,
-        flashbots_protect_node_url: str | None,
+        flashbots_protect_node_urls: list[str] | None,
         bundle_interval: int,
         max_fee_per_gas_percentage_multiplier: int,
         max_priority_fee_per_gas_percentage_multiplier: int,
         enforce_gas_price_tolerance: int,
-        ethereum_node_debug_trace_call_url: str,
-        ethereum_node_eth_get_logs_url: str,
+        ethereum_node_debug_trace_call_urls: list[str],
+        ethereum_node_eth_get_logs_urls: list[str],
         disable_p2p: bool,
         max_verification_gas: int,
         max_call_data_gas: int,
@@ -84,15 +84,15 @@ class ExecutionEndpoint(Endpoint):
         min_unstake_delay: int
     ):
         super().__init__("bundler_endpoint")
-        self.ethereum_node_url = ethereum_node_url
+        self.ethereum_node_urls = ethereum_node_urls
         self.chain_id = chain_id
 
         self.user_operation_handler_v7v8 = UserOperationHandlerV7V8(
             chain_id,
-            ethereum_node_url,
+            ethereum_node_urls,
             bundler_address,
             is_legacy_mode,
-            ethereum_node_eth_get_logs_url,
+            ethereum_node_eth_get_logs_urls,
             max_fee_per_gas_percentage_multiplier,
             max_priority_fee_per_gas_percentage_multiplier,
             max_verification_gas,
@@ -103,13 +103,13 @@ class ExecutionEndpoint(Endpoint):
 
         self.local_mempool_manager_v8 = LocalMempoolManagerV8(
             self.user_operation_handler_v7v8,
-            ethereum_node_url,
+            ethereum_node_urls,
             bundler_address,
             chain_id,
             is_unsafe,
             enforce_gas_price_tolerance,
             is_legacy_mode,
-            ethereum_node_debug_trace_call_url,
+            ethereum_node_debug_trace_call_urls,
             reputation_whitelist,
             reputation_blacklist,
             min_stake,
@@ -118,13 +118,13 @@ class ExecutionEndpoint(Endpoint):
 
         self.local_mempool_manager_v7 = LocalMempoolManagerV7(
             self.user_operation_handler_v7v8,
-            ethereum_node_url,
+            ethereum_node_urls,
             bundler_address,
             chain_id,
             is_unsafe,
             enforce_gas_price_tolerance,
             is_legacy_mode,
-            ethereum_node_debug_trace_call_url,
+            ethereum_node_debug_trace_call_urls,
             reputation_whitelist,
             reputation_blacklist,
             min_stake,
@@ -137,10 +137,10 @@ class ExecutionEndpoint(Endpoint):
         else:
             self.user_operation_handler_v6 = UserOperationHandlerV6(
                 chain_id,
-                ethereum_node_url,
+                ethereum_node_urls,
                 bundler_address,
                 is_legacy_mode,
-                ethereum_node_eth_get_logs_url,
+                ethereum_node_eth_get_logs_urls,
                 max_fee_per_gas_percentage_multiplier,
                 max_priority_fee_per_gas_percentage_multiplier,
                 max_verification_gas,
@@ -151,13 +151,13 @@ class ExecutionEndpoint(Endpoint):
 
             self.local_mempool_manager_v6 = LocalMempoolManagerV6(
                 self.user_operation_handler_v6,
-                ethereum_node_url,
+                ethereum_node_urls,
                 bundler_address,
                 chain_id,
                 is_unsafe,
                 enforce_gas_price_tolerance,
                 is_legacy_mode,
-                ethereum_node_debug_trace_call_url,
+                ethereum_node_debug_trace_call_urls,
                 reputation_whitelist,
                 reputation_blacklist,
                 min_stake,
@@ -168,14 +168,14 @@ class ExecutionEndpoint(Endpoint):
             self.local_mempool_manager_v6,
             self.local_mempool_manager_v7,
             self.local_mempool_manager_v8,
-            ethereum_node_url,
-            bundle_node_url,
+            ethereum_node_urls,
+            bundle_node_urls,
             bundler_private_key,
             bundler_address,
             chain_id,
             is_legacy_mode,
             conditional_rpc,
-            flashbots_protect_node_url,
+            flashbots_protect_node_urls,
             max_fee_per_gas_percentage_multiplier,
             max_priority_fee_per_gas_percentage_multiplier,
         )
@@ -768,7 +768,7 @@ class ExecutionEndpoint(Endpoint):
             )
         (
             _, _, stake, unstake_delay_sec, _
-        ) = await get_deposit_info(address, entrypoint, self.ethereum_node_url)
+        ) = await get_deposit_info(address, entrypoint, self.ethereum_node_urls)
 
         return {
             "stakeInfo": {
@@ -896,7 +896,7 @@ class ExecutionEndpoint(Endpoint):
         (
             latest_block_number, _, _, _, latest_block_hash
         ) = await get_latest_block_info(
-            self.ethereum_node_url
+            self.ethereum_node_urls
         )
         return {
             "chain_id": self.chain_id,

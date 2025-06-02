@@ -22,7 +22,7 @@ MIN_CALL_GAS_LIMIT = 21_000
 
 
 class GasManagerV6(GasManager):
-    ethereum_node_url: str
+    ethereum_node_urls: list[str]
     chain_id: str
     is_legacy_mode: bool
     max_fee_per_gas_percentage_multiplier: int
@@ -34,7 +34,7 @@ class GasManagerV6(GasManager):
 
     def __init__(
         self,
-        ethereum_node_url,
+        ethereum_node_urls,
         chain_id,
         is_legacy_mode,
         max_fee_per_gas_percentage_multiplier: int,
@@ -42,7 +42,7 @@ class GasManagerV6(GasManager):
         max_verification_gas,
         max_call_data_gas,
     ):
-        self.ethereum_node_url = ethereum_node_url
+        self.ethereum_node_urls = ethereum_node_urls
         self.chain_id = chain_id
         self.is_legacy_mode = is_legacy_mode
         self.max_fee_per_gas_percentage_multiplier = (
@@ -224,7 +224,7 @@ class GasManagerV6(GasManager):
         ]
 
         result: Any = await send_rpc_request_to_eth_client(
-            self.ethereum_node_url, "eth_call", params, None, "error"
+            self.ethereum_node_urls, "eth_call", params, None, "error"
         )
 
         if "error" not in result:

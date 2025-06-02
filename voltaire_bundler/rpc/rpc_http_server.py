@@ -13,7 +13,7 @@ from prometheus_client import Summary
 from voltaire_bundler.bundle.exceptions import (ExecutionException,
                                                  ValidationException)
 from voltaire_bundler.event_bus_manager.endpoint import Client, RequestEvent
-from voltaire_bundler.rpc.health import check_bundler_balance, check_node_health
+from voltaire_bundler.rpc.health import check_bundler_balance, check_nodes_health
 from voltaire_bundler.rpc.jsonrpc import \
     RPCFault, RPCInvalidMethodParams, validate_and_load_json_rpc_request
 from voltaire_bundler.typing import Address
@@ -338,7 +338,7 @@ async def check_health(
     min_balance: int,
     _: web.Request
 ) -> web.Response:
-    nodes_success, nodes_results = await check_node_health(
+    nodes_success, nodes_results = await check_nodes_health(
         node_urls_to_check, target_chain_id_hex)
 
     all_ok = nodes_success
