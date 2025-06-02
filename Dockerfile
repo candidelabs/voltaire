@@ -18,7 +18,8 @@ RUN set -ex \
     && adduser --system --uid 1001 -G appgroup --no-create-home appuser \
     # Install dependencies
     && pip install --no-cache-dir --upgrade pip \
-    && pip install . --no-cache-dir
+    && pip install -r requirements.txt --no-cache-dir \
+    && pip install . --no-dependencies
 
 RUN chown -R appuser:appgroup /app 
 RUN mkdir -p /app/cache
