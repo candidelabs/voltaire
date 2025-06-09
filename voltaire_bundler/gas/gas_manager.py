@@ -314,3 +314,17 @@ def calculate_deposit_slot_index(address: str) -> str:
             [int(address, 16), 0]  # slot = 0
         )
     ).hex()
+
+
+def deep_union(dict1, dict2):
+    dict1_copy = dict1.copy()
+    for dict2_key, dict2_value in dict2.items():
+        if (
+            dict2_key in dict1_copy and
+            isinstance(dict2_value, dict) and
+            isinstance(dict1_copy[dict2_key], dict)
+        ):
+            dict1_copy[dict2_key] = deep_union(dict1_copy[dict2_key], dict2_value)
+        else:
+            dict1_copy[dict2_key] = dict2_value
+    return dict1_copy

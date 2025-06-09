@@ -8,7 +8,7 @@ from eth_abi import decode, encode
 from voltaire_bundler.bundle.exceptions import \
     (ExecutionException, ExecutionExceptionCode,
      ValidationException, ValidationExceptionCode)
-from voltaire_bundler.gas.gas_manager import GasManager, calculate_deposit_slot_index
+from voltaire_bundler.gas.gas_manager import GasManager, calculate_deposit_slot_index, deep_union
 from voltaire_bundler.user_operation.models import FailedOp, FailedOpWithRevert
 from voltaire_bundler.user_operation.user_operation_handler import \
     decode_failed_op_event, decode_failed_op_with_revert_event
@@ -221,7 +221,7 @@ class GasManagerV7V8(GasManager):
                 "data": call_data,
             },
             "latest",
-            default_state_overrides | state_override_set_dict
+            deep_union(default_state_overrides, state_override_set_dict)
         ]
 
         result: Any = await send_rpc_request_to_eth_client(
