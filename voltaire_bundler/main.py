@@ -53,8 +53,8 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
 
     async with asyncio.TaskGroup() as task_group:
         execution_endpoint: ExecutionEndpoint = ExecutionEndpoint(
-            init_data.ethereum_node_url,
-            init_data.bundle_node_url,
+            init_data.ethereum_node_urls,
+            init_data.bundle_node_urls,
             init_data.bundler_pk,
             init_data.bundler_address,
             init_data.chain_id,
@@ -62,13 +62,13 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             init_data.is_debug,
             init_data.is_legacy_mode,
             init_data.conditional_rpc,
-            init_data.flashbots_protect_node_url,
+            init_data.flashbots_protect_node_urls,
             init_data.bundle_interval,
             init_data.max_fee_per_gas_percentage_multiplier,
             init_data.max_priority_fee_per_gas_percentage_multiplier,
             init_data.enforce_gas_price_tolerance,
-            init_data.ethereum_node_debug_trace_call_url,
-            init_data.ethereum_node_eth_get_logs_url,
+            init_data.ethereum_node_debug_trace_call_urls,
+            init_data.ethereum_node_eth_get_logs_urls,
             init_data.disable_p2p,
             init_data.max_verification_gas,
             init_data.max_call_data_gas,
@@ -83,11 +83,11 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
         )
         task_group.create_task(execution_endpoint.start_execution_endpoint())
 
-        node_urls_to_check = init_data.ethereum_node_url
-        if init_data.ethereum_node_url != init_data.ethereum_node_debug_trace_call_url:
-            node_urls_to_check += init_data.ethereum_node_debug_trace_call_url
-        if init_data.ethereum_node_url != init_data.ethereum_node_eth_get_logs_url:
-            node_urls_to_check += init_data.ethereum_node_eth_get_logs_url
+        node_urls_to_check = init_data.ethereum_node_urls
+        if init_data.ethereum_node_urls != init_data.ethereum_node_debug_trace_call_urls:
+            node_urls_to_check += init_data.ethereum_node_debug_trace_call_urls
+        if init_data.ethereum_node_urls != init_data.ethereum_node_eth_get_logs_urls:
+            node_urls_to_check += init_data.ethereum_node_eth_get_logs_urls
 
         task_group.create_task(
             run_rpc_http_server(
