@@ -617,7 +617,7 @@ def init_logging(args: Namespace):
     logging.getLogger("Voltaire")
 
 
-def init_bundler_address_and_secret(args: Namespace):
+async def init_bundler_address_and_secret(args: Namespace, ethereum_node_url: str):
     bundler_address = ""
     bundler_pk = ""
 
@@ -628,6 +628,37 @@ def init_bundler_address_and_secret(args: Namespace):
     else:
         bundler_pk = args.bundler_secret
         bundler_address = public_address_from_private_key(bundler_pk)
+
+    try:
+        bundler_code_res = await send_rpc_request_to_eth_client_no_retry(
+            ethereum_node_url,
+            "eth_getCode",
+            [bundler_address, "latest"],
+        )
+        if "result" not in bundler_code_res:
+            logging.critical(
+                f"eth_getCode failed for bundler address {bundler_address}"
+            )
+            sys.exit(1)
+        else:
+            bundler_code = bundler_code_res["result"]
+            if (len(bundler_code) > 2):
+                logging.critical(
+                    f"Invalid Eth bundler beneficiary address: {bundler_address}"
+                    " as it should be an eoa without an eip7702 delegation."
+                )
+                sys.exit(1)
+    except aiohttp.client_exceptions.ClientConnectorError:
+        logging.critical(
+            f"Error when connecting to Eth node {ethereum_node_url} for eth_getCode"
+        )
+        sys.exit(1)
+    except Exception:
+        logging.critical(
+            f"Error when connecting to Eth node {ethereum_node_url} for eth_getCode"
+        )
+        sys.exit(1)
+
     return bundler_address, bundler_pk
 
 
@@ -726,7 +757,8 @@ async def get_init_data(args: Namespace) -> InitData:
         )
         sys.exit(1)
 
-    bundler_address, bundler_pk = init_bundler_address_and_secret(args)
+    bundler_address, bundler_pk = await init_bundler_address_and_secret(
+        args, ethereum_node_urls[0])
 
     if args.bundle_node_url is None:
         bundle_node_urls = ethereum_node_urls
