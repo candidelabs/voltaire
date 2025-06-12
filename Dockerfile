@@ -1,4 +1,4 @@
-FROM python:3.13.2-alpine3.21
+FROM python:3.13.4-alpine3.22 AS builder
 
 ENV PIP_DEFAULT_TIMEOUT=100 \
     # Allow statements and log messages to immediately appear
@@ -10,15 +10,24 @@ ENV PIP_DEFAULT_TIMEOUT=100 \
 
 # Set WORKDIR
 WORKDIR /app
-COPY . /app
+
+COPY ./requirements.txt .
 
 RUN set -ex \
     # Create a non-root user
     && addgroup --system --gid 1001 appgroup \
     && adduser --system --uid 1001 -G appgroup --no-create-home appuser \
-    # Install dependencies
+    # Upgrade pip
     && pip install --no-cache-dir --upgrade pip \
-    && pip install -r requirements.txt --no-cache-dir \
+    # Build wheels from requirements
+    && pip wheel --no-cache-dir --wheel-dir=/wheels -r requirements.txt
+
+COPY . .
+
+RUN set -ex \
+    # Install dependencies
+    && pip install --no-cache /wheels/* \
+    && rm -rf /wheels \
     && pip install . --no-dependencies
 
 RUN chown -R appuser:appgroup /app 
