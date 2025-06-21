@@ -65,8 +65,8 @@ class GasManager(ABC, Generic[UserOperationType]):
                 block_max_priority_fee_per_gas = block_max_fee_per_gas
                 if max_fee_per_gas < block_max_fee_per_gas_with_tolerance:
                     raise ValidationException(
-                        ValidationExceptionCode.SimulateValidation,
-                        "Max fee per gas is too low. it should be minimum : " +
+                        ValidationExceptionCode.InvalidFields,
+                        "maxFeePerGas is too low. it should be minimum : " +
                         f"{block_max_fee_per_gas_with_tolerance_hex}",
                     )
 
@@ -89,14 +89,14 @@ class GasManager(ABC, Generic[UserOperationType]):
                 if max_fee_per_gas < estimated_base_fee:
                     raise ValidationException(
                         ValidationExceptionCode.InvalidFields,
-                        "Max fee per gas is too low." +
+                        "maxFeePerGas is too low." +
                         "it should be minimum the estimated base fee: " +
                         f"{hex(estimated_base_fee)}",
                     )
                 if max_priority_fee_per_gas < 1:
                     raise ValidationException(
                         ValidationExceptionCode.InvalidFields,
-                        "Max priority fee per gas is too low. it should be minimum : 1",
+                        "maxPriorityFeePerGas is too low. it should be minimum : 1",
                     )
                 if (
                     min(
@@ -107,7 +107,7 @@ class GasManager(ABC, Generic[UserOperationType]):
                 ):
                     raise ValidationException(
                         ValidationExceptionCode.InvalidFields,
-                        "Max fee per gas and (Max priority fee per gas + estimated basefee) " +
+                        "maxFeePerGas and (maxPriorityFeePerGas + estimated basefee) " +
                         f"should be equal or higher than : {block_max_fee_per_gas_with_tolerance_hex}",
                     )
 
@@ -125,15 +125,15 @@ class GasManager(ABC, Generic[UserOperationType]):
 
         if user_operation.pre_verification_gas < expected_preverification_gas:
             raise ValidationException(
-                ValidationExceptionCode.SimulateValidation,
-                "Preverification gas is too low." +
+                ValidationExceptionCode.InvalidFields,
+                "preVerificationGas gas is too low." +
                 f"it should be minimum : {hex(expected_preverification_gas)}",
             )
 
         if user_operation.verification_gas_limit > self.max_verification_gas:
             raise ValidationException(
-                ValidationExceptionCode.SimulateValidation,
-                "Verification gas is too high." +
+                ValidationExceptionCode.InvalidFields,
+                "verificationGasLimit is too high." +
                 f"it should be maximum : {hex(self.max_verification_gas)}",
             )
 
