@@ -162,10 +162,15 @@ async def send_rpc_request_to_eth_client_no_retry(
                 await asyncio.sleep(1)
 
 
-async def get_latest_block_info(
-        ethereum_node_urls) -> tuple[str, int, str, int, str]:
+async def get_block_info(
+    ethereum_node_urls, block_number_hex: str = "latest"
+) -> tuple[str, int, str, int, str]:
     raw_res: Any = await send_rpc_request_to_eth_client(
-        ethereum_node_urls, "eth_getBlockByNumber", ["latest", False], None, "result"
+        ethereum_node_urls,
+        "eth_getBlockByNumber",
+        [block_number_hex, False],
+        None,
+        "result"
     )
     latest_block = raw_res["result"]
 

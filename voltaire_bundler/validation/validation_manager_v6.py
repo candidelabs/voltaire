@@ -57,6 +57,9 @@ class ValidationManagerV6(ValidationManager):
 
         self.entrypoint_code_override = load_bytecode(
             "EntryPointSimulationsV6.json")
+        self.entrypoint_code_override_arb = load_bytecode(
+            "EntryPointSimulationsV6Arb.json")
+
 
     async def validate_user_operation(
         self,
@@ -223,9 +226,17 @@ class ValidationManagerV6(ValidationManager):
         call_data = ValidationManagerV6.encode_simulate_validation_calldata(
             user_operation, min_block_number)
 
-        state_overrides = {  # override the Entrypoint with EntryPointSimulationsV6
-            entrypoint: {"code": self.entrypoint_code_override}
-        }
+        # arbitrum One or arbitrum sepolia
+        if self.chain_id == 42161 or self.chain_id == 421614:
+            state_overrides = {
+                # override the Entrypoint with EntryPointSimulationsV6Arb
+                entrypoint: {"code": self.entrypoint_code_override_arb},
+            }
+        else:
+            state_overrides = {
+                # override the Entrypoint with EntryPointSimulationsV6
+                entrypoint: {"code": self.entrypoint_code_override},
+            }
 
         params = [
             {
@@ -270,10 +281,17 @@ class ValidationManagerV6(ValidationManager):
         call_data = ValidationManagerV6.encode_simulate_validation_calldata(
             user_operation, min_block_number
         )
-
-        state_overrides = {  # override the Entrypoint with EntryPointSimulationsV6
-            entrypoint: {"code": self.entrypoint_code_override},
-        }
+        # arbitrum One or arbitrum sepolia
+        if self.chain_id == 42161 or self.chain_id == 421614:
+            state_overrides = {
+                # override the Entrypoint with EntryPointSimulationsV6Arb
+                entrypoint: {"code": self.entrypoint_code_override_arb},
+            }
+        else:
+            state_overrides = {
+                # override the Entrypoint with EntryPointSimulationsV6
+                entrypoint: {"code": self.entrypoint_code_override},
+            }
 
         params = [
             {

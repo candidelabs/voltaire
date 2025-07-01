@@ -26,7 +26,7 @@ from voltaire_bundler.user_operation.user_operation_handler_v7v8 import \
     UserOperationHandlerV7V8
 from voltaire_bundler.user_operation.user_operation_handler import \
     fell_user_operation_optional_parameters_for_estimateUserOperationGas
-from voltaire_bundler.utils.eth_client_utils import get_latest_block_info
+from voltaire_bundler.utils.eth_client_utils import get_block_info
 
 from .bundle.bundle_manager import BundlerManager
 from .mempool.mempool_manager_v6 import LocalMempoolManagerV6
@@ -231,12 +231,18 @@ class ExecutionEndpoint(Endpoint):
         # await self.send_pooled_user_op_hashes_request("", 0)
 
     async def update_p2p_gossip(self, p2pClient: Client) -> None:
-        requestEvents = self.local_mempool_manager_v8.create_p2p_gossip_requests()
-        requestEvents += self.local_mempool_manager_v7.create_p2p_gossip_requests()
+        request_events_ops = [
+            self.local_mempool_manager_v8.create_p2p_gossip_requests(),
+            self.local_mempool_manager_v7.create_p2p_gossip_requests()
+        ]
         if self.local_mempool_manager_v6 is not None:
-            requestEvents += self.local_mempool_manager_v6.create_p2p_gossip_requests()
-        for requestEvent in requestEvents:
-            await p2pClient.broadcast_only(requestEvent)
+            request_events_ops.append(
+                self.local_mempool_manager_v6.create_p2p_gossip_requests()
+            )
+        request_events_res = await asyncio.gather(*request_events_ops)
+        for request_events in request_events_res:
+            for request_event in request_events:
+                await p2pClient.broadcast_only(request_event)
         self.local_mempool_manager_v8.verified_useroperations_standard_mempool_gossip_queue.clear()
         self.local_mempool_manager_v7.verified_useroperations_standard_mempool_gossip_queue.clear()
         if self.local_mempool_manager_v6 is not None:
@@ -451,6 +457,7 @@ class ExecutionEndpoint(Endpoint):
             local_mempool.queue_verified_useroperation_to_gossip_publish(
                 user_operation_json,
                 verified_at_block_hash,
+                user_operation.validated_at_block_hex,
                 valid_mempools,
             )
 
@@ -895,7 +902,7 @@ class ExecutionEndpoint(Endpoint):
             self, _req_arguments: dict) -> dict[str, int | bytes]:
         (
             latest_block_number, _, _, _, latest_block_hash
-        ) = await get_latest_block_info(
+        ) = await get_block_info(
             self.ethereum_node_urls
         )
         return {

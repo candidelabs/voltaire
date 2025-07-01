@@ -9,7 +9,7 @@ from voltaire_bundler.bundle.exceptions import UserOpReceiptFoundException
 from voltaire_bundler.mempool.sender_mempool import VerifiedUserOperation
 from voltaire_bundler.typing import Address
 from voltaire_bundler.utils.eth_client_utils import \
-        get_latest_block_info, send_rpc_request_to_eth_client
+        get_block_info, send_rpc_request_to_eth_client
 from typing import Any
 from ..gas.gas_manager import GasManager
 from .models import (Log, ReceiptInfo, UserOperationReceiptInfo)
@@ -205,7 +205,7 @@ class UserOperationHandler(ABC):
         logs_number_of_ranges: int,
     ):
         if logs_incremental_range > 0:
-            block_info = await get_latest_block_info(
+            block_info = await get_block_info(
                 self.ethereum_node_eth_get_logs_urls)
 
             latest_block_number = int(block_info[0], 16)

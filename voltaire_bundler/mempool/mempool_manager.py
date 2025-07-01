@@ -18,7 +18,7 @@ from voltaire_bundler.event_bus_manager.endpoint import RequestEvent
 from voltaire_bundler.validation.validation_manager import ValidationManager
 from voltaire_bundler.typing import Address, MempoolId
 from voltaire_bundler.user_operation.user_operation import UserOperation
-from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
+from voltaire_bundler.utils.eth_client_utils import get_block_info, send_rpc_request_to_eth_client
 
 from .sender_mempool import SenderMempool
 
@@ -180,7 +180,7 @@ class LocalMempoolManager():
 
         return (
             user_operation_hash,
-            validated_at_block_number,
+            validated_at_block_hash,
             valid_mempools_ids
         )
 
@@ -576,31 +576,55 @@ class LocalMempoolManager():
         self,
         user_operation_json,
         verified_at_block_hash: str,
+        verified_at_block_number_hex: str | None,  # for arbitrum only
         valid_mempools: List[MempoolId],
     ) -> None:
         verified_useroperation = dict()
         verified_useroperation["entry_point_contract"] = encode_address(
                 self.entrypoint)
-        verified_useroperation["verified_at_block_hash"] = encode_uint256(
-            int(verified_at_block_hash, 16)
-        )
+        verified_useroperation["verified_at_block_hash"] = verified_at_block_hash
         verified_useroperation["user_operation"] = user_operation_json
+
+        if self.chain_id == 42161 or self.chain_id == 421614:
+            verified_useroperation["verified_at_block_number"] = verified_at_block_number_hex
 
         self.verified_useroperations_standard_mempool_gossip_queue.append(
             verified_useroperation
         )
 
-    def create_p2p_gossip_requests(self) -> List[RequestEvent]:
+    async def create_p2p_gossip_requests(self) -> List[RequestEvent]:
         requestEvents = list()
+        block_numbers_hex = list()
+        block_info_ops = list()
         for (
             verified_useroperation
         ) in self.verified_useroperations_standard_mempool_gossip_queue:
             gossib_to_broadcast = dict()
             gossib_to_broadcast["topics"] = [self.canonical_mempool_id]
             gossib_to_broadcast["verified_useroperation"] = verified_useroperation
-
+            # arbitrum One or arbitrum sepolia
+            if self.chain_id == 42161 or self.chain_id == 421614:
+                assert "verified_at_block_number" in verified_useroperation
+                verified_at_block_number = verified_useroperation[
+                    "verified_at_block_number"
+                ]
+                block_numbers_hex.append(verified_at_block_number)
+                block_info_ops.append(
+                    get_block_info(self.ethereum_node_urls, verified_at_block_number)
+                )
             requestEvents.append(gossib_to_broadcast)
         self.verified_useroperations_standard_mempool_gossip_queue.clear()
+        
+        if not (self.chain_id == 42161 or self.chain_id == 421614):
+            return requestEvents
+
+        # if arbtrum fetch valid block hashed and set the valid block hash
+        # for each verified user operation
+        block_info_results = await asyncio.gather(*block_info_ops)
+        for (gossib_to_broadcast, block_info) in zip(requestEvents, block_info_results):
+            _, _, _, _, block_hash = block_info
+            gossib_to_broadcast[
+                "verified_useroperation"]["verified_at_block_hash"] = block_hash
         return requestEvents
 
     def _verify_max_allowed_user_operations(
