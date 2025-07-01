@@ -21,7 +21,6 @@ use crate::EnrExt;
 // use crate::Eth2Enr;
 use crate::{error, metrics, Enr, NetworkGlobals, PubsubMessage, TopicHash};
 use api_types::{PeerRequestId, Request, RequestId, Response};
-use ethereum_types::H256;
 use futures::stream::StreamExt;
 use gossipsub_scoring_parameters::{voltaire_gossip_thresholds, PeerScoreSettings};
 use libp2p::bandwidth::BandwidthSinks;

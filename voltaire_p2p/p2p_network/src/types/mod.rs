@@ -1,3 +1,5 @@
+#![allow(clippy::non_snake_case)]
+
 pub mod error;
 mod globals;
 mod pubsub;
@@ -5,9 +7,6 @@ mod subnet;
 mod topics;
 mod verified_useroperation;
 mod optional;
-
-#[macro_use]
-mod macros;
 
 pub type Enr = discv5::enr::Enr<discv5::enr::CombinedKey>;
 

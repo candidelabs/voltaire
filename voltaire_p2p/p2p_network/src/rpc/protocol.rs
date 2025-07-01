@@ -9,7 +9,6 @@ use futures::{FutureExt, StreamExt};
 use libp2p::core::{InboundUpgrade, UpgradeInfo};
 use ssz::Encode;
 use std::io;
-use std::marker::PhantomData;
 use std::time::Duration;
 use strum::{AsRefStr, Display, EnumString, IntoStaticStr};
 use tokio_io_timeout::TimeoutStream;
@@ -141,7 +140,7 @@ impl UpgradeInfo for RPCProtocol {
 
     /// The list of supported RPC protocols for Voltaire.
     fn protocol_info(&self) -> Self::InfoIter {
-        let mut supported_protocols = SupportedProtocol::currently_supported();
+        let supported_protocols = SupportedProtocol::currently_supported();
         // if self.enable_light_client_server {
         //     supported_protocols.push(ProtocolId::new(
         //         SupportedProtocol::LightClientBootstrapV1,
