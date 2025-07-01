@@ -138,7 +138,7 @@ class LocalMempoolManager():
 
         new_sender = self.senders_to_senders_mempools[new_sender_address]
 
-        replaced_user_operation_hash_and_paymaster = await new_sender.add_user_operation(
+        replaced_user_operation_hash_and_paymaster = new_sender.add_user_operation(
             user_operation,
             user_operation_hash,
             validated_at_block_hash,
@@ -292,7 +292,7 @@ class LocalMempoolManager():
 
         new_sender = self.senders_to_senders_mempools[new_sender_address]
 
-        replaced_user_operation_hash_and_paymaster = await new_sender.add_user_operation(
+        replaced_user_operation_hash_and_paymaster = new_sender.add_user_operation(
             user_operation, user_operation_hash, validated_at_block_hash
         )
         if replaced_user_operation_hash_and_paymaster is not None:

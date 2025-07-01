@@ -21,7 +21,7 @@ class SenderMempool:
     address: Address
     user_operation_hashs_to_verified_user_operation: dict[str, VerifiedUserOperation]
 
-    async def add_user_operation(
+    def add_user_operation(
         self,
         new_user_operation: UserOperation,
         new_user_operation_hash: str,
