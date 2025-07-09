@@ -26,7 +26,7 @@ from voltaire_bundler.user_operation.user_operation_handler_v7v8 import \
     UserOperationHandlerV7V8
 from voltaire_bundler.user_operation.user_operation_handler import \
     fell_user_operation_optional_parameters_for_estimateUserOperationGas
-from voltaire_bundler.utils.eth_client_utils import get_block_info
+from voltaire_bundler.utils.eth_client_utils import get_block_info, send_rpc_request_to_eth_client
 
 from .bundle.bundle_manager import BundlerManager
 from .mempool.mempool_manager_v6 import LocalMempoolManagerV6
@@ -623,6 +623,27 @@ class ExecutionEndpoint(Endpoint):
         await self.bundle_manager.send_next_bundle()
 
         return "ok"
+
+    async def _event_voltaire_feesPerGas(self, _) -> dict:
+        max_fee_per_gas, max_priority_fee_per_gas = await asyncio.gather(
+            send_rpc_request_to_eth_client(
+                self.ethereum_node_urls, "eth_gasPrice",
+                None, None, "result"
+            ),
+            send_rpc_request_to_eth_client(
+                self.ethereum_node_urls, "eth_maxPriorityFeePerGas",
+                None, None, "result"
+            )
+        )
+        max_fee_per_gas_with_buffer = hex(math.ceil(
+            int(max_fee_per_gas["result"], 16) * 1.2))  # 20% buffer
+        max_priority_fee_per_gas_with_buffer = hex(math.ceil(
+            int(max_priority_fee_per_gas["result"], 16) * 1.2))  # 20% buffer
+
+        return {
+            "maxFeePerGas": max_fee_per_gas_with_buffer,
+            "maxPriorityFeePerGas": max_priority_fee_per_gas_with_buffer,
+        }
 
     async def _event_debug_bundler_clearState(self, _) -> str:
 

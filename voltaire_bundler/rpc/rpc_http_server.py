@@ -252,6 +252,7 @@ async def debug_bundler_getStakeStatus(address: str, entrypoint: str):
     )
     return result
 
+
 async def debug_bundler_setBundlingMode(mode: str):
     result = await _handle_rpc_request(
         endpoint_id="bundler_endpoint",
@@ -260,8 +261,18 @@ async def debug_bundler_setBundlingMode(mode: str):
     )
     return result
 
+
 async def web3_bundlerVersion():
     return Success(version("voltaire_bundler"))
+
+
+async def voltaire_feesPerGas():
+    result = await _handle_rpc_request(
+        endpoint_id="bundler_endpoint",
+        request_type="voltaire_feesPerGas",
+        request_arguments=[],
+    )
+    return result
 
 METHODS: dict[str, Callable] = {
     "eth_chainId": eth_chainId,
@@ -271,6 +282,7 @@ METHODS: dict[str, Callable] = {
     "eth_getUserOperationReceipt": eth_getUserOperationReceipt,
     "eth_getUserOperationByHash": eth_getUserOperationByHash,
     "web3_bundlerVersion": web3_bundlerVersion,
+    "voltaire_feesPerGas": voltaire_feesPerGas,
 }
 
 
