@@ -315,7 +315,9 @@ class ExecutionEndpoint(Endpoint):
         ):
             if (
                 not self.is_eip7702 or
-                input_entrypoint != LocalMempoolManagerV8.entrypoint_lowercase
+                (
+                    input_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase
+                )
             ):
                 raise ValidationException(
                     ValidationExceptionCode.InvalidFields,
@@ -412,7 +414,7 @@ class ExecutionEndpoint(Endpoint):
             useroperation_arg["eip7702Auth"] is not None and
             (
                 not self.is_eip7702 or
-                input_entrypoint != LocalMempoolManagerV8.entrypoint_lowercase
+                input_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase
             )
         ):
             raise ValidationException(

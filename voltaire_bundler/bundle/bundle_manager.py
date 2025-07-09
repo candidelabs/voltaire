@@ -611,17 +611,14 @@ class BundlerManager:
         user_operations_list = []
         auth_list = []
 
-        if entrypoint == self.local_mempool_manager_v8.entrypoint:
+        if (
+            entrypoint == self.local_mempool_manager_v8.entrypoint or
+            entrypoint == self.local_mempool_manager_v7.entrypoint
+        ):
             for user_operation in user_operations:
                 user_operations_list.append(user_operation.to_list())
                 if user_operation.eip7702_auth is not None:
                     auth_list.append(user_operation.eip7702_auth)
-            call_data = encode_handleops_calldata_v7v8(
-                user_operations_list, self.bundler_address
-            )
-        elif entrypoint == self.local_mempool_manager_v7.entrypoint:
-            for user_operation in user_operations:
-                user_operations_list.append(user_operation.to_list())
             call_data = encode_handleops_calldata_v7v8(
                 user_operations_list, self.bundler_address
             )
@@ -748,7 +745,8 @@ class BundlerManager:
 
                 logging.warning(
                     "Dropping user operation that failed third validation."
-                    f"useroperation: {user_operation.user_operation_hash}"
+                    f"useroperation: {user_operation.user_operation_hash}."
+                    f"reason: {reason}"
                 )
                 del user_operations[operation_index]
                 if len(user_operations) > 0:
