@@ -95,6 +95,7 @@ async def send_rpc_request_to_eth_client(
                     "code" in json_result["error"] and
                     json_result["error"]["code"] != 3 and
                     json_result["error"]["code"] != -32000 and
+                    json_result["error"]["code"] != -32015 and  # nethermind https://github.com/NethermindEth/nethermind/pull/8951
                     json_result["error"]["code"] != -32603
                 ) or (
                     # special case for erpc errors like:
