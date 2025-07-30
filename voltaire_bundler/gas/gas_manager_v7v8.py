@@ -246,6 +246,14 @@ class GasManagerV7V8(GasManager):
             )
 
         error_data = result["error"]["data"]
+        if "err" in error_data:  # nethermind
+            for word in error_data.split():
+                if "0x" in word:
+                    error_data = word
+            if "err" in error_data:  # "0x" not found
+                raise ValueError(
+                    "Invalid response from node during simulate_handle_op_mode"
+                )
         error_selector = str(error_data[:10])
         error_params = error_data[10:]
 
