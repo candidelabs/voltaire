@@ -34,8 +34,11 @@ class UserOperation(ABC):
         pass
 
     @abstractmethod
-    def get_max_cost(self) -> int:
+    def get_max_gas(self) -> int:
         pass
+
+    def get_max_cost(self) -> int:
+        return self.get_max_gas() * self.max_fee_per_gas
 
 
 def verify_and_get_address(field_name: str, value: Address | None) -> Address:

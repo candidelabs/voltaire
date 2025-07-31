@@ -151,7 +151,7 @@ class UserOperationV6(UserOperation):
             max_cost += 2 * self.verification_gas_limit
         return max_cost * self.max_fee_per_gas
 
-    def get_max_cost(self) -> int:
+    def get_max_gas(self) -> int:
         max_cost = (
             self.pre_verification_gas +
             self.verification_gas_limit +
@@ -160,7 +160,7 @@ class UserOperationV6(UserOperation):
         if self.paymaster_address_lowercase is not None:
             max_cost += 2 * self.verification_gas_limit
 
-        return max_cost * self.max_fee_per_gas
+        return max_cost
 
     def _set_factory_and_paymaster_address(self) -> None:
         if len(self.init_code) > 20:

@@ -270,7 +270,7 @@ class UserOperationV7V8(UserOperation):
             max_cost += self.paymaster_verification_gas_limit
         return max_cost * self.max_fee_per_gas
 
-    def get_max_cost(self) -> int:
+    def get_max_gas(self) -> int:
         max_cost = (
             self.pre_verification_gas +
             self.verification_gas_limit +
@@ -281,7 +281,7 @@ class UserOperationV7V8(UserOperation):
         if self.paymaster_post_op_gas_limit is not None:
             max_cost += self.paymaster_post_op_gas_limit
 
-        return max_cost * self.max_fee_per_gas
+        return max_cost
 
     def _set_factory_and_paymaster_address(self) -> None:
         if (self.factory is not None and len(self.factory) >= 20):
