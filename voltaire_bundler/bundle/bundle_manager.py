@@ -269,8 +269,6 @@ class BundlerManager:
                 "Sending bundle failed. failed call data or gas estimation.")
             return
 
-        gas_estimation_hex = hex(math.ceil(
-            int(gas_estimation_hex, 16) * 1.2))  # 20% buffer
 
         block_max_fee_per_gas = tasks[1]["result"]
         nonce = tasks[2]["result"]
@@ -642,6 +640,13 @@ class BundlerManager:
                 user_operations_list, self.bundler_address
             )
 
+        bundle_calldata_init_gas = calculate_bundle_calldata_init_gas(call_data)
+        bundle_gas_limit = 0
+        for user_operation in user_operations:
+            bundle_gas_limit += user_operation.get_max_gas()
+
+        bundle_gas_limit += 50_000 + bundle_calldata_init_gas
+
         # see EntryPointMinBlock.sol
         entrypoint_proxy_bytecode = (
             "0x60806040527f" +
@@ -660,7 +665,7 @@ class BundlerManager:
 
         result = await send_rpc_request_to_eth_client(
             self.ethereum_node_urls,
-            "eth_estimateGas",
+            "eth_call",
             [
                 params,
                 "pending",
@@ -672,8 +677,6 @@ class BundlerManager:
             ]
         )
         if "result" in result:
-            call_gas_limit = result["result"]
-
             merged_storage_map = None
             if self.conditional_rpc is not None:
                 senders_root_hashs_operations = list()
@@ -698,7 +701,7 @@ class BundlerManager:
                     merged_storage_map[
                         user_operation.sender_address
                     ] = root_hash_result["result"]["storageHash"]
-            return call_data, call_gas_limit, merged_storage_map, auth_list
+            return call_data, bundle_gas_limit, merged_storage_map, auth_list
         # the bundler performs the third validation of the entire UserOperations
         # bundle. If any of the UserOperations fail validation,
         # the bundler drops them, and updates their reputation,
@@ -906,3 +909,18 @@ class BundlerManager:
                 f"reason to ban:{reason_to_ban} - error: {reason}"
             )
             mempool_manager.reputation_manager.ban_entity(entity_to_ban)
+
+
+def calculate_bundle_calldata_init_gas(bundle_call_data: str) -> int:
+    bundle_call_data_bytes = bytes.fromhex(bundle_call_data[2:])
+    zero_byte = 4
+    non_zero_byte = 16
+
+    packed_length = len(bundle_call_data_bytes)
+    zero_byte_count = bundle_call_data_bytes.count(b"\x00")
+    non_zero_byte_count = packed_length - zero_byte_count
+    call_data_cost = (
+        zero_byte_count * zero_byte + non_zero_byte_count * non_zero_byte
+    )
+
+    return 21000 + call_data_cost
