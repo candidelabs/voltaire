@@ -45,6 +45,7 @@ class LocalMempoolManager():
     latest_paymaster_deposits_cache_block: int
     min_stake: int
     min_unstake_delay: int
+    max_compined_bundle_user_operations_gas_limit: int = 15_000_000
     MAX_OPS_PER_REQUEST = 4096
 
     def clear_user_operations(self) -> None:
@@ -365,7 +366,7 @@ class LocalMempoolManager():
                 )
             )
         new_code_hash_results = await asyncio.gather(*new_code_hash_ops)
-
+        compined_gas_limit = 0
         for (
             user_operation,
             (is_valid, associated_addresses, storage_map),
@@ -375,6 +376,18 @@ class LocalMempoolManager():
             validation_results,
             new_code_hash_results
         ):
+            user_operation_max_gas = user_operation.get_max_cost()
+            if (
+                (compined_gas_limit + user_operation_max_gas) >
+                self.max_compined_bundle_user_operations_gas_limit
+            ):
+                logging.debug(
+                    "user operation skipped for bundling because "
+                    "because max bundle gas limit was reached."
+                )
+                continue
+            compined_gas_limit += user_operation_max_gas
+
             sender_address = user_operation.sender_address
             sender_mempool = self.senders_to_senders_mempools[sender_address]
             user_operation_hash = user_operation.user_operation_hash
