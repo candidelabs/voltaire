@@ -44,9 +44,9 @@ class BundlerManager:
     flashbots_protect_node_urls: list[str] | None
     max_fee_per_gas_percentage_multiplier: int
     max_priority_fee_per_gas_percentage_multiplier: int
-    user_operations_to_send_v6: dict[str, UserOperationV6] | None
-    user_operations_to_send_v7: dict[str, UserOperationV7V8]
-    user_operations_to_send_v8: dict[str, UserOperationV7V8]
+    bundles_to_send_v6: list[dict[str, UserOperationV6]] | None
+    bundles_to_send_v7: list[dict[str, UserOperationV7V8]]
+    bundles_to_send_v8: list[dict[str, UserOperationV7V8]]
     user_operations_to_monitor_v6: dict[str, UserOperationV6]
     user_operations_to_monitor_v7: dict[str, UserOperationV7V8]
     user_operations_to_monitor_v8: dict[str, UserOperationV7V8]
@@ -87,12 +87,12 @@ class BundlerManager:
         self.max_priority_fee_per_gas_percentage_multiplier = (
             max_priority_fee_per_gas_percentage_multiplier
         )
-        self.user_operations_to_send_v8 = {}
-        self.user_operations_to_send_v7 = {}
+        self.bundles_to_send_v8 = []
+        self.bundles_to_send_v7 = []
         if self.local_mempool_manager_v6 is None:
-            self.user_operations_to_send_v6 = None
+            self.bundles_to_send_v6 = None
         else:
-            self.user_operations_to_send_v6 = {}
+            self.bundles_to_send_v6 = []
 
         self.user_operations_to_monitor_v8 = {}
         self.user_operations_to_monitor_v7 = {}
@@ -104,10 +104,14 @@ class BundlerManager:
     async def send_next_bundle(self) -> None:
         await self.update_send_queue_and_monitor_queue()
 
-        user_operations_to_send_v8 = self.user_operations_to_send_v8
-        user_operations_to_send_v7 = self.user_operations_to_send_v7
-        self.user_operations_to_send_v8 = {}
-        self.user_operations_to_send_v7 = {}
+        if len(self.bundles_to_send_v8) > 0:
+            user_operations_to_send_v8 = self.bundles_to_send_v8.pop(0)
+        else:
+            user_operations_to_send_v8 = {}
+        if len(self.bundles_to_send_v7) > 0:
+            user_operations_to_send_v7 = self.bundles_to_send_v7.pop(0)
+        else:
+            user_operations_to_send_v7 = {}
         highest_verified_at_block_v8 = sorted(map(
             lambda userop: int(userop.validated_at_block_hex, 16)
             if userop.validated_at_block_hex is not None else 0,
@@ -131,10 +135,12 @@ class BundlerManager:
                 highest_verified_at_block_v7
             )
         ]
-        if self.user_operations_to_send_v6 is not None:
+        if self.bundles_to_send_v6 is not None:
             assert self.local_mempool_manager_v6 is not None
-            user_operations_to_send_v6 = self.user_operations_to_send_v6
-            self.user_operations_to_send_v6 = {}
+            if len(self.bundles_to_send_v6) > 0:
+                user_operations_to_send_v6 = self.bundles_to_send_v6.pop(0)
+            else:
+                user_operations_to_send_v6 = {}
             highest_verified_at_block_v6 = sorted(map(
                 lambda userop: int(userop.validated_at_block_hex, 16)
                 if userop.validated_at_block_hex is not None else 0,
@@ -191,18 +197,18 @@ class BundlerManager:
         tasks = await asyncio.gather(*tasks_arr)
 
         user_operations_to_bundle_v8 = cast(dict[str, UserOperationV7V8], tasks[2])
-        self.user_operations_to_send_v8 |= user_operations_to_bundle_v8
+        self.bundles_to_send_v8.append(user_operations_to_bundle_v8)
         self.user_operations_to_monitor_v8 |= copy.deepcopy(user_operations_to_bundle_v8)
 
         user_operations_to_bundle_v7 = cast(dict[str, UserOperationV7V8], tasks[3])
-        self.user_operations_to_send_v7 |= user_operations_to_bundle_v7
+        self.bundles_to_send_v7.append(user_operations_to_bundle_v7)
         self.user_operations_to_monitor_v7 |= copy.deepcopy(user_operations_to_bundle_v7)
 
         if self.local_mempool_manager_v6 is not None:
-            if self.user_operations_to_send_v6 is None:
-                self.user_operations_to_send_v6 = {}
+            if self.bundles_to_send_v6 is None:
+                self.bundles_to_send_v6 = []
             user_operations_to_bundle_v6 = cast(dict[str, UserOperationV6], tasks[5])
-            self.user_operations_to_send_v6 |= user_operations_to_bundle_v6
+            self.bundles_to_send_v6.append(user_operations_to_bundle_v6)
             self.user_operations_to_monitor_v6 |= copy.deepcopy(
                 user_operations_to_bundle_v6)
 
