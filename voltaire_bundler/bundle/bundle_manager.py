@@ -372,7 +372,10 @@ class BundlerManager:
                 logging.error("Failed to send bundle." + str(result["error"]))
                 # ErrAlreadyKnown is returned if the transactions is already
                 # contained within the pool.
-                if "already known" in result["error"]["message"]:
+                if (
+                    "already known" in result["error"]["message"] or
+                    "AlreadyKnown" in result["error"]["message"]  # nethermind
+                ):
                     return
                 # ErrInvalidSender is returned if the transaction
                 # contains an invalid signature.
@@ -380,7 +383,10 @@ class BundlerManager:
                     pass  # todo
                 # ErrUnderpriced is returned if a transaction's gas price
                 # is below the minimum configured for the transaction pool.
-                elif "transaction underpriced" in result["error"]["message"]:
+                elif (
+                    "transaction underpriced" in result["error"]["message"] or
+                    "AlreadyKnown" in result["error"]["message"]  # nethermind
+                ):
                     # retry sending useroperations with higher gas price
                     # if the gas_price_percentage_multiplier reached 200,
                     # drop all user_operations
@@ -403,7 +409,8 @@ class BundlerManager:
                 # attempted to be replaced with a different one without
                 # the required price bump.
                 elif (
-                    "replacement transaction underpriced" in result["error"]["message"]
+                    "replacement transaction underpriced" in result["error"]["message"] or
+                    "ReplacementNotAllowed" in result["error"]["message"]  # nethermind
                 ):
                     if self.gas_price_percentage_multiplier <= 200:
                         self.gas_price_percentage_multiplier += 10
