@@ -376,7 +376,7 @@ class LocalMempoolManager():
             validation_results,
             new_code_hash_results
         ):
-            user_operation_max_gas = user_operation.get_max_cost()
+            user_operation_max_gas = user_operation.get_max_gas()
             if (
                 (compined_gas_limit + user_operation_max_gas) >
                 self.max_compined_bundle_user_operations_gas_limit
