@@ -379,22 +379,26 @@ class BundlerManager:
         if "error" in result:
             if "message" in result["error"]:
                 logging.error("Failed to send bundle." + str(result["error"]))
-                # ErrAlreadyKnown is returned if the transactions is already
-                # contained within the pool.
-                if (
-                    "already known" in result["error"]["message"] or
-                    "AlreadyKnown" in result["error"]["message"]  # nethermind
-                ):
-                    return
                 # ErrInvalidSender is returned if the transaction
                 # contains an invalid signature.
-                elif "invalid sender" in result["error"]["message"]:
+                if "invalid sender" in result["error"]["message"]:
                     pass  # todo
+                # ErrAlreadyKnown is returned if the transactions is already
+                # contained within the pool.
+                # or
                 # ErrUnderpriced is returned if a transaction's gas price
                 # is below the minimum configured for the transaction pool.
+                # or
+                # ErrReplaceUnderpriced is returned if a transaction is
+                # attempted to be replaced with a different one without
+                # the required price bump.
                 elif (
-                    "transaction underpriced" in result["error"]["message"] or
-                    "AlreadyKnown" in result["error"]["message"]  # nethermind
+                    "already known" in result["error"]["message"] or  # Geth
+                    "transaction underpriced" in result["error"]["message"] or  # Geth
+                    "replacement transaction underpriced" in result["error"]["message"] or
+                    "AlreadyKnown" in result["error"]["message"]  or # nethermind
+                    "ReplacementNotAllowed" in result["error"]["message"]  or # nethermind
+                    "could not replace existing tx" in result["error"]["message"]  # erigon
                 ):
                     # retry sending useroperations with higher gas price
                     # if the gas_price_percentage_multiplier reached 200,
@@ -402,30 +406,9 @@ class BundlerManager:
                     if self.gas_price_percentage_multiplier <= 200:
                         self.gas_price_percentage_multiplier += 10
                         logging.warning(
-                            "transaction underprices, increasing bundle gas price "
-                            "by 10%  - gas_price_percentage_multiplier now is "
-                            f"{self.gas_price_percentage_multiplier}%"
-                        )
-                        await self.send_bundle(
-                            user_operations, mempool_manager, highest_verified_at_block
-                        )
-                    else:
-                        logging.error(
-                            "Failed to send bundle. Dropping all user operations"
-                            + str(result["error"])
-                        )
-                # ErrReplaceUnderpriced is returned if a transaction is
-                # attempted to be replaced with a different one without
-                # the required price bump.
-                elif (
-                    "replacement transaction underpriced" in result["error"]["message"] or
-                    "ReplacementNotAllowed" in result["error"]["message"]  # nethermind
-                ):
-                    if self.gas_price_percentage_multiplier <= 200:
-                        self.gas_price_percentage_multiplier += 10
-                        logging.warning(
-                            "replacement transaction underprices, increasing bundle gas price "
-                            "by 10%  - gas_price_percentage_multiplier now is "
+                            str(result["error"]["message"]) +
+                            "increasing bundle gas price by 10% "
+                            "- gas_price_percentage_multiplier now is "
                             f"{self.gas_price_percentage_multiplier}%"
                         )
 
