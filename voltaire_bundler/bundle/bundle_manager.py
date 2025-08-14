@@ -291,6 +291,11 @@ class BundlerManager:
                 * (self.max_priority_fee_per_gas_percentage_multiplier / 100)
                 * (self.gas_price_percentage_multiplier / 100)
             )
+
+           # max priority fee per gas should be atleast 1
+            if block_max_priority_fee_per_gas_dec_mod <= 0:
+                block_max_priority_fee_per_gas_dec_mod = 1
+
             block_max_priority_fee_per_gas_hex = hex(
                     block_max_priority_fee_per_gas_dec_mod)
 
