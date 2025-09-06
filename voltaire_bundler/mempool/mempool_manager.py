@@ -376,22 +376,21 @@ class LocalMempoolManager():
             validation_results,
             new_code_hash_results
         ):
-            user_operation_max_gas = user_operation.get_max_gas()
-            if (
-                (compined_gas_limit + user_operation_max_gas) >
-                self.max_compined_bundle_user_operations_gas_limit
-            ):
-                logging.debug(
-                    "user operation skipped for bundling because "
-                    "because max bundle gas limit was reached."
-                )
-                continue
-            compined_gas_limit += user_operation_max_gas
-
             sender_address = user_operation.sender_address
             sender_mempool = self.senders_to_senders_mempools[sender_address]
             user_operation_hash = user_operation.user_operation_hash
             if is_valid:
+                user_operation_max_gas = user_operation.get_max_gas()
+                if (
+                    (compined_gas_limit + user_operation_max_gas) >
+                    self.max_compined_bundle_user_operations_gas_limit
+                ):
+                    logging.debug(
+                        "user operation skipped for bundling because "
+                        "because max bundle gas limit was reached."
+                    )
+                    continue
+
                 if storage_map is not None:
                     to_bundle = True
                     for storage_address_lowercase in storage_map.keys():
@@ -431,6 +430,7 @@ class LocalMempoolManager():
                     )
                 continue
 
+            compined_gas_limit += user_operation_max_gas
             bundle[user_operation_hash] = user_operation
             del sender_mempool.user_operation_hashs_to_verified_user_operation[
                 user_operation_hash]
