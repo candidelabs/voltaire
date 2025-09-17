@@ -223,7 +223,7 @@ class BundlerManager:
         if num_of_user_operations == 0:
             return
         logging.info(
-            f"Sending bundle with {num_of_user_operations} user operations"
+            f"Attempting to send bundle with {num_of_user_operations} user operations."
         )
 
         call_data_and_call_gas_limit_op = self.create_bundle_calldata_and_estimate_gas(
@@ -302,6 +302,13 @@ class BundlerManager:
             # max priority fee per gas can't be higher than max fee per gas
             if block_max_priority_fee_per_gas_dec_mod > block_max_fee_per_gas_dec_mod:
                 block_max_priority_fee_per_gas_hex = block_max_fee_per_gas_hex
+
+        logging.info(
+            f"Sending bundle with {num_of_user_operations} user operations, "
+            f"gas: {gas_estimation_hex}, "
+            f"maxFeePerGas: {block_max_fee_per_gas_hex}, "
+            f"maxPriorityFeePerGas: {block_max_priority_fee_per_gas_hex}"
+        )
 
         if len(auth_list) == 0:
             txnDict = {
@@ -401,13 +408,13 @@ class BundlerManager:
                     "could not replace existing tx" in result["error"]["message"]  # erigon
                 ):
                     # retry sending useroperations with higher gas price
-                    # if the gas_price_percentage_multiplier reached 200,
+                    # if the gas_price_percentage_multiplier reached 600,
                     # drop all user_operations
-                    if self.gas_price_percentage_multiplier <= 200:
-                        self.gas_price_percentage_multiplier += 10
+                    if self.gas_price_percentage_multiplier <= 600:
+                        self.gas_price_percentage_multiplier += 30
                         logging.warning(
                             str(result["error"]["message"]) +
-                            "increasing bundle gas price by 10% "
+                            "increasing bundle gas price by 30% "
                             "- gas_price_percentage_multiplier now is "
                             f"{self.gas_price_percentage_multiplier}%"
                         )
@@ -514,10 +521,10 @@ class BundlerManager:
                 )
                 user_operations_hashes_to_remove_from_monitoring.append(
                     user_operation.user_operation_hash)
-            elif user_operation.number_of_add_to_mempool_attempts > 5:
+            elif user_operation.number_of_add_to_mempool_attempts > 20:
                 logging.warning(
                     f"user operation: {user_operation.user_operation_hash} "
-                    "was not included onchain yet after readding to mempool 5 times"
+                    "was not included onchain yet after readding to mempool 20 times"
                     "-drooping the userop from the monitoring system"
                 )
                 user_operations_hashes_to_remove_from_monitoring.append(
