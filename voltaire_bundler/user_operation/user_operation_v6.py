@@ -151,7 +151,7 @@ class UserOperationV6(UserOperation):
             max_cost += 2 * self.verification_gas_limit
         return max_cost * self.max_fee_per_gas
 
-    def get_max_gas(self) -> int:
+    def get_max_gas_without_pre_verification_gas(self) -> int:
         max_cost = (
             self.verification_gas_limit +
             self.call_gas_limit

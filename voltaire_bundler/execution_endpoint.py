@@ -438,7 +438,7 @@ class ExecutionEndpoint(Endpoint):
             )
 
         MAX_GAS_PER_USER_OPERATION = 15_000_000
-        max_gas = user_operation.get_max_gas()
+        max_gas = user_operation.get_max_gas_without_pre_verification_gas()
         if max_gas > MAX_GAS_PER_USER_OPERATION:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,

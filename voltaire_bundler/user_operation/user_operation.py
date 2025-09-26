@@ -34,7 +34,7 @@ class UserOperation(ABC):
         pass
 
     @abstractmethod
-    def get_max_gas(self) -> int:
+    def get_max_gas_without_pre_verification_gas(self) -> int:
         pass
 
     @abstractmethod

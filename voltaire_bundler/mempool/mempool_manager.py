@@ -380,7 +380,7 @@ class LocalMempoolManager():
             sender_mempool = self.senders_to_senders_mempools[sender_address]
             user_operation_hash = user_operation.user_operation_hash
             if is_valid:
-                user_operation_max_gas = user_operation.get_max_gas()
+                user_operation_max_gas = user_operation.get_max_gas_without_pre_verification_gas()
                 if (
                     (compined_gas_limit + user_operation_max_gas) >
                     self.max_compined_bundle_user_operations_gas_limit
