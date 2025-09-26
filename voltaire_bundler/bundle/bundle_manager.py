@@ -265,10 +265,9 @@ class BundlerManager:
         call_data, gas_estimation_hex, merged_storage_map, auth_list = tasks[0]
 
         if call_data is None or gas_estimation_hex is None:
-            logging.error(
+            logging.debug(
                 "Sending bundle failed. failed call data or gas estimation.")
             return
-
 
         block_max_fee_per_gas = tasks[1]["result"]
         nonce = tasks[2]["result"]
@@ -414,7 +413,7 @@ class BundlerManager:
                         self.gas_price_percentage_multiplier += 30
                         logging.warning(
                             str(result["error"]["message"]) +
-                            "increasing bundle gas price by 30% "
+                            " increasing bundle gas price by 30% "
                             "- gas_price_percentage_multiplier now is "
                             f"{self.gas_price_percentage_multiplier}%"
                         )
@@ -754,7 +753,7 @@ class BundlerManager:
                         user_operation.user_operation_hash
                     ] = (user_operation, reason, entrypoint)
 
-                logging.warning(
+                logging.debug(
                     "Dropping user operation that failed third validation."
                     f"useroperation: {user_operation.user_operation_hash}."
                     f"reason: {reason}"
@@ -785,7 +784,7 @@ class BundlerManager:
         entrypoint: Address
     ):
         if "AA25 invalid account nonce" == reason:
-            logging.warning(
+            logging.debug(
                 "Not banning a useroperation for invalid nonce."
                 f"useroperation: {user_operation.user_operation_hash}"
             )
