@@ -272,6 +272,18 @@ class UserOperationV7V8(UserOperation):
 
     def get_max_gas(self) -> int:
         max_cost = (
+            self.verification_gas_limit +
+            self.call_gas_limit
+        )
+        if self.paymaster_verification_gas_limit is not None:
+            max_cost += self.paymaster_verification_gas_limit
+        if self.paymaster_post_op_gas_limit is not None:
+            max_cost += self.paymaster_post_op_gas_limit
+
+        return max_cost
+
+    def get_max_gas_with_pre_verification_gas(self) -> int:
+        max_cost = (
             self.pre_verification_gas +
             self.verification_gas_limit +
             self.call_gas_limit

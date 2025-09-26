@@ -436,6 +436,16 @@ class ExecutionEndpoint(Endpoint):
                 ValidationExceptionCode.InvalidFields,
                 "Unsupported entrypoint",
             )
+
+        MAX_GAS_PER_USER_OPERATION = 15_000_000
+        max_gas = user_operation.get_max_gas()
+        if max_gas > MAX_GAS_PER_USER_OPERATION:
+            raise ValidationException(
+                ValidationExceptionCode.InvalidFields,
+                f"UserOperation max gas {max_gas} "
+                f"is larger than {MAX_GAS_PER_USER_OPERATION}",
+            )
+
         (user_operation_hash, verified_at_block_hash, valid_mempools) = (
             await local_mempool.add_user_operation(user_operation)
         )

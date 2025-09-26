@@ -638,7 +638,7 @@ class BundlerManager:
         bundle_calldata_init_gas = calculate_bundle_calldata_init_gas(call_data)
         bundle_gas_limit = 0
         for user_operation in user_operations:
-            bundle_gas_limit += user_operation.get_max_gas()
+            bundle_gas_limit += user_operation.get_max_gas_with_pre_verification_gas()
 
         bundle_gas_limit += 50_000 + bundle_calldata_init_gas
 
