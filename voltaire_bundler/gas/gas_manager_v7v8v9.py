@@ -22,7 +22,7 @@ ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 MIN_CALL_GAS_LIMIT = 21_000
 
 
-class GasManagerV7V8(GasManager):
+class GasManagerV7V8V9(GasManager):
     ethereum_node_urls: list[str]
     chain_id: str
     is_legacy_mode: bool
