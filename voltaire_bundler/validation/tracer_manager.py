@@ -6,7 +6,7 @@ from eth_utils import keccak, to_checksum_address
 
 from voltaire_bundler.bundle.exceptions import (ValidationException,
                                                  ValidationExceptionCode)
-from voltaire_bundler.user_operation.user_operation_v7v8 import UserOperationV7V8
+from voltaire_bundler.user_operation.user_operation_v7v8v9 import UserOperationV7V8V9
 from voltaire_bundler.user_operation.user_operation_v6 import UserOperationV6
 from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
 from voltaire_bundler.typing import Address
@@ -30,7 +30,7 @@ class TracerManager():
 
     async def validate_trace_results(
         self,
-        user_operation: UserOperationV7V8 | UserOperationV6,
+        user_operation: UserOperationV7V8V9 | UserOperationV6,
         entrypoint: str,
         is_sender_staked: bool,
         is_factory_staked: bool | None,
@@ -49,7 +49,7 @@ class TracerManager():
             sender_creator_lowercase = "0x7fc98430eaedbb6070b35b39d798725049088348"
             is_init_code = len(user_operation.init_code) > 2
         else:
-            user_operation = cast(UserOperationV7V8, user_operation)
+            user_operation = cast(UserOperationV7V8V9, user_operation)
             if user_operation.factory is not None:
                 factory_lowercase = Address(user_operation.factory.lower())
             if user_operation.paymaster is not None:

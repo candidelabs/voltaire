@@ -12,11 +12,11 @@ import voltaire_bundler
 from voltaire_bundler.bundle.exceptions import \
     ValidationException, ValidationExceptionCode
 from voltaire_bundler.user_operation.user_operation_handler import decode_failed_op_event, decode_failed_op_with_revert_event
-from voltaire_bundler.user_operation.user_operation_v7v8 import UserOperationV7V8
+from voltaire_bundler.user_operation.user_operation_v7v8v9 import UserOperationV7V8V9
 from voltaire_bundler.user_operation.user_operation_handler_v7v8 import \
     UserOperationHandlerV7V8
 from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
-from voltaire_bundler.user_operation.user_operation_v7v8 import \
+from voltaire_bundler.user_operation.user_operation_v7v8v9 import \
         get_user_operation_hash
 from voltaire_bundler.utils.load_bytecode import load_bytecode
 from voltaire_bundler.user_operation.models import (
@@ -73,7 +73,7 @@ class ValidationManagerV7V8(ValidationManager):
 
     async def validate_user_operation(
         self,
-        user_operation: UserOperationV7V8,
+        user_operation: UserOperationV7V8V9,
         entrypoint: str,
         block_number: str | None,
         min_block_number: str | None,
@@ -197,7 +197,7 @@ class ValidationManagerV7V8(ValidationManager):
 
     async def simulate_validation_without_tracing(
         self,
-        user_operation: UserOperationV7V8,
+        user_operation: UserOperationV7V8V9,
         entrypoint: str,
         block_number: str | None,
         min_block_number: str | None = None,
@@ -310,7 +310,7 @@ class ValidationManagerV7V8(ValidationManager):
 
     async def simulate_validation_with_tracing(
         self,
-        user_operation: UserOperationV7V8,
+        user_operation: UserOperationV7V8V9,
         entrypoint: str,
         block_number: str | None,
         min_block_number: str | None = None,
@@ -633,7 +633,7 @@ class ValidationManagerV7V8(ValidationManager):
 
     @staticmethod
     def encode_simulate_validation_calldata(
-        user_operation: UserOperationV7V8, min_block_number: str | None = None
+        user_operation: UserOperationV7V8V9, min_block_number: str | None = None
     ) -> str:
         # simulateValidation(entrypoint solidity function) will always revert
         function_selector = "0x6ffd58b7"

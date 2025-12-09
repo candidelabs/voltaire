@@ -16,8 +16,8 @@ from voltaire_bundler.user_operation.user_operation_handler import \
         get_deposit_info
 from voltaire_bundler.user_operation.user_operation_v6 import \
         UserOperationV6
-from voltaire_bundler.user_operation.user_operation_v7v8 import \
-        UserOperationV7V8
+from voltaire_bundler.user_operation.user_operation_v7v8v9 import \
+        UserOperationV7V8V9
 from voltaire_bundler.user_operation.user_operation import \
         is_user_operation_hash, verify_and_get_address, verify_and_get_uint
 from voltaire_bundler.user_operation.user_operation_handler_v6 import \
@@ -350,7 +350,7 @@ class ExecutionEndpoint(Endpoint):
             user_operation_with_optional_params = (
                 fell_user_operation_optional_parameters_for_estimateUserOperationGas(
                     useroperation_arg))
-            user_operation = UserOperationV7V8(
+            user_operation = UserOperationV7V8V9(
                 user_operation_with_optional_params)
             gas_manager = self.user_operation_handler_v7v8.gas_manager
             (
@@ -422,10 +422,10 @@ class ExecutionEndpoint(Endpoint):
                 "EIP-7702 tuples are not supported",
             )
         if input_entrypoint == LocalMempoolManagerV8.entrypoint_lowercase:
-            user_operation = UserOperationV7V8(useroperation_arg)
+            user_operation = UserOperationV7V8V9(useroperation_arg)
             local_mempool = self.local_mempool_manager_v8
         elif input_entrypoint == LocalMempoolManagerV7.entrypoint_lowercase:
-            user_operation = UserOperationV7V8(useroperation_arg)
+            user_operation = UserOperationV7V8V9(useroperation_arg)
             local_mempool = self.local_mempool_manager_v7
         elif (input_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase and
                 self.local_mempool_manager_v6 is not None):
@@ -839,10 +839,10 @@ class ExecutionEndpoint(Endpoint):
             user_operation = verified_useroperation["user_operation"]
             mempool_id = topic.split('/')[2]
             if mempool_id == self.local_mempool_manager_v8.canonical_mempool_id:
-                user_operation_obj = UserOperationV7V8(user_operation)
+                user_operation_obj = UserOperationV7V8V9(user_operation)
                 local_mempool = self.local_mempool_manager_v8
             elif mempool_id == self.local_mempool_manager_v7.canonical_mempool_id:
-                user_operation_obj = UserOperationV7V8(user_operation)
+                user_operation_obj = UserOperationV7V8V9(user_operation)
                 local_mempool = self.local_mempool_manager_v7
             elif (
                     self.local_mempool_manager_v6 is not None and
