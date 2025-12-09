@@ -30,7 +30,7 @@ from voltaire_bundler.utils.eip7702 import format_hex_array_for_rlp_encode
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 
-class ValidationManagerV7V8(ValidationManager):
+class ValidationManagerV7V8V9(ValidationManager):
     user_operation_handler: UserOperationHandlerV7V8V9
 
     def __init__(
@@ -109,14 +109,14 @@ class ValidationManagerV7V8(ValidationManager):
             validated_at_block_number,
             validated_at_block_timestamp,
             validated_at_block_hash
-        ) = ValidationManagerV7V8.decode_validation_result(validation_result)
-        ValidationManagerV7V8.verify_sig_and_timestamp(
+        ) = ValidationManagerV7V8V9.decode_validation_result(validation_result)
+        ValidationManagerV7V8V9.verify_sig_and_timestamp(
             return_info.sender_validation_data.sig_failed,
             return_info.sender_validation_data.valid_until,
             return_info.sender_validation_data.valid_after,
             validated_at_block_timestamp
         )
-        ValidationManagerV7V8.verify_sig_and_timestamp(
+        ValidationManagerV7V8V9.verify_sig_and_timestamp(
             return_info.paymaster_validation_data.sig_failed,
             return_info.paymaster_validation_data.valid_until,
             return_info.paymaster_validation_data.valid_after,
@@ -214,7 +214,7 @@ class ValidationManagerV7V8(ValidationManager):
                 "",
             )
 
-        call_data = ValidationManagerV7V8.encode_simulate_validation_calldata(
+        call_data = ValidationManagerV7V8V9.encode_simulate_validation_calldata(
             user_operation, min_block_number)
         if entrypoint.lower() == "0x4337084d9e255ff0702461cf8895ce9e3b5ff108":
             # arbitrum One or arbitrum sepolia
@@ -327,7 +327,7 @@ class ValidationManagerV7V8(ValidationManager):
                 "",
             )
 
-        call_data = ValidationManagerV7V8.encode_simulate_validation_calldata(
+        call_data = ValidationManagerV7V8V9.encode_simulate_validation_calldata(
             user_operation, min_block_number)
         if entrypoint.lower() == "0x4337084d9e255ff0702461cf8895ce9e3b5ff108":
             # arbitrum One or arbitrum sepolia
