@@ -42,7 +42,7 @@ class TracerManager():
         factory_lowercase = None
         paymaster_lowercase = None
 
-        if entrypoint_lowercase == "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789":
+        if entrypoint_lowercase == "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789":    #EPv0.06
             user_operation = cast(UserOperationV6, user_operation)
             factory_lowercase = user_operation.factory_address_lowercase
             paymaster_lowercase = user_operation.paymaster_address_lowercase
@@ -55,10 +55,12 @@ class TracerManager():
             if user_operation.paymaster is not None:
                 paymaster_lowercase = Address(user_operation.paymaster.lower())
             is_init_code = user_operation.factory is not None
-            if entrypoint_lowercase == "0x0000000071727de22e5e9d8baf0edac6f37da032":
-                sender_creator_lowercase = "0xefc2c1444ebcc4db75e7613d20c6a62ff67a167c"
-            else:
+            if entrypoint_lowercase == "0x433709009B8330FDa32311DF1C2AFA402eD8D009":    #EPv0.09
+                sender_creator_lowercase = "0x0A630a99Df908A81115A3022927Be82f9299987e"
+            elif entrypoint_lowercase == "0x4337084d9e255ff0702461cf8895ce9e3b5ff108":  #EPv0.08
                 sender_creator_lowercase = "0x449ed7c3e6fee6a97311d4b55475df59c44add33"
+            elif entrypoint_lowercase == "0x0000000071727de22e5e9d8baf0edac6f37da032":  #EPv0.07
+                sender_creator_lowercase = "0xefc2c1444ebcc4db75e7613d20c6a62ff67a167c"
 
         # [OP-052], [OP-053], [OP-054], [OP-061]
         validate_call_stack(
