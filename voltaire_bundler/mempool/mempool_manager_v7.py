@@ -7,7 +7,7 @@ from voltaire_bundler.user_operation.user_operation_handler_v7v8v9 import \
     UserOperationHandlerV7V8V9
 
 from voltaire_bundler.mempool.reputation_manager import ReputationManager
-from ..validation.validation_manager_v7v8 import ValidationManagerV7V8
+from ..validation.validation_manager_v7v8v9 import ValidationManagerV7V8V9
 
 
 @dataclass
@@ -30,7 +30,7 @@ class LocalMempoolManagerV7(LocalMempoolManager):
         min_stake: int,
         min_unstake_delay: int
     ):
-        self.validation_manager = ValidationManagerV7V8(
+        self.validation_manager = ValidationManagerV7V8V9(
             user_operation_handler,
             ethereum_node_urls,
             bundler_address,
