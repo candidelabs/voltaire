@@ -24,7 +24,7 @@ from voltaire_bundler.user_operation.user_operation_v7v8v9 import UserOperationV
 
 from voltaire_bundler.utils.eip7702 import create_and_sign_eip7702_raw_transaction
 from voltaire_bundler.utils.eth_client_utils import \
-    encode_handleops_calldata_v6, encode_handleops_calldata_v7v8, send_rpc_request_to_eth_client
+    encode_handleops_calldata_v6, encode_handleops_calldata_v7v8v9, send_rpc_request_to_eth_client
 
 from ..mempool.reputation_manager import ReputationManager
 
@@ -624,7 +624,7 @@ class BundlerManager:
                 user_operations_list.append(user_operation.to_list())
                 if user_operation.eip7702_auth is not None:
                     auth_list.append(user_operation.eip7702_auth)
-            call_data = encode_handleops_calldata_v7v8(
+            call_data = encode_handleops_calldata_v7v8v9(
                 user_operations_list, self.bundler_address
             )
         else:

@@ -12,7 +12,7 @@ from voltaire_bundler.user_operation.models import UserOperationType
 from voltaire_bundler.bundle.exceptions import \
     ValidationException, ValidationExceptionCode
 from voltaire_bundler.utils.eth_client_utils import \
-    encode_handleops_calldata_v6, encode_handleops_calldata_v7v8, send_rpc_request_to_eth_client
+    encode_handleops_calldata_v6, encode_handleops_calldata_v7v8v9, send_rpc_request_to_eth_client
 
 
 class GasManager(ABC, Generic[UserOperationType]):
@@ -164,7 +164,7 @@ class GasManager(ABC, Generic[UserOperationType]):
                     user_op[5] = 0xa8d2755f7a
                 if user_op[6] == (0).to_bytes(32):
                     user_op[6] = (0xa4f91cbf5f).to_bytes(16) + (0xa76e216f4b).to_bytes(16)
-                handleops_calldata = encode_handleops_calldata_v7v8(
+                handleops_calldata = encode_handleops_calldata_v7v8v9(
                     user_operations_list, ZERO_ADDRESS
                 )
 
