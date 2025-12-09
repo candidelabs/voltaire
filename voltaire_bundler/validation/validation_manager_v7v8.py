@@ -13,8 +13,8 @@ from voltaire_bundler.bundle.exceptions import \
     ValidationException, ValidationExceptionCode
 from voltaire_bundler.user_operation.user_operation_handler import decode_failed_op_event, decode_failed_op_with_revert_event
 from voltaire_bundler.user_operation.user_operation_v7v8v9 import UserOperationV7V8V9
-from voltaire_bundler.user_operation.user_operation_handler_v7v8 import \
-    UserOperationHandlerV7V8
+from voltaire_bundler.user_operation.user_operation_handler_v7v8v9 import \
+    UserOperationHandlerV7V8V9
 from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
 from voltaire_bundler.user_operation.user_operation_v7v8v9 import \
         get_user_operation_hash
@@ -31,11 +31,11 @@ ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 
 class ValidationManagerV7V8(ValidationManager):
-    user_operation_handler: UserOperationHandlerV7V8
+    user_operation_handler: UserOperationHandlerV7V8V9
 
     def __init__(
         self,
-        user_operation_handler: UserOperationHandlerV7V8,
+        user_operation_handler: UserOperationHandlerV7V8V9,
         ethereum_node_urls: list[str],
         bundler_address: str,
         chain_id: int,

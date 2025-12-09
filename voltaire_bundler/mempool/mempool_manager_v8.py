@@ -3,8 +3,8 @@ from dataclasses import dataclass
 from .mempool_manager import LocalMempoolManager
 from .mempool_info import DEFAULT_MEMPOOL_INFO
 from voltaire_bundler.typing import Address, MempoolId
-from voltaire_bundler.user_operation.user_operation_handler_v7v8 import \
-    UserOperationHandlerV7V8
+from voltaire_bundler.user_operation.user_operation_handler_v7v8v9 import \
+    UserOperationHandlerV7V8V9
 
 from voltaire_bundler.mempool.reputation_manager import ReputationManager
 from ..validation.validation_manager_v7v8 import ValidationManagerV7V8
@@ -17,7 +17,7 @@ class LocalMempoolManagerV8(LocalMempoolManager):
 
     def __init__(
         self,
-        user_operation_handler: UserOperationHandlerV7V8,
+        user_operation_handler: UserOperationHandlerV7V8V9,
         ethereum_node_urls: list[str],
         bundler_address: str,
         chain_id: int,

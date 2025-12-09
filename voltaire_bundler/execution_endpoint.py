@@ -22,8 +22,8 @@ from voltaire_bundler.user_operation.user_operation import \
         is_user_operation_hash, verify_and_get_address, verify_and_get_uint
 from voltaire_bundler.user_operation.user_operation_handler_v6 import \
     UserOperationHandlerV6
-from voltaire_bundler.user_operation.user_operation_handler_v7v8 import \
-    UserOperationHandlerV7V8
+from voltaire_bundler.user_operation.user_operation_handler_v7v8v9 import \
+    UserOperationHandlerV7V8V9
 from voltaire_bundler.user_operation.user_operation_handler import \
     fell_user_operation_optional_parameters_for_estimateUserOperationGas
 from voltaire_bundler.utils.eth_client_utils import get_block_info, send_rpc_request_to_eth_client
@@ -42,7 +42,7 @@ class ExecutionEndpoint(Endpoint):
     ethereum_node_urls: list[str]
     bundle_manager: BundlerManager
     user_operation_handler_v6: Optional[UserOperationHandlerV6]
-    user_operation_handler_v7v8: UserOperationHandlerV7V8
+    user_operation_handler_v7v8: UserOperationHandlerV7V8V9
     reputation_manager: ReputationManager
     chain_id: int
     local_mempool_manager_v6: Optional[LocalMempoolManagerV6]
@@ -87,7 +87,7 @@ class ExecutionEndpoint(Endpoint):
         self.ethereum_node_urls = ethereum_node_urls
         self.chain_id = chain_id
 
-        self.user_operation_handler_v7v8 = UserOperationHandlerV7V8(
+        self.user_operation_handler_v7v8 = UserOperationHandlerV7V8V9(
             chain_id,
             ethereum_node_urls,
             bundler_address,

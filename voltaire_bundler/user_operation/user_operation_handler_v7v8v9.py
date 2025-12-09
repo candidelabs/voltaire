@@ -8,7 +8,7 @@ from voltaire_bundler.user_operation.user_operation_handler import UserOperation
 from ..gas.gas_manager_v7v8 import GasManagerV7V8
 
 
-class UserOperationHandlerV7V8(UserOperationHandler):
+class UserOperationHandlerV7V8V9(UserOperationHandler):
 
     def __init__(
         self,
