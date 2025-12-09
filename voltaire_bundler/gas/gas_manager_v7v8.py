@@ -13,8 +13,8 @@ from voltaire_bundler.user_operation.models import FailedOp, FailedOpWithRevert
 from voltaire_bundler.user_operation.user_operation_handler import \
     decode_failed_op_event, decode_failed_op_with_revert_event
 from voltaire_bundler.utils.load_bytecode import load_bytecode
-from ..user_operation.user_operation_v7v8 import UserOperationV7V8
-from ..user_operation.user_operation_v7v8 import pack_user_operation_with_signature
+from ..user_operation.user_operation_v7v8v9 import UserOperationV7V8V9
+from ..user_operation.user_operation_v7v8v9 import pack_user_operation_with_signature
 from voltaire_bundler.utils.eth_client_utils import \
     send_rpc_request_to_eth_client
 
@@ -63,7 +63,7 @@ class GasManagerV7V8(GasManager):
 
     async def estimate_user_operation_gas(
         self,
-        user_operation: UserOperationV7V8,
+        user_operation: UserOperationV7V8V9,
         entrypoint: str,
         state_override_set_dict: dict[str, Any],
     ) -> tuple[str, str, str]:
@@ -117,7 +117,7 @@ class GasManagerV7V8(GasManager):
 
     async def estimate_call_gas_and_verificationgas_limit(
         self,
-        user_operation: UserOperationV7V8,
+        user_operation: UserOperationV7V8V9,
         entrypoint: str,
         state_override_set_dict: dict[str, Any],
         is_check_once: bool,
@@ -163,7 +163,7 @@ class GasManagerV7V8(GasManager):
 
     async def simulate_handle_op_mod(
         self,
-        user_operation: UserOperationV7V8,
+        user_operation: UserOperationV7V8V9,
         entrypoint: str,
         min_gas: int,
         max_gas: int,
@@ -310,7 +310,7 @@ class GasManagerV7V8(GasManager):
 
         return error_selector, error_params_decoded
 
-    def calc_base_preverification_gas(self, user_operation: UserOperationV7V8) -> int:
+    def calc_base_preverification_gas(self, user_operation: UserOperationV7V8V9) -> int:
         user_operation_list = user_operation.to_list()
 
         user_operation_list[5] = 21000

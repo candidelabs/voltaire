@@ -20,7 +20,7 @@ from voltaire_bundler.user_operation.user_operation_handler import \
         decode_failed_op_event, decode_failed_op_with_revert_event, \
         get_deposit_info, get_user_operation_logs_for_block_range
 from voltaire_bundler.user_operation.user_operation_v6 import UserOperationV6
-from voltaire_bundler.user_operation.user_operation_v7v8 import UserOperationV7V8
+from voltaire_bundler.user_operation.user_operation_v7v8v9 import UserOperationV7V8V9
 
 from voltaire_bundler.utils.eip7702 import create_and_sign_eip7702_raw_transaction
 from voltaire_bundler.utils.eth_client_utils import \
@@ -45,13 +45,13 @@ class BundlerManager:
     max_fee_per_gas_percentage_multiplier: int
     max_priority_fee_per_gas_percentage_multiplier: int
     bundles_to_send_v6: list[dict[str, UserOperationV6]] | None
-    bundles_to_send_v7: list[dict[str, UserOperationV7V8]]
-    bundles_to_send_v8: list[dict[str, UserOperationV7V8]]
+    bundles_to_send_v7: list[dict[str, UserOperationV7V8V9]]
+    bundles_to_send_v8: list[dict[str, UserOperationV7V8V9]]
     user_operations_to_monitor_v6: dict[str, UserOperationV6]
-    user_operations_to_monitor_v7: dict[str, UserOperationV7V8]
-    user_operations_to_monitor_v8: dict[str, UserOperationV7V8]
+    user_operations_to_monitor_v7: dict[str, UserOperationV7V8V9]
+    user_operations_to_monitor_v8: dict[str, UserOperationV7V8V9]
     user_operations_to_ban: dict[
-        str, tuple[UserOperationV6 | UserOperationV7V8, str, Address]]
+        str, tuple[UserOperationV6 | UserOperationV7V8V9, str, Address]]
     gas_price_percentage_multiplier: int
     bundle_gas_estimation_multiplier: int
 
@@ -199,11 +199,11 @@ class BundlerManager:
             ]
         tasks = await asyncio.gather(*tasks_arr)
 
-        user_operations_to_bundle_v8 = cast(dict[str, UserOperationV7V8], tasks[2])
+        user_operations_to_bundle_v8 = cast(dict[str, UserOperationV7V8V9], tasks[2])
         self.bundles_to_send_v8.append(user_operations_to_bundle_v8)
         self.user_operations_to_monitor_v8 |= copy.deepcopy(user_operations_to_bundle_v8)
 
-        user_operations_to_bundle_v7 = cast(dict[str, UserOperationV7V8], tasks[3])
+        user_operations_to_bundle_v7 = cast(dict[str, UserOperationV7V8V9], tasks[3])
         self.bundles_to_send_v7.append(user_operations_to_bundle_v7)
         self.user_operations_to_monitor_v7 |= copy.deepcopy(user_operations_to_bundle_v7)
 
@@ -217,7 +217,7 @@ class BundlerManager:
 
     async def send_bundle(
         self,
-        user_operations: list[UserOperationV7V8] | list[UserOperationV6],
+        user_operations: list[UserOperationV7V8V9] | list[UserOperationV6],
         mempool_manager: LocalMempoolManagerV8 | LocalMempoolManagerV7 | LocalMempoolManagerV6,
         highest_verified_at_block: int
     ) -> None:
@@ -490,7 +490,7 @@ class BundlerManager:
 
     async def remove_included_and_readd_to_mempool_userops_monitoring(
             self,
-            user_operations_to_monitor: dict[str, UserOperationV7V8] | dict[str, UserOperationV6],
+            user_operations_to_monitor: dict[str, UserOperationV7V8V9] | dict[str, UserOperationV6],
             entrypoint: str,
             local_mempool: LocalMempoolManagerV6 | LocalMempoolManagerV7 | LocalMempoolManagerV8
     ) -> None:
@@ -558,7 +558,7 @@ class BundlerManager:
 
     def update_monitor_status_transation_hash(
         self,
-        user_operations: list[UserOperationV7V8] | list[UserOperationV6],
+        user_operations: list[UserOperationV7V8V9] | list[UserOperationV6],
         transaction_hash: str,
     ) -> None:
         for user_operation in user_operations:
@@ -601,7 +601,7 @@ class BundlerManager:
 
     async def create_bundle_calldata_and_estimate_gas(
         self,
-        user_operations: list[UserOperationV6] | list[UserOperationV7V8],
+        user_operations: list[UserOperationV6] | list[UserOperationV7V8V9],
         bundler: Address,
         entrypoint: Address,
         highest_verified_at_block: int,
@@ -786,7 +786,7 @@ class BundlerManager:
 
     async def handle_useroperation_banning(
         self,
-        user_operation: UserOperationV6 | UserOperationV7V8,
+        user_operation: UserOperationV6 | UserOperationV7V8V9,
         reason: str,
         entrypoint: Address
     ):

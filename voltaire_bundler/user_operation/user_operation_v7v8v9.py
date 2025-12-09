@@ -11,7 +11,7 @@ from .user_operation import UserOperation
 
 
 @dataclass()
-class UserOperationV7V8(UserOperation):
+class UserOperationV7V8V9(UserOperation):
     sender_address: Address
     nonce: int
     factory: Address | None
