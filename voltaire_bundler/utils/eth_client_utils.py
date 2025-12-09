@@ -214,7 +214,7 @@ def encode_handleops_calldata_v6(
 
 
 @staticmethod
-def encode_handleops_calldata_v7v8(
+def encode_handleops_calldata_v7v8v9(
         user_operations_list: list[list[Any]], bundler_address: str) -> str:
     function_selector = "0x765e827f"  # handleOps
     params = encode(
