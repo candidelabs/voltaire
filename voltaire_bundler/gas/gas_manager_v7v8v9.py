@@ -33,6 +33,7 @@ class GasManagerV7V8V9(GasManager):
     max_call_data_gas: int
     entrypoint_code_override_v7: str
     entrypoint_code_override_v8: str
+    entrypoint_code_override_v9: str
 
     def __init__(
         self,
@@ -60,6 +61,8 @@ class GasManagerV7V8V9(GasManager):
             "EntryPointSimulationsV7WithBinarySearch.json")
         self.entrypoint_code_override_v8 = load_bytecode(
             "EntryPointSimulationsV8WithBinarySearch.json")
+        self.entrypoint_code_override_v9 = load_bytecode(
+            "EntryPointSimulationsV9WithBinarySearch.json")
 
     async def estimate_user_operation_gas(
         self,
@@ -183,7 +186,9 @@ class GasManagerV7V8V9(GasManager):
                 [min_gas, max_gas, 10_000, is_continious, is_check_once]
             ],
         )
-        if entrypoint.lower() == "0x4337084d9e255ff0702461cf8895ce9e3b5ff108":
+        if entrypoint.lower() == "0x433709009b8330fda32311df1c2afa402ed8d009":
+            entrypoint_code_override = self.entrypoint_code_override_v9
+        elif entrypoint.lower() == "0x4337084d9e255ff0702461cf8895ce9e3b5ff108":
             entrypoint_code_override = self.entrypoint_code_override_v8
         else:
             entrypoint_code_override = self.entrypoint_code_override_v7

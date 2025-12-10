@@ -70,6 +70,11 @@ class ValidationManagerV7V8V9(ValidationManager):
             "EntryPointSimulationsV8.json")
         self.entrypoint_code_override_v8_arb = load_bytecode(
             "EntryPointSimulationsV8.json")
+        
+        self.entrypoint_code_override_v9 = load_bytecode(
+            "EntryPointSimulationsV9.json")
+        self.entrypoint_code_override_v9_arb = load_bytecode(
+            "EntryPointSimulationsV9.json")
 
     async def validate_user_operation(
         self,
@@ -216,19 +221,25 @@ class ValidationManagerV7V8V9(ValidationManager):
 
         call_data = ValidationManagerV7V8V9.encode_simulate_validation_calldata(
             user_operation, min_block_number)
-        if entrypoint.lower() == "0x4337084d9e255ff0702461cf8895ce9e3b5ff108":
+        if entrypoint.lower() == "0x433709009b8330fda32311df1c2afa402ed8d009": # EP v0.09
+            # arbitrum One or arbitrum sepolia
+            if self.chain_id == 42161 or self.chain_id == 421614:
+                entrypoint_code_override = self.entrypoint_code_override_v9_arb
+            else:
+                entrypoint_code_override = self.entrypoint_code_override_v9
+        elif entrypoint.lower() == "0x4337084d9e255ff0702461cf8895ce9e3b5ff108": # EP v0.08
             # arbitrum One or arbitrum sepolia
             if self.chain_id == 42161 or self.chain_id == 421614:
                 entrypoint_code_override = self.entrypoint_code_override_v8_arb
             else:
                 entrypoint_code_override = self.entrypoint_code_override_v8
-        else:
+        else: # EP v0.07
             # arbitrum One or arbitrum sepolia
             if self.chain_id == 42161 or self.chain_id == 421614:
                 entrypoint_code_override = self.entrypoint_code_override_v7_arb
             else:
                 entrypoint_code_override = self.entrypoint_code_override_v7
-        state_overrides = {  # override the Entrypoint with EntryPointSimulationsV7
+        state_overrides = {  # override the Entrypoint with EntryPointSimulations
             entrypoint: {"code": entrypoint_code_override}
         }
 
@@ -329,19 +340,25 @@ class ValidationManagerV7V8V9(ValidationManager):
 
         call_data = ValidationManagerV7V8V9.encode_simulate_validation_calldata(
             user_operation, min_block_number)
-        if entrypoint.lower() == "0x4337084d9e255ff0702461cf8895ce9e3b5ff108":
+        if entrypoint.lower() == "0x433709009b8330fda32311df1c2afa402ed8d009": # EP v0.09
+            # arbitrum One or arbitrum sepolia
+            if self.chain_id == 42161 or self.chain_id == 421614:
+                entrypoint_code_override = self.entrypoint_code_override_v9_arb
+            else:
+                entrypoint_code_override = self.entrypoint_code_override_v9
+        elif entrypoint.lower() == "0x4337084d9e255ff0702461cf8895ce9e3b5ff108": # EP v0.08
             # arbitrum One or arbitrum sepolia
             if self.chain_id == 42161 or self.chain_id == 421614:
                 entrypoint_code_override = self.entrypoint_code_override_v8_arb
             else:
                 entrypoint_code_override = self.entrypoint_code_override_v8
-        else:
+        else: # EP v0.07
             # arbitrum One or arbitrum sepolia
             if self.chain_id == 42161 or self.chain_id == 421614:
                 entrypoint_code_override = self.entrypoint_code_override_v7_arb
             else:
                 entrypoint_code_override = self.entrypoint_code_override_v7
-        state_overrides = {  # override the Entrypoint with EntryPointSimulationsV7
+        state_overrides = {  # override the Entrypoint with EntryPointSimulations
             entrypoint: {"code": entrypoint_code_override}
         }
 
