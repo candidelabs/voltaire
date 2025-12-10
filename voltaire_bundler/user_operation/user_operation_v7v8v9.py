@@ -316,7 +316,17 @@ def get_user_operation_hash(
     chain_id: int,
     delegate: str | None = None
 ) -> str:
-    if entrypoint_addr.startswith("0x4337"):  # ep v0.8.0
+    if entrypoint_addr.startswith("0x433709"):  # ep v0.9.0
+        packed_user_operation_hash = keccak(
+            pack_user_operation_for_hashing_v8(user_operation_list, delegate)
+        )
+
+        domain_separator = build_domain_separator(chain_id)
+        user_operation_hash = "0x" + keccak(
+            b'\x19\x01' + domain_separator + packed_user_operation_hash,
+        ).hex()
+        return user_operation_hash
+    if entrypoint_addr.startswith("0x433708"):  # ep v0.8.0
         packed_user_operation_hash = keccak(
             pack_user_operation_for_hashing_v8(user_operation_list, delegate)
         )
