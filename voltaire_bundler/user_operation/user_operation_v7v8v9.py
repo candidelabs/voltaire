@@ -318,10 +318,12 @@ def get_user_operation_hash(
 ) -> str:
     if entrypoint_addr.startswith("0x433709"):  # ep v0.9.0
         packed_user_operation_hash = keccak(
+            # todo: implement ep 0.09 specific hashing
             pack_user_operation_for_hashing_v8(user_operation_list, delegate)
         )
 
-        domain_separator = build_domain_separator(chain_id)
+        domain_separator = build_domain_separator(
+            chain_id, "0x433709009B8330FDa32311DF1C2AFA402eD8D009")
         user_operation_hash = "0x" + keccak(
             b'\x19\x01' + domain_separator + packed_user_operation_hash,
         ).hex()
@@ -331,7 +333,8 @@ def get_user_operation_hash(
             pack_user_operation_for_hashing_v8(user_operation_list, delegate)
         )
 
-        domain_separator = build_domain_separator(chain_id)
+        domain_separator = build_domain_separator(
+            chain_id, "0x4337084d9e255ff0702461cf8895ce9e3b5ff108")
         user_operation_hash = "0x" + keccak(
             b'\x19\x01' + domain_separator + packed_user_operation_hash,
         ).hex()
@@ -349,7 +352,7 @@ def get_user_operation_hash(
         return user_operation_hash
 
 
-def build_domain_separator(chain_id: int) -> bytes:
+def build_domain_separator(chain_id: int, entrypoint: str) -> bytes:
     global DOMAIN_SEPARATOR
 
     if DOMAIN_SEPARATOR is None:
@@ -361,7 +364,7 @@ def build_domain_separator(chain_id: int) -> bytes:
         TYPE_HASH = b'\x8bs\xc3\xc6\x9b\xb8\xfe=Q.\xccL\xf7Y\xccy#\x9f{\x17\x9b\x0f\xfa\xca\xa9\xa7]R+9@\x0f'
         encoded_user_operation_hash = encode(
             ["(bytes32,bytes32,bytes32,uint256,address)"],
-            [[TYPE_HASH, HASHED_NAME, HASHED_VERSION, chain_id, "0x4337084d9e255ff0702461cf8895ce9e3b5ff108"]],
+            [[TYPE_HASH, HASHED_NAME, HASHED_VERSION, chain_id, entrypoint]],
         )
 
         DOMAIN_SEPARATOR = keccak(encoded_user_operation_hash)
