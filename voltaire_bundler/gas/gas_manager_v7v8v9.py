@@ -234,7 +234,7 @@ class GasManagerV7V8V9(GasManager):
         )
         if "error" not in result:
             # this should never happen
-            logging.critical("balanceOf eth_call failed")
+            logging.critical("eth_call failed")
             raise ValueError("simulateHandleOpMod didn't revert!")
 
         elif (
