@@ -304,6 +304,10 @@ class BundlerManager:
             return
 
         call_data, gas_estimation_hex, merged_storage_map, auth_list = tasks[0]
+        gas_esttimation_int = (
+            int(gas_estimation_hex) * self.bundle_gas_estimation_multiplier
+        )
+        gas_estimation_hex = hex(gas_esttimation_int)
 
         if call_data is None or gas_estimation_hex is None:
             logging.debug(
