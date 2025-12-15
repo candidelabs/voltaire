@@ -83,7 +83,8 @@ class ExecutionEndpoint(Endpoint):
         reputation_blacklist: list[str],
         is_eip7702: bool,
         min_stake: int,
-        min_unstake_delay: int
+        min_unstake_delay: int,
+        bundle_gas_estimation_multiplier: int,
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_urls = ethereum_node_urls
@@ -196,6 +197,7 @@ class ExecutionEndpoint(Endpoint):
             flashbots_protect_node_urls,
             max_fee_per_gas_percentage_multiplier,
             max_priority_fee_per_gas_percentage_multiplier,
+            bundle_gas_estimation_multiplier,
         )
         self.peer_ids_to_cursor = dict()
         self.peer_ids_to_user_ops_hashes_queue = dict()

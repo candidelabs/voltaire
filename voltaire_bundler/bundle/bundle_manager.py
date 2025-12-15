@@ -57,6 +57,7 @@ class BundlerManager:
     user_operations_to_ban: dict[
         str, tuple[UserOperationV6 | UserOperationV7V8V9, str, Address]]
     gas_price_percentage_multiplier: int
+    bundle_gas_estimation_multiplier: int
 
     def __init__(
         self,
@@ -74,6 +75,7 @@ class BundlerManager:
         flashbots_protect_node_urls: list[str] | None,
         max_fee_per_gas_percentage_multiplier: int,
         max_priority_fee_per_gas_percentage_multiplier: int,
+        bundle_gas_estimation_multiplier: int,
     ):
         self.local_mempool_manager_v6 = local_mempool_manager_v6
         self.local_mempool_manager_v7 = local_mempool_manager_v7
@@ -108,6 +110,7 @@ class BundlerManager:
 
         self.gas_price_percentage_multiplier = 100
         self.user_operations_to_ban = {}
+        self.bundle_gas_estimation_multiplier = bundle_gas_estimation_multiplier
 
     async def send_next_bundle(self) -> None:
         await self.update_send_queue_and_monitor_queue()
@@ -298,6 +301,10 @@ class BundlerManager:
             return
 
         call_data, gas_estimation_hex, merged_storage_map, auth_list = tasks[0]
+        gas_esttimation_int = (
+            int(gas_estimation_hex) * self.bundle_gas_estimation_multiplier
+        )
+        gas_estimation_hex = hex(gas_esttimation_int)
 
         if call_data is None or gas_estimation_hex is None:
             logging.debug(
