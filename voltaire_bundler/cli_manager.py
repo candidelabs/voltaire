@@ -84,6 +84,7 @@ class InitData:
     p2p_canonical_mempool_id_06: MempoolId | None
     min_stake: int
     min_unstake_delay: int
+    bundle_gas_estimation_multiplier: int
 
 
 def address(ep: str):
@@ -584,6 +585,14 @@ def initialize_argument_parser() -> ArgumentParser:
         help="minimum unstake delay.",
         default=1,
     )
+
+    parser.add_argument(
+        "--bundle_gas_estimation_multiplier",
+        type=unsigned_int,
+        help="bundle gas estimation multiplier.",
+        default=_get_env_or_default("VOLTAIRE_BUNDLE_GAS_ESTIMATION_MULTIPLIER", 1, int),
+    )
+
     return parser
 
 
@@ -907,6 +916,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.p2p_canonical_mempool_id_06,
         args.min_stake,
         args.min_unstake_delay,
+        args.bundle_gas_estimation_multiplier
     )
 
     if args.verbose:
