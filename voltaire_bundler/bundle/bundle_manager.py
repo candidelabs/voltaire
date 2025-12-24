@@ -26,6 +26,7 @@ from voltaire_bundler.user_operation.user_operation_v7v8v9 import UserOperationV
 from voltaire_bundler.utils.eip7702 import create_and_sign_eip7702_raw_transaction
 from voltaire_bundler.utils.eth_client_utils import \
     encode_handleops_calldata_v6, encode_handleops_calldata_v7v8v9, send_rpc_request_to_eth_client
+from voltaire_bundler.utils.load_bytecode import load_bytecode
 
 from ..mempool.reputation_manager import ReputationManager
 
@@ -58,6 +59,7 @@ class BundlerManager:
         str, tuple[UserOperationV6 | UserOperationV7V8V9, str, Address]]
     gas_price_percentage_multiplier: int
     bundle_gas_estimation_multiplier: int
+    entrypoint_v9_reentrant: str
 
     def __init__(
         self,
@@ -111,6 +113,7 @@ class BundlerManager:
         self.gas_price_percentage_multiplier = 100
         self.user_operations_to_ban = {}
         self.bundle_gas_estimation_multiplier = bundle_gas_estimation_multiplier
+        self.entrypoint_v9_reentrant = load_bytecode("EntryPointV9Reentrant.json")
 
     async def send_next_bundle(self) -> None:
         await self.update_send_queue_and_monitor_queue()
@@ -688,83 +691,52 @@ class BundlerManager:
             bundle_gas_limit += user_operation.get_max_gas_with_pre_verification_gas()
 
         bundle_gas_limit += 50_000 + bundle_calldata_init_gas
-        
+
+        # see EntryPointMinBlock.sol
+        entrypoint_proxy_bytecode = (
+            "0x60806040527f" +
+            encode(["uint256"], [highest_verified_at_block]).hex() +
+            "4311610066576040517f08c379a000000000000000000000000000000000000000000000000000000000815260040161005d90610119565b60405180910390fd5b5f54365f5f375f5f365f5f73" +
+            entrypoint[2:] +
+            "5af13d5f5f3e80610095573d5ffd5b3d5ff35b5f82825260208201905092915050565b7f63757272656e7420626c6f636b206e756d626572206973206e6f7420686967685f8201527f6572207468616e206d696e426c6f636b00000000000000000000000000000000602082015250565b5f610103603083610099565b915061010e826100a9565b604082019050919050565b5f6020820190508181035f830152610130816100f7565b905091905056fea2646970667358221220fdaf8cdf14134724b4c557e94fe297425c83ef6bba7e4741a52b5f093f2324b464736f6c634300081b0033"
+        )
+        params = {
+            "from": bundler,
+            "to": "0x0000000000000000000000000000000000000000",
+            "data": call_data,
+        }
+        if (len(auth_list) > 0):
+            params["authorizationList"] = auth_list
+
         if entrypoint == self.local_mempool_manager_v9.entrypoint:
-            # see MinBlock.sol
-            minblock_proxy_bytecode = (
-                "0x60a06040527f" +
-                encode(["uint256"], [highest_verified_at_block]).hex() +
-                "6080908152503480156035575f5ffd5b5060805161013361004d5f395f600601526101335ff3fe60806040527f000000000000000000000000000000000000000000000000000000000000000043116063576040517f08c379a0000000000000000000000000000000000000000000000000000000008152600401605a9060e1565b60405180910390fd5b005b5f82825260208201905092915050565b7f63757272656e7420626c6f636b206e756d626572206973206e6f7420686967685f8201527f6572207468616e206d696e426c6f636b00000000000000000000000000000000602082015250565b5f60cd6030836065565b915060d6826075565b604082019050919050565b5f6020820190508181035f83015260f68160c3565b905091905056fea2646970667358221220f1e8f5a08add8fe7970dd3549ae43ac100aae3f603788686dfc885348a3b385064736f6c634300081f0033"
-            )
-            params = {
-                "blockStateCalls": [
-                    {
-                        "stateOverrides": {
-                            "0x0000000000000000000000000000000000000000": {
-                                "code": minblock_proxy_bytecode
-                            }
-                        },
-                        "calls": [
-                            {
-                                "from": bundler,
-                                "to": "0x0000000000000000000000000000000000000000",
-                                "data": "0x",
-                            },
-                            {
-                                "from": bundler,
-                                "to": entrypoint,
-                                "data": call_data,
-                            }
-                        ]
-                    }
-                ],
+            overrides = {
+                "0x0000000000000000000000000000000000000000": {
+                    "code": entrypoint_proxy_bytecode
+                },
+                entrypoint: {
+                    # EntryPointV9Reentrant
+                    # Entrypoint v9 only allows eoa for nonReentrant
+                    # We rely on the entrypoint proxy calling the entrypoint contract
+                    # so we disable the eoa check
+                    "code": self.entrypoint_v9_reentrant
+                }
             }
-
-            if (len(auth_list) > 0):
-                params["authorizationList"] = auth_list
-            # we can only call EPv0.09 from an eoa
-            # this means we can't use EntryPointMinBlock to inforce minimum block
-            # using eth_simulateV1 with two separate calls is the solution
-            # if eth_simulateV1 proved to be supported and work proberly on all clients and chains
-            # it can be used for the other entrypoints as well
-            result = await send_rpc_request_to_eth_client(
-                self.ethereum_node_urls,
-                "eth_simulateV1",
-                [
-                    params,
-                    "pending",
-                ]
-            )
         else:
-            # see EntryPointMinBlock.sol
-            entrypoint_proxy_bytecode = (
-                "0x60806040527f" +
-                encode(["uint256"], [highest_verified_at_block]).hex() +
-                "4311610066576040517f08c379a000000000000000000000000000000000000000000000000000000000815260040161005d90610119565b60405180910390fd5b5f54365f5f375f5f365f5f73" +
-                entrypoint[2:] +
-                "5af13d5f5f3e80610095573d5ffd5b3d5ff35b5f82825260208201905092915050565b7f63757272656e7420626c6f636b206e756d626572206973206e6f7420686967685f8201527f6572207468616e206d696e426c6f636b00000000000000000000000000000000602082015250565b5f610103603083610099565b915061010e826100a9565b604082019050919050565b5f6020820190508181035f830152610130816100f7565b905091905056fea2646970667358221220fdaf8cdf14134724b4c557e94fe297425c83ef6bba7e4741a52b5f093f2324b464736f6c634300081b0033"
-            )
-            params = {
-                "from": bundler,
-                "to": "0x0000000000000000000000000000000000000000",
-                "data": call_data,
+            overrides = {
+                "0x0000000000000000000000000000000000000000": {
+                    "code": entrypoint_proxy_bytecode
+                }
             }
-            if (len(auth_list) > 0):
-                params["authorizationList"] = auth_list
 
-            result = await send_rpc_request_to_eth_client(
-                self.ethereum_node_urls,
-                "eth_call",
-                [
-                    params,
-                    "pending",
-                    {
-                        "0x0000000000000000000000000000000000000000": {
-                            "code": entrypoint_proxy_bytecode
-                        }
-                    }
-                ]
-            )
+        result = await send_rpc_request_to_eth_client(
+            self.ethereum_node_urls,
+            "eth_call",
+            [
+                params,
+                "pending",
+                overrides
+            ]
+        )
 
         if "result" in result:
             merged_storage_map = None
