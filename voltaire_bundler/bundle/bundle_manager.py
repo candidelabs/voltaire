@@ -703,7 +703,8 @@ class BundlerManager:
         )
         params = {
             "from": bundler,
-            "to": "0x0000000000000000000000000000000000000000",
+            # a random address for the entrypoint proxy override
+            "to": "0xb01c6Ffdd1cb32c1007438D429cC070d129396D4",
             "data": call_data,
         }
         if (len(auth_list) > 0):
@@ -711,7 +712,7 @@ class BundlerManager:
 
         if entrypoint == self.local_mempool_manager_v9.entrypoint:
             overrides = {
-                "0x0000000000000000000000000000000000000000": {
+                "0xb01c6Ffdd1cb32c1007438D429cC070d129396D4": {
                     "code": entrypoint_proxy_bytecode
                 },
                 entrypoint: {
@@ -724,7 +725,7 @@ class BundlerManager:
             }
         else:
             overrides = {
-                "0x0000000000000000000000000000000000000000": {
+                "0xb01c6Ffdd1cb32c1007438D429cC070d129396D4": {
                     "code": entrypoint_proxy_bytecode
                 }
             }
