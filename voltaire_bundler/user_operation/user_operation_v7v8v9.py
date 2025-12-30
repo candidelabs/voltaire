@@ -319,7 +319,7 @@ def get_user_operation_hash(
     if entrypoint_addr.startswith("0x433709"):  # ep v0.9.0
         packed_user_operation_hash = keccak(
             # todo: implement ep 0.09 specific hashing
-            pack_user_operation_for_hashing_v8(user_operation_list, delegate)
+            pack_user_operation_for_hashing_v9(user_operation_list, delegate)
         )
 
         domain_separator = build_domain_separator(
@@ -373,8 +373,61 @@ def build_domain_separator(chain_id: int, entrypoint: str) -> bytes:
     return DOMAIN_SEPARATOR
 
 
+def pack_user_operation_for_hashing_v9(
+    user_operation_list: list, delegate: str | None = None
+) -> bytes:
+    return pack_user_operation_for_hashing_v8v9(user_operation_list, delegate, True)
+
+
+PAYMASTER_DATA_OFFSET = 52
+PAYMASTER_SIG_MAGIC_LEN = 8
+# suffix length (signature length + magic)
+PAYMASTER_SUFFIX_LEN = PAYMASTER_SIG_MAGIC_LEN + 2
+PAYMASTER_SIG_MAGIC = "22e325a297439656"  # keccak("PaymasterSignature")[:8]
+PAYMASTER_SIG_MAGIC_BYTES = b'"\xe3%\xa2\x97C\x96V'
+# minimum length of paymasterData that can contain a paymaster signature.
+MIN_PAYMASTER_DATA_WITH_SUFFIX_LEN = PAYMASTER_DATA_OFFSET + PAYMASTER_SUFFIX_LEN 
+
+
+def paymaster_data_keccak_v9(paymaster_data: bytes) -> bytes:
+    paymaster_signature_length = get_paymaster_signature_length(paymaster_data)
+    if paymaster_signature_length > 0:
+        paymaster_data_len = len(paymaster_data)
+        paymaster_data_to_hash = paymaster_data[
+            0:paymaster_data_len - (paymaster_signature_length + PAYMASTER_SUFFIX_LEN)
+        ]
+        return keccak(paymaster_data_to_hash + PAYMASTER_SIG_MAGIC_BYTES)
+    else:
+        return keccak(paymaster_data)
+
+
+def get_paymaster_signature_length(paymaster_data: bytes) -> int:
+    data_len = len(paymaster_data)
+    if data_len < MIN_PAYMASTER_DATA_WITH_SUFFIX_LEN:
+        return 0
+    suffix8 = bytes.hex(paymaster_data[(data_len - PAYMASTER_SIG_MAGIC_LEN):data_len])
+    if (suffix8 != PAYMASTER_SIG_MAGIC):
+        return 0
+    paymaster_length_position = data_len - PAYMASTER_SUFFIX_LEN
+    pm_signature_length = int(
+        bytes.hex(paymaster_data[paymaster_length_position:paymaster_length_position+2]), 16
+    )
+    if (pm_signature_length > data_len - MIN_PAYMASTER_DATA_WITH_SUFFIX_LEN):
+        raise ValidationException(
+            ValidationExceptionCode.InvalidFields,
+            "Invalid Paymaster Signature Length",
+        )
+    return pm_signature_length
+
+
 def pack_user_operation_for_hashing_v8(
     user_operation_list: list, delegate: str | None = None
+) -> bytes:
+    return pack_user_operation_for_hashing_v8v9(user_operation_list, delegate)
+
+
+def pack_user_operation_for_hashing_v8v9(
+    user_operation_list: list, delegate: str | None = None, is_v9: bool = False
 ) -> bytes:
     if user_operation_list[2] == bytes(0):
         user_operation_list[2] = keccak(user_operation_list[2])  # initCode
@@ -387,7 +440,11 @@ def pack_user_operation_for_hashing_v8(
     else:
         user_operation_list[2] = keccak(user_operation_list[2])  # initCode
     user_operation_list[3] = keccak(user_operation_list[3])  # callData
-    user_operation_list[7] = keccak(user_operation_list[7])  # paymasterAndData
+    # paymasterAndData
+    if is_v9:
+        user_operation_list[7] = paymaster_data_keccak_v9(user_operation_list[7])
+    else:
+        user_operation_list[7] = keccak(user_operation_list[7])
 
     user_operation_list_without_signature = user_operation_list[:-1]
     # PACKED_USEROP_TYPEHASH = keccak("PackedUserOperation(address sender,uint256 nonce,bytes initCode,bytes callData,bytes32 accountGasLimits,uint256 preVerificationGas,bytes32 gasFees,bytes paymasterAndData)")
