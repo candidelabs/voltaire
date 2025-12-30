@@ -7,6 +7,7 @@ from eth_abi import decode, encode
 from voltaire_bundler.bundle.exceptions import ExecutionException, \
         ExecutionExceptionCode, ValidationException, ValidationExceptionCode
 from voltaire_bundler.gas.gas_manager import GasManager, calculate_deposit_slot_index, deep_union
+from voltaire_bundler.typing import Address
 from voltaire_bundler.user_operation.models import FailedOp
 from voltaire_bundler.user_operation.user_operation_handler import \
         decode_failed_op_event
@@ -17,13 +18,13 @@ from voltaire_bundler.user_operation.user_operation_v6 import \
 from voltaire_bundler.utils.eth_client_utils import \
     send_rpc_request_to_eth_client
 
-ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 MIN_CALL_GAS_LIMIT = 21_000
 
 
 class GasManagerV6(GasManager):
     ethereum_node_urls: list[str]
     chain_id: str
+    bundler_address: Address
     is_legacy_mode: bool
     max_fee_per_gas_percentage_multiplier: int
     max_priority_fee_per_gas_percentage_multiplier: int
@@ -36,6 +37,7 @@ class GasManagerV6(GasManager):
         self,
         ethereum_node_urls,
         chain_id,
+        bundler_address,
         is_legacy_mode,
         max_fee_per_gas_percentage_multiplier: int,
         max_priority_fee_per_gas_percentage_multiplier: int,
@@ -44,6 +46,7 @@ class GasManagerV6(GasManager):
     ):
         self.ethereum_node_urls = ethereum_node_urls
         self.chain_id = chain_id
+        self.bundler_address = bundler_address
         self.is_legacy_mode = is_legacy_mode
         self.max_fee_per_gas_percentage_multiplier = (
             max_fee_per_gas_percentage_multiplier
@@ -183,7 +186,7 @@ class GasManagerV6(GasManager):
         )
 
         default_state_overrides: dict[str, Any] = {
-            ZERO_ADDRESS: {
+            self.bundler_address: {
                 # override the "from" zero address balance with a high value
                 "balance": "0x314dc6448d9338c15b0a00000000",
             },
@@ -215,7 +218,7 @@ class GasManagerV6(GasManager):
 
         params: list[Any] = [
             {
-                "from": ZERO_ADDRESS,
+                "from": self.bundler_address,
                 "to": entrypoint,
                 "data": call_data,
             },

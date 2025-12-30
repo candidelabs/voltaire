@@ -27,8 +27,6 @@ from .validation_manager import ValidationManager
 from voltaire_bundler.typing import Address
 from voltaire_bundler.utils.eip7702 import format_hex_array_for_rlp_encode
 
-ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
-
 
 class ValidationManagerV7V8V9(ValidationManager):
     user_operation_handler: UserOperationHandlerV7V8V9
@@ -240,7 +238,11 @@ class ValidationManagerV7V8V9(ValidationManager):
             else:
                 entrypoint_code_override = self.entrypoint_code_override_v7
         state_overrides = {  # override the Entrypoint with EntryPointSimulations
-            entrypoint: {"code": entrypoint_code_override}
+            entrypoint: {"code": entrypoint_code_override},
+            self.bundler_address: {
+                # override the bundler address balance with a high value
+                "balance": "0x314dc6448d9338c15b0a00000000",
+            },
         }
 
         if user_operation.eip7702_auth is not None:
@@ -253,7 +255,7 @@ class ValidationManagerV7V8V9(ValidationManager):
 
         params = [
             {
-                "from": ZERO_ADDRESS,
+                "from": self.bundler_address,
                 "to": entrypoint,
                 "data": call_data,
             },
@@ -359,7 +361,11 @@ class ValidationManagerV7V8V9(ValidationManager):
             else:
                 entrypoint_code_override = self.entrypoint_code_override_v7
         state_overrides = {  # override the Entrypoint with EntryPointSimulations
-            entrypoint: {"code": entrypoint_code_override}
+            entrypoint: {"code": entrypoint_code_override},
+            self.bundler_address: {
+                # override the bundler address balance with a high value
+                "balance": "0x314dc6448d9338c15b0a00000000",
+            },
         }
 
         if user_operation.eip7702_auth is not None:
@@ -371,7 +377,7 @@ class ValidationManagerV7V8V9(ValidationManager):
                 state_overrides[user_operation.sender_address] = {"code": new_code}
         params = [
             {
-                "from": ZERO_ADDRESS,
+                "from": self.bundler_address,
                 "to": entrypoint,
                 "data": call_data,
             },

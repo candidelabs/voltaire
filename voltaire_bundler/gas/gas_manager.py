@@ -8,6 +8,7 @@ from functools import cache
 from eth_abi import encode, decode
 from eth_utils import keccak
 
+from voltaire_bundler.typing import Address
 from voltaire_bundler.user_operation.models import UserOperationType
 from voltaire_bundler.bundle.exceptions import \
     ValidationException, ValidationExceptionCode
@@ -18,6 +19,7 @@ from voltaire_bundler.utils.eth_client_utils import \
 class GasManager(ABC, Generic[UserOperationType]):
     ethereum_node_urls: list[str]
     chain_id: str
+    bundler_address: Address
     is_legacy_mode: bool
     max_fee_per_gas_percentage_multiplier: int
     max_priority_fee_per_gas_percentage_multiplier: int
@@ -154,7 +156,6 @@ class GasManager(ABC, Generic[UserOperationType]):
         user_op = user_operations_list[0]
         if len(user_op) != 11:  # for now, only estimate l1 gas for ep0.7 and ep0.8
             try:
-                ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
                 # currently most bundles contains a singler useroperations
                 # so l1 fees is calculated for the full handleops transaction
                 # set random values for gas limits and gas prices for accurate gas estimation
@@ -165,7 +166,7 @@ class GasManager(ABC, Generic[UserOperationType]):
                 if user_op[6] == (0).to_bytes(32):
                     user_op[6] = (0xa4f91cbf5f).to_bytes(16) + (0xa76e216f4b).to_bytes(16)
                 handleops_calldata = encode_handleops_calldata_v7v8v9(
-                    user_operations_list, ZERO_ADDRESS
+                    user_operations_list, self.bundler_address
                 )
 
                 # op chains (optimism, optimism sepolia, base, world chain)
@@ -214,7 +215,6 @@ class GasManager(ABC, Generic[UserOperationType]):
         handleops_calldata: str,
         block_number_hex: str,
     ) -> int:
-        ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
         optimism_gas_oracle_contract_address = (
             "0x420000000000000000000000000000000000000F"
         )
@@ -229,7 +229,7 @@ class GasManager(ABC, Generic[UserOperationType]):
 
         params = [
             {
-                "from": ZERO_ADDRESS,
+                "from": self.bundler_address,
                 "to": optimism_gas_oracle_contract_address,
                 "data": call_data,
             },
@@ -260,7 +260,6 @@ class GasManager(ABC, Generic[UserOperationType]):
         is_init: bool,
         block_number_hex: str,
     ) -> int:
-        ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
         arbitrum_nodeInterface_address = (
             "0x00000000000000000000000000000000000000C8"
         )
@@ -274,7 +273,7 @@ class GasManager(ABC, Generic[UserOperationType]):
 
         params = [
             {
-                "from": ZERO_ADDRESS,
+                "from": self.bundler_address,
                 "to": arbitrum_nodeInterface_address,
                 "data": call_data,
             },

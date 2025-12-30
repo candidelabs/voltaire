@@ -20,9 +20,6 @@ from voltaire_bundler.user_operation.user_operation_v6 import \
 from voltaire_bundler.validation.tracer_manager import TracerManager
 
 
-ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
-
-
 class ValidationManagerV6(ValidationManager):
     user_operation_handler: UserOperationHandlerV6
 
@@ -231,16 +228,24 @@ class ValidationManagerV6(ValidationManager):
             state_overrides = {
                 # override the Entrypoint with EntryPointSimulationsV6Arb
                 entrypoint: {"code": self.entrypoint_code_override_arb},
+                self.bundler_address: {
+                    # override the bundler address balance with a high value
+                    "balance": "0x314dc6448d9338c15b0a00000000",
+                },
             }
         else:
             state_overrides = {
                 # override the Entrypoint with EntryPointSimulationsV6
                 entrypoint: {"code": self.entrypoint_code_override},
+                self.bundler_address: {
+                    # override the bundler address balance with a high value
+                    "balance": "0x314dc6448d9338c15b0a00000000",
+                },
             }
 
         params = [
             {
-                "from": ZERO_ADDRESS,
+                "from": self.bundler_address,
                 "to": entrypoint,
                 "data": call_data,
             },
@@ -286,16 +291,24 @@ class ValidationManagerV6(ValidationManager):
             state_overrides = {
                 # override the Entrypoint with EntryPointSimulationsV6Arb
                 entrypoint: {"code": self.entrypoint_code_override_arb},
+                self.bundler_address: {
+                    # override the bundler address balance with a high value
+                    "balance": "0x314dc6448d9338c15b0a00000000",
+                },
             }
         else:
             state_overrides = {
                 # override the Entrypoint with EntryPointSimulationsV6
                 entrypoint: {"code": self.entrypoint_code_override},
+                self.bundler_address: {
+                    # override the bundler address balance with a high value
+                    "balance": "0x314dc6448d9338c15b0a00000000",
+                },
             }
 
         params = [
             {
-                "from": ZERO_ADDRESS,
+                "from": self.bundler_address,
                 "to": entrypoint,
                 "data": call_data,
             },

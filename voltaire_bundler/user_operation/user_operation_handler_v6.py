@@ -30,6 +30,7 @@ class UserOperationHandlerV6(UserOperationHandler):
         self.gas_manager = GasManagerV6(
             self.ethereum_node_urls,
             chain_id,
+            bundler_address,
             is_legacy_mode,
             max_fee_per_gas_percentage_multiplier,
             max_priority_fee_per_gas_percentage_multiplier,
