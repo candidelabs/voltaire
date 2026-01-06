@@ -801,7 +801,7 @@ async def get_init_data(args: Namespace) -> InitData:
         )
         if ethereum_node_chain_id_hex != ethereum_node_debug_chain_id_hex:
             logging.critical(
-                f"Eth node chain id {ethereum_node_chain_id_hex} not eqaul " +
+                f"Eth node chain id {ethereum_node_chain_id_hex} not equal " +
                 f"Eth node debug chain id {ethereum_node_debug_chain_id_hex}"
             )
             sys.exit(1)
@@ -814,7 +814,7 @@ async def get_init_data(args: Namespace) -> InitData:
         )
         if ethereum_node_chain_id_hex != ethereum_node_debug_chain_id_hex:
             logging.critical(
-                f"Eth node chain id {ethereum_node_chain_id_hex} not eqaul " +
+                f"Eth node chain id {ethereum_node_chain_id_hex} not equal " +
                 f"Eth node debug chain id {ethereum_node_debug_chain_id_hex}"
             )
             sys.exit(1)
@@ -827,8 +827,8 @@ async def get_init_data(args: Namespace) -> InitData:
         )
         if ethereum_node_chain_id_hex != eth_get_logs_url_chain_id_hex:
             logging.critical(
-                f"Eth node chain id {ethereum_node_chain_id_hex} not eqaul " +
-                f"Eth node debug chain id {eth_get_logs_url_chain_id_hex}"
+                f"Eth node chain id {ethereum_node_chain_id_hex} not equal " +
+                f"Eth node logs chain id {eth_get_logs_url_chain_id_hex}"
             )
             sys.exit(1)
 
