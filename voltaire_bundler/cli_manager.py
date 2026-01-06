@@ -686,6 +686,8 @@ def check_if_valid_rpc_url_and_port(rpc_url, rpc_port) -> None:
             f"Bind failed. {str(message)} for RPC url {rpc_url} and port {rpc_port}"
         )
         sys.exit(1)
+    finally:
+        soc.close()
 
 
 async def check_valid_ethereum_rpc_nodes_and_get_chain_id(
