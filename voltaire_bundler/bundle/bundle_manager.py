@@ -790,6 +790,7 @@ class BundlerManager:
                     user_operations,
                     bundler,
                     entrypoint,
+                    highest_verified_at_block,
                     recursion_depth
                 )
 
@@ -838,6 +839,7 @@ class BundlerManager:
                         user_operations,
                         bundler,
                         entrypoint,
+                        highest_verified_at_block,
                         recursion_depth
                     )
                 else:
