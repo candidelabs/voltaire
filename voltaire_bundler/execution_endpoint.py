@@ -52,7 +52,7 @@ class ExecutionEndpoint(Endpoint):
     local_mempool_manager_v9: LocalMempoolManagerV9
     peer_ids_to_cursor: dict[str, int]
     peer_ids_to_user_ops_hashes_queue: dict[str, list[str]]
-    disabe_p2p: bool
+    disable_p2p: bool
     is_eip7702: bool
 
     def __init__(
