@@ -896,7 +896,7 @@ class BundlerManager:
             return
         if entrypoint == self.local_mempool_manager_v9.entrypoint:
             mempool_manager = self.local_mempool_manager_v9
-        if entrypoint == self.local_mempool_manager_v8.entrypoint:
+        elif entrypoint == self.local_mempool_manager_v8.entrypoint:
             mempool_manager = self.local_mempool_manager_v8
         elif entrypoint == self.local_mempool_manager_v7.entrypoint:
             mempool_manager = self.local_mempool_manager_v7
