@@ -307,7 +307,7 @@ class UserOperationV7V8V9(UserOperation):
             self.paymaster_address_lowercase = None
 
 
-DOMAIN_SEPARATOR: bytes | None = None
+DOMAIN_SEPARATOR_CACHE: dict[tuple[int, str], bytes] = {}
 
 
 def get_user_operation_hash(
@@ -353,9 +353,10 @@ def get_user_operation_hash(
 
 
 def build_domain_separator(chain_id: int, entrypoint: str) -> bytes:
-    global DOMAIN_SEPARATOR
+    global DOMAIN_SEPARATOR_CACHE
 
-    if DOMAIN_SEPARATOR is None:
+    cache_key = (chain_id, entrypoint.lower())
+    if cache_key not in DOMAIN_SEPARATOR_CACHE:
         # DOMAIN_NAME = "ERC4337"
         HASHED_NAME = b'6M\xa2\x8a\\\x92\xbc\xc8\x7f\xe9|\x88\x13\xa6\xc6\xb8\xa3\xa0I\xb0\xea\n2\x8f\xcb\x0bO\x0e\x003u\x86'
         # DOMAIN_VERSION = "1"
@@ -367,10 +368,9 @@ def build_domain_separator(chain_id: int, entrypoint: str) -> bytes:
             [[TYPE_HASH, HASHED_NAME, HASHED_VERSION, chain_id, entrypoint]],
         )
 
-        DOMAIN_SEPARATOR = keccak(encoded_user_operation_hash)
+        DOMAIN_SEPARATOR_CACHE[cache_key] = keccak(encoded_user_operation_hash)
 
-    assert DOMAIN_SEPARATOR is not None
-    return DOMAIN_SEPARATOR
+    return DOMAIN_SEPARATOR_CACHE[cache_key]
 
 
 def pack_user_operation_for_hashing_v9(
