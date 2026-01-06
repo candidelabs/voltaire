@@ -24,24 +24,26 @@ class ReputationEntry:
 
 
 class ReputationManager:
-    entities_reputation: dict[str, ReputationEntry] = {}
-    whitelist: list[str] = []
-    blacklist: list[str] = []
+    entities_reputation: dict[str, ReputationEntry]
+    whitelist: list[str]
+    blacklist: list[str]
 
     def __init__(
             self,
             reputation_whitelist: list[str],
             reputation_blacklist: list[str]
     ) -> None:
+        self.entities_reputation = {}
         if reputation_whitelist is not None:
-            reputation_whitelist = list(map(
+            self.whitelist = list(map(
                 lambda entity: entity.lower(), reputation_whitelist))
+        else:
+            self.whitelist = []
         if reputation_blacklist is not None:
-            reputation_blacklist = list(map(
+            self.blacklist = list(map(
                 lambda entity: entity.lower(), reputation_blacklist))
-
-        self.whitelist = reputation_whitelist
-        self.blacklist = reputation_blacklist
+        else:
+            self.blacklist = []
         asyncio.ensure_future(self.execute_reputation_cron_job())
 
     async def execute_reputation_cron_job(self) -> None:
