@@ -487,7 +487,7 @@ class ValidationManagerV7V8V9(ValidationManager):
             auth_signer_address = signature.recover_public_key_from_msg_hash(
                 auth_hash
             ).to_address()
-        except EthUtilsValidationError or BadSignature as excp:
+        except (EthUtilsValidationError, BadSignature) as excp:
             logging.error(
                 f"Failed to recover authorization for address: {authorization["address"]}."
                 f"error:{str(excp)}"
