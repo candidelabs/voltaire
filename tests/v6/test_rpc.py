@@ -8,7 +8,7 @@ async def test_eth_chain_id(bundlerInstance):
     Test eth_chainId
     """
     chain_id = await send_rpc_request_to_eth_client(
-        "http://127.0.0.1:53000/rpc",
+        ["http://127.0.0.1:53000/rpc"],
         "eth_chainId",
         [],
     )
@@ -22,7 +22,7 @@ async def test_eth_supportedEntryPoints(bundlerInstance):
     Test eth_chainId
     """
     supportedEntryPoints = await send_rpc_request_to_eth_client(
-        "http://127.0.0.1:53000/rpc",
+        ["http://127.0.0.1:53000/rpc"],
         "eth_supportedEntryPoints",
         [],
     )
@@ -36,7 +36,7 @@ async def test_eth_estimateUserOperationGas(bundlerInstance):
     Test eth_estimateUserOperationGas
     """
     result = await send_rpc_request_to_eth_client(
-        "http://127.0.0.1:53000/rpc",
+        ["http://127.0.0.1:53000/rpc"],
         "eth_estimateUserOperationGas",
         [{
             "sender": "0xEed01c4FfA9f88096b77d2f16c2e143a94D71298",

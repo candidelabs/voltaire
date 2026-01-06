@@ -17,7 +17,7 @@ def event_loop():
     except RuntimeError:
         loop = asyncio.new_event_loop()
     yield loop
-    asyncio.get_event_loop().close()
+    loop.close()
 
 
 @pytest_asyncio.fixture(scope="module", autouse=True)
