@@ -95,11 +95,6 @@ class GasManager(ABC, Generic[UserOperationType]):
                         "it should be minimum the estimated base fee: " +
                         f"{hex(estimated_base_fee)}",
                     )
-                if max_priority_fee_per_gas < 1:
-                    raise ValidationException(
-                        ValidationExceptionCode.InvalidFields,
-                        "maxPriorityFeePerGas is too low. it should be minimum : 1",
-                    )
                 if (
                     min(
                         max_fee_per_gas,
