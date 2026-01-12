@@ -318,7 +318,6 @@ def get_user_operation_hash(
 ) -> str:
     if entrypoint_addr.startswith("0x433709"):  # ep v0.9.0
         packed_user_operation_hash = keccak(
-            # todo: implement ep 0.09 specific hashing
             pack_user_operation_for_hashing_v9(user_operation_list, delegate)
         )
 
