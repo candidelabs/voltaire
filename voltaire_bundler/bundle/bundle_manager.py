@@ -310,10 +310,10 @@ class BundlerManager:
                 "Sending bundle failed. failed call data or gas estimation.")
             return
         
-        gas_esttimation_int = (
+        gas_estimation_int = (
             int(gas_estimation_hex) * self.bundle_gas_estimation_multiplier
         )
-        gas_estimation_hex = hex(gas_esttimation_int)
+        gas_estimation_hex = hex(gas_estimation_int)
 
         block_max_fee_per_gas = tasks[1]["result"]
         nonce = tasks[2]["result"]
