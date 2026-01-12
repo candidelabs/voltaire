@@ -67,12 +67,12 @@ class ValidationManagerV7V8V9(ValidationManager):
         self.entrypoint_code_override_v8 = load_bytecode(
             "EntryPointSimulationsV8.json")
         self.entrypoint_code_override_v8_arb = load_bytecode(
-            "EntryPointSimulationsV8.json")
+            "EntryPointSimulationsV8Arb.json")
         
         self.entrypoint_code_override_v9 = load_bytecode(
             "EntryPointSimulationsV9.json")
         self.entrypoint_code_override_v9_arb = load_bytecode(
-            "EntryPointSimulationsV9.json")
+            "EntryPointSimulationsModV9Arb.json")
 
     async def validate_user_operation(
         self,
