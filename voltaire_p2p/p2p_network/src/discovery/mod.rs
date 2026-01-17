@@ -45,6 +45,7 @@ use tokio::sync::mpsc;
 /// Local ENR storage filename.
 pub const ENR_FILENAME: &str = "enr.dat";
 /// Target number of peers to search for given a grouped subnet query.
+#[allow(dead_code)]
 const TARGET_PEERS_FOR_GROUPED_QUERY: usize = 6;
 /// Number of times to attempt a discovery request.
 const MAX_DISCOVERY_RETRY: usize = 3;
@@ -61,6 +62,7 @@ const MAX_SUBNETS_IN_QUERY: usize = 3;
 /// make it easier to peers to eclipse this node. Kademlia suggests a value of 16.
 pub const FIND_NODE_QUERY_CLOSEST_PEERS: usize = 16;
 /// The threshold for updating `min_ttl` on a connected peer.
+#[allow(dead_code)]
 const DURATION_DIFFERENCE: Duration = Duration::from_millis(1);
 
 /// A query has completed. This result contains a mapping of discovered peer IDs to the `min_ttl`

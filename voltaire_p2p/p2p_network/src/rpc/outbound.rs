@@ -66,14 +66,16 @@ impl OutboundRequest {
                 SupportedProtocol::PooledUserOpHashesV1,
                 Encoding::SSZSnappy,
             )],
-            OutboundRequest::PooledUserOpsByHash(_) => vec![ProtocolId::new(
-                SupportedProtocol::PooledUserOpsByHashV07,
-                Encoding::SSZSnappy,
-            )],
-            OutboundRequest::PooledUserOpsByHash(_) => vec![ProtocolId::new(
-                SupportedProtocol::PooledUserOpsByHashV06,
-                Encoding::SSZSnappy,
-            )],
+            OutboundRequest::PooledUserOpsByHash(_) => vec![
+                ProtocolId::new(
+                    SupportedProtocol::PooledUserOpsByHashV07,
+                    Encoding::SSZSnappy,
+                ),
+                ProtocolId::new(
+                    SupportedProtocol::PooledUserOpsByHashV06,
+                    Encoding::SSZSnappy,
+                ),
+            ],
             OutboundRequest::Ping(_) => vec![ProtocolId::new(
                 SupportedProtocol::PingV1,
                 Encoding::SSZSnappy,
@@ -91,8 +93,8 @@ impl OutboundRequest {
         match self {
             OutboundRequest::Status(_) => 1,
             OutboundRequest::Goodbye(_) => 0,
-            OutboundRequest::PooledUserOpHashes(req) => 10,
-            OutboundRequest::PooledUserOpsByHash(req) => 10,
+            OutboundRequest::PooledUserOpHashes(_) => 10,
+            OutboundRequest::PooledUserOpsByHash(_) => 10,
             OutboundRequest::Ping(_) => 1,
             OutboundRequest::MetaData(_) => 1,
         }
@@ -106,7 +108,7 @@ impl OutboundRequest {
             OutboundRequest::PooledUserOpHashes(_) => SupportedProtocol::PooledUserOpHashesV1,
             OutboundRequest::PooledUserOpsByHash(_) => SupportedProtocol::PooledUserOpsByHashV07,
             OutboundRequest::Ping(_) => SupportedProtocol::PingV1,
-            OutboundRequest::MetaData(req) => SupportedProtocol::MetaDataV1,
+            OutboundRequest::MetaData(_) => SupportedProtocol::MetaDataV1,
         }
     }
 

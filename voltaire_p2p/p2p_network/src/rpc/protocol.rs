@@ -370,7 +370,7 @@ impl InboundRequest {
             InboundRequest::Goodbye(_) => 0,
             InboundRequest::Ping(_) => 1,
             InboundRequest::MetaData(_) => 1,
-            InboundRequest::PooledUserOpHashes(req) => 10,
+            InboundRequest::PooledUserOpHashes(_) => 10,
             InboundRequest::PooledUserOpsByHash(_) => 1,
         }
     }

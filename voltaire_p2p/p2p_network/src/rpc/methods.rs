@@ -492,7 +492,7 @@ impl std::fmt::Display for PooledUserOpsByHashRequest {
 impl slog::KV for StatusMessage {
     fn serialize(
         &self,
-        record: &slog::Record,
+        _record: &slog::Record,
         serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
         serializer.emit_arguments("chain_id", &format_args!("{:?}", self.chain_id))?;
