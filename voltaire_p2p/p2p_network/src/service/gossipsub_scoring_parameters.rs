@@ -12,6 +12,7 @@ const PROPOSER_SLASHING_WEIGHT: f64 = 0.05;
 const ATTESTER_SLASHING_WEIGHT: f64 = 0.05;
 
 /// The time window (seconds) that we expect messages to be forwarded to us in the mesh.
+#[allow(dead_code)]
 const MESH_MESSAGE_DELIVERIES_WINDOW: u64 = 2;
 
 // Const as this is used in the peer manager to prevent gossip from disconnecting peers.
@@ -29,11 +30,12 @@ pub fn voltaire_gossip_thresholds() -> PeerScoreThresholds {
 }
 
 pub struct PeerScoreSettings {
+    #[allow(dead_code)]
     max_positive_score: f64,
 }
 
 impl PeerScoreSettings {
-    pub fn new(gs_config: &GossipsubConfig) -> PeerScoreSettings {
+    pub fn new(_gs_config: &GossipsubConfig) -> PeerScoreSettings {
         let max_positive_score = (MAX_IN_MESH_SCORE + MAX_FIRST_MESSAGE_DELIVERIES_SCORE)
             * (BEACON_BLOCK_WEIGHT
                 + BEACON_AGGREGATE_PROOF_WEIGHT
@@ -48,26 +50,10 @@ impl PeerScoreSettings {
 
      pub fn get_peer_score_params(
         &self,
-        active_validators: usize,
-        thresholds: &PeerScoreThresholds,
+        _active_validators: usize,
+        _thresholds: &PeerScoreThresholds,
     ) -> error::Result<PeerScoreParams> {
-
-        let mut params = PeerScoreParams {
-            topics: todo!(),
-            topic_score_cap: todo!(),
-            app_specific_weight: todo!(),
-            ip_colocation_factor_weight: todo!(),
-            ip_colocation_factor_threshold: todo!(),
-            ip_colocation_factor_whitelist: todo!(),
-            behaviour_penalty_weight: todo!(),
-            behaviour_penalty_threshold: todo!(),
-            behaviour_penalty_decay: todo!(),
-            decay_interval: todo!(),
-            decay_to_zero: todo!(),
-            retain_score: todo!(),
-        };
-
-        Ok(params)
+        todo!("Implement peer score params")
     }
    
 }

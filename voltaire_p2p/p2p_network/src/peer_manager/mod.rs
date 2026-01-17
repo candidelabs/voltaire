@@ -1047,7 +1047,7 @@ impl PeerManager {
                         // sync-committee threshold, if we can avoid it.
 
                         let mut removed_peer_index = None;
-                        for (index, (candidate_peer, info)) in peers_on_subnet.iter().enumerate() {
+                        for (index, (_candidate_peer, info)) in peers_on_subnet.iter().enumerate() {
                             // Ensure we don't remove too many outbound peers
                             if info.is_outbound_only()
                                 && self.target_outbound_peers()

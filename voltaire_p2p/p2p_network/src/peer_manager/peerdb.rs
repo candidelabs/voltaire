@@ -213,7 +213,7 @@ impl PeerDB {
     pub fn synced_peers(&self) -> impl Iterator<Item = &PeerId> {
         self.peers
             .iter()
-            .filter(|(_, info)| {
+            .filter(|(_, _info)| {
                 // if info.sync_status().is_synced() || info.sync_status().is_advanced() {
                 //     return info.is_connected();
                 // }

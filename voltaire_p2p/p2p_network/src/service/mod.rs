@@ -124,9 +124,11 @@ pub struct Network<AppReqId: ReqId> {
     // // lookups for every gossipsub message send.
     // enr_fork_id: EnrForkId,
     /// Directory where metadata is stored.
+    #[allow(dead_code)]
     network_dir: PathBuf,
     // fork_context: Arc<ForkContext>,
     /// Gossipsub score parameters.
+    #[allow(dead_code)]
     score_settings: PeerScoreSettings,
     /// The interval for updating gossipsub scores
     update_gossipsub_scores: tokio::time::Interval,
@@ -191,8 +193,8 @@ impl<AppReqId: ReqId> Network<AppReqId> {
         let score_settings = PeerScoreSettings::new(&config.gs_config);
 
         let gossip_cache = {
-            let slot_duration = std::time::Duration::from_secs(10);
-            let half_epoch = std::time::Duration::from_secs(
+            let _slot_duration = std::time::Duration::from_secs(10);
+            let _half_epoch = std::time::Duration::from_secs(
                 // ctx.chain_spec.seconds_per_slot * TSpec::slots_per_epoch() / 2,
                 100,
             );
@@ -203,7 +205,7 @@ impl<AppReqId: ReqId> Network<AppReqId> {
         let local_peer_id = network_globals.local_peer_id();
 
         let (gossipsub, update_gossipsub_scores) = {
-            let thresholds = voltaire_gossip_thresholds();
+            let _thresholds = voltaire_gossip_thresholds();
 
             // // Prepare scoring parameters
             // let params = {
@@ -1046,7 +1048,7 @@ impl<AppReqId: ReqId> Network<AppReqId> {
     /// Sends a METADATA response to a peer.
     fn send_meta_data_response(
         &mut self,
-        req: MetadataRequest,
+        _req: MetadataRequest,
         id: PeerRequestId,
         peer_id: PeerId,
     ) {
@@ -1136,12 +1138,13 @@ impl<AppReqId: ReqId> Network<AppReqId> {
 
     /// Dial cached Enrs in discovery service that are in the given `subnet_id` and aren't
     /// in Connected, Dialing or Banned state.
-    fn dial_cached_enrs_in_subnet(&mut self, subnet: Subnet) {
+    #[allow(dead_code)]
+    fn dial_cached_enrs_in_subnet(&mut self, _subnet: Subnet) {
         // let predicate = subnet_predicate(vec![subnet], &self.log);
         let peers_to_dial: Vec<Enr> = self
             .discovery()
             .cached_enrs()
-            .filter_map(|(_peer_id, enr)| {
+            .filter_map(|(_peer_id, _enr)| {
                 // if predicate(enr) {
                 //     Some(enr.clone())
                 // } else {
@@ -1201,7 +1204,7 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                     }
                 }
             }
-            gossipsub::Event::Subscribed { peer_id, topic } => {
+            gossipsub::Event::Subscribed { peer_id: _peer_id, topic } => {
                 if let Ok(topic) = GossipTopic::decode(topic.as_str(), topic_v07, topic_v06) {
                     // if let Some(subnet_id) = topic.subnet_id() {
                     //     self.network_globals
@@ -1242,7 +1245,7 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                     }
                 }
             }
-            gossipsub::Event::Unsubscribed { peer_id, topic } => {
+            gossipsub::Event::Unsubscribed { peer_id: _peer_id, topic: _topic } => {
                 // if let Some(subnet_id) = subnet_from_topic_hash(&topic) {
                 //     self.network_globals
                 //         .peers

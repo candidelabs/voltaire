@@ -35,7 +35,7 @@ impl GossipCacheBuilder {
 
     pub fn build(self) -> GossipCache {
         let GossipCacheBuilder {
-            default_timeout,
+            default_timeout: _,
         } = self;
         GossipCache {
             expirations: DelayQueue::default(),

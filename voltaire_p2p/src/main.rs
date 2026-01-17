@@ -1,4 +1,4 @@
-use std::{sync::Arc, path::PathBuf, net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs}, str::FromStr, time::Duration};
+use std::{sync::Arc, path::PathBuf, net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs}, str::FromStr};
 
 use clap::ArgMatches;
 use p2p_voltaire_network::{NetworkConfig, ListenAddress, Multiaddr, multiaddr::Protocol, discv5::Enr, PeerIdSerialized};

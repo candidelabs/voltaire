@@ -33,24 +33,29 @@ pub struct UserOperationV06 {
     /// Anti-replay parameter (see "Semi-abstracted Nonce Support" ).
     pub nonce: U256,
     /// The initCode of the account (needed if and only if the account is not yet on-chain and needs to be created).
-    #[serde(with = "ssz_types::serde_utils::hex_var_list")]
-    pub initCode: VariableList<u8, MaxCallDataSize>,
+    #[serde(rename = "initCode", with = "ssz_types::serde_utils::hex_var_list")]
+    pub init_code: VariableList<u8, MaxCallDataSize>,
     /// The data to pass to the `sender` during the main execution call.
-    #[serde(with = "ssz_types::serde_utils::hex_var_list")]
-    pub callData: VariableList<u8, MaxCallDataSize>,
+    #[serde(rename = "callData", with = "ssz_types::serde_utils::hex_var_list")]
+    pub call_data: VariableList<u8, MaxCallDataSize>,
     /// The amount of gas to allocate the main execution call.
-    pub callGasLimit: U256,
+    #[serde(rename = "callGasLimit")]
+    pub call_gas_limit: U256,
     /// The amount of gas to allocate for the verification step.
-    pub verificationGasLimit: U256,
+    #[serde(rename = "verificationGasLimit")]
+    pub verification_gas_limit: U256,
     /// The amount of gas to pay for to compensate the bundler for pre-verification execution, calldata and any gas overhead that can't be tracked on-chain.
-    pub preVerificationGas: U256,
+    #[serde(rename = "preVerificationGas")]
+    pub pre_verification_gas: U256,
     /// Maximum fee per gas.
-    pub maxFeePerGas: U256,
+    #[serde(rename = "maxFeePerGas")]
+    pub max_fee_per_gas: U256,
     ///  Maximum priority fee per gas.
-    pub maxPriorityFeePerGas: U256,
+    #[serde(rename = "maxPriorityFeePerGas")]
+    pub max_priority_fee_per_gas: U256,
     /// Address of paymaster sponsoring the transaction, followed by extra data to send to the paymaster (empty for self-sponsored transaction).
-    #[serde(with = "ssz_types::serde_utils::hex_var_list")]
-    pub paymasterAndData: VariableList<u8, MaxCallDataSize>,
+    #[serde(rename = "paymasterAndData", with = "ssz_types::serde_utils::hex_var_list")]
+    pub paymaster_and_data: VariableList<u8, MaxCallDataSize>,
     /// Data passed into the account along with the nonce during the verification step.
     #[serde(with = "ssz_types::serde_utils::hex_var_list")]
     pub signature: VariableList<u8, MaxCallDataSize>,
@@ -115,32 +120,42 @@ pub struct UserOperationV07 {
     /// Anti-replay parameter (see "Semi-abstracted Nonce Support" ).
     pub factory: Optional<Address>,
     /// Anti-replay parameter (see "Semi-abstracted Nonce Support" ).
-    pub factoryData: Optional<VariableList<u8, MaxCallDataSize>>,
+    #[serde(rename = "factoryData")]
+    pub factory_data: Optional<VariableList<u8, MaxCallDataSize>>,
     /// The data to pass to the `sender` during the main execution call.
-    #[serde(with = "ssz_types::serde_utils::hex_var_list")]
-    pub callData: VariableList<u8, MaxCallDataSize>,
+    #[serde(rename = "callData", with = "ssz_types::serde_utils::hex_var_list")]
+    pub call_data: VariableList<u8, MaxCallDataSize>,
     /// The amount of gas to allocate the main execution call.
-    pub callGasLimit: U256,
+    #[serde(rename = "callGasLimit")]
+    pub call_gas_limit: U256,
     /// The amount of gas to allocate for the verification step.
-    pub verificationGasLimit: U256,
+    #[serde(rename = "verificationGasLimit")]
+    pub verification_gas_limit: U256,
     /// The amount of gas to pay for to compensate the bundler for pre-verification execution, calldata and any gas overhead that can't be tracked on-chain.
-    pub preVerificationGas: U256,
+    #[serde(rename = "preVerificationGas")]
+    pub pre_verification_gas: U256,
     /// Maximum fee per gas.
-    pub maxFeePerGas: U256,
+    #[serde(rename = "maxFeePerGas")]
+    pub max_fee_per_gas: U256,
     ///  Maximum priority fee per gas.
-    pub maxPriorityFeePerGas: U256,
+    #[serde(rename = "maxPriorityFeePerGas")]
+    pub max_priority_fee_per_gas: U256,
     /// Anti-replay parameter (see "Semi-abstracted Nonce Support" ).
     pub paymaster: Optional<Address>,
     /// Anti-replay parameter (see "Semi-abstracted Nonce Support" ).
-    pub paymasterVerificationGasLimit: Optional<U256>,
+    #[serde(rename = "paymasterVerificationGasLimit")]
+    pub paymaster_verification_gas_limit: Optional<U256>,
     /// Anti-replay parameter (see "Semi-abstracted Nonce Support" ).
-    pub paymasterPostOpGasLimit: Optional<U256>,
+    #[serde(rename = "paymasterPostOpGasLimit")]
+    pub paymaster_post_op_gas_limit: Optional<U256>,
     /// Address of paymaster sponsoring the transaction, followed by extra data to send to the paymaster (empty for self-sponsored transaction).
-    pub paymasterData: Optional<VariableList<u8, MaxCallDataSize>>,
+    #[serde(rename = "paymasterData")]
+    pub paymaster_data: Optional<VariableList<u8, MaxCallDataSize>>,
     /// Data passed into the account along with the nonce during the verification step.
     #[serde(with = "ssz_types::serde_utils::hex_var_list")]
     pub signature: VariableList<u8, MaxCallDataSize>,
-    pub eip7702Auth: Optional<Eip7702Auth>,
+    #[serde(rename = "eip7702Auth")]
+    pub eip7702_auth: Optional<Eip7702Auth>,
 }
 
 #[derive(

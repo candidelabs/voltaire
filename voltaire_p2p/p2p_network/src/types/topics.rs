@@ -9,6 +9,7 @@ pub const TOPIC_PREFIX: &str = "account_abstraction";
 pub const SSZ_SNAPPY_ENCODING_POSTFIX: &str = "ssz_snappy";
 pub const USER_OPS_WITH_ENTRY_POINT: &str = "user_operation";
 
+#[allow(dead_code)]
 pub const BASE_CORE_TOPICS: [GossipKind; 2] = [
     GossipKind::VerifiedUserOperationV07,
     GossipKind::VerifiedUserOperationV06,
