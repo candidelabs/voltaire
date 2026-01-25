@@ -14,11 +14,9 @@ use crate::{rpc::*, NetworkConfig as Config};
 use crate::service::behaviour::BehaviourEvent;
 pub use crate::service::behaviour::Gossipsub;
 use crate::types::{
-    GossipEncoding, GossipKind, GossipTopic,
-    SnappyTransform, Subnet, SubnetDiscovery,
+    GossipEncoding, GossipKind, GossipTopic, SnappyTransform, SubnetDiscovery,
 };
 use crate::EnrExt;
-// use crate::Eth2Enr;
 use crate::{error, metrics, Enr, NetworkGlobals, PubsubMessage, TopicHash};
 use api_types::{PeerRequestId, Request, RequestId, Response};
 use futures::stream::StreamExt;
@@ -29,22 +27,17 @@ use libp2p::gossipsub::{
 };
 use libp2p::identify;
 use libp2p::multiaddr::{Multiaddr, Protocol as MProtocol};
-use libp2p::swarm::{Swarm, SwarmBuilder, SwarmEvent};
+use libp2p::swarm::{Config as SwarmConfig, Swarm, SwarmEvent};
 use libp2p::PeerId;
 use slog::{crit, debug, info, o, trace, warn};
 use ssz_types::{typenum::U32, FixedVector};
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::time::Duration;
 use std::{
     sync::Arc,
     task::{Context, Poll},
 };
 
-// // use types::ForkName;
-// use types::{
-//     consts::altair::SYNC_COMMITTEE_SUBNET_COUNT, EnrForkId, EthSpec, ForkContext, Slot, SubnetId,
-// };
 use utils::{build_transport, strip_peer_id, MAX_CONNECTIONS_PER_PEER};
 
 pub mod api_types;
@@ -119,14 +112,9 @@ pub struct Network<AppReqId: ReqId> {
     /* Auxiliary Fields */
     /// A collections of variables accessible outside the network service.
     network_globals: Arc<NetworkGlobals>,
-    // /// Keeps track of the current EnrForkId for upgrading gossipsub topics.
-    // // NOTE: This can be accessed via the network_globals ENR. However we keep it here for quick
-    // // lookups for every gossipsub message send.
-    // enr_fork_id: EnrForkId,
     /// Directory where metadata is stored.
     #[allow(dead_code)]
     network_dir: PathBuf,
-    // fork_context: Arc<ForkContext>,
     /// Gossipsub score parameters.
     #[allow(dead_code)]
     score_settings: PeerScoreSettings,
@@ -144,19 +132,12 @@ pub struct Network<AppReqId: ReqId> {
 /// Implements the combined behaviour for the libp2p service.
 impl<AppReqId: ReqId> Network<AppReqId> {
     pub async fn new(
-        executor: task_executor::TaskExecutor,
-        // ctx: ServiceContext<'_>,
         config: Config,
         log: &slog::Logger,
     ) -> error::Result<(Self, Arc<NetworkGlobals>)> {
         let log = log.new(o!("service"=> "libp2p"));
-        // let mut config = ctx.config.clone();
         trace!(log, "Libp2p Service starting");
-        // initialise the node's ID
         let local_keypair = utils::load_private_key(&config, &log);
-
-        // let local_keypair = identity::Keypair::generate_secp256k1();
-        // let local_peer_id = PeerId::from(id_keys.public());
 
         // set up a collection of variables accessible outside of the network crate
         let network_globals = {
@@ -184,63 +165,25 @@ impl<AppReqId: ReqId> Network<AppReqId> {
             Arc::new(globals)
         };
 
-        // // Grab our local ENR FORK ID
-        // let enr_fork_id = network_globals
-        //     .local_enr()
-        //     .eth2()
-        //     .expect("Local ENR must have a fork id");
-
         let score_settings = PeerScoreSettings::new(&config.gs_config);
 
-        let gossip_cache = {
-            let _slot_duration = std::time::Duration::from_secs(10);
-            let _half_epoch = std::time::Duration::from_secs(
-                // ctx.chain_spec.seconds_per_slot * TSpec::slots_per_epoch() / 2,
-                100,
-            );
-
-            GossipCache::builder().build()
-        };
+        let gossip_cache = GossipCache::builder().build();
         
         let local_peer_id = network_globals.local_peer_id();
 
         let (gossipsub, update_gossipsub_scores) = {
             let _thresholds = voltaire_gossip_thresholds();
 
-            // // Prepare scoring parameters
-            // let params = {
-            //     // Construct a set of gossipsub peer scoring parameters
-            //     // We don't know the number of active validators and the current slot yet
-            //     let active_validators = 1000;//TSpec::minimum_validator_count();
-            //     // let current_slot = Slot::new(0);
-            //     score_settings.get_peer_score_params(
-            //         active_validators,
-            //         &thresholds,
-            //         &enr_fork_id,
-            //         // current_slot,
-            //     )?
-            // };
-
-            // trace!(log, "Using peer score params"; "params" => ?params);
-
-            // Set up a scoring update interval
-            let update_gossipsub_scores = tokio::time::interval(/*params.decay_interval*/Duration::new(1, 0));
-            // let possible_fork_digests = ctx.fork_context.all_fork_digests();
+            let update_gossipsub_scores = tokio::time::interval(Duration::new(1, 0));
             let filter: gossipsub::MaxCountSubscriptionFilter<gossipsub::WhitelistSubscriptionFilter> = gossipsub::MaxCountSubscriptionFilter {
-                filter: utils::create_whitelist_filter(
-                    config.clone().topics
-                    // possible_fork_digests,
-                    // ctx.chain_spec.attestation_subnet_count,
-                    // 100,
-                    // SYNC_COMMITTEE_SUBNET_COUNT,
-                ),
+                filter: utils::create_whitelist_filter(config.clone().topics),
                 max_subscribed_topics: 200,
-                max_subscriptions_per_request: 150, // 148 in theory = (64 attestation + 4 sync committee + 6 core topics) * 2
+                max_subscriptions_per_request: 150,
             };
 
             let gossipsub_config_params = GossipsubConfigParams {
-                message_domain_valid_snappy: [1,0,0,0],//ctx.chain_spec.message_domain_valid_snappy,
-                gossip_max_size: 10485760,//ctx.chain_spec.gossip_max_size as usize,
+                message_domain_valid_snappy: [1, 0, 0, 0],
+                gossip_max_size: 10485760,
             };
             let mut config = config.clone();
             config.gs_config = gossipsub_config(
@@ -248,21 +191,9 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                 gossipsub_config_params,
             );
 
-            // config.gs_config = gossipsub_config(
-            //     config.network_load,
-            //     // ctx.fork_context.clone(),
-            //     gossipsub_config_params,
-            // );
-
-            // // If metrics are enabled for gossipsub build the configuration
-            // let gossipsub_metrics = ctx
-            //     .gossipsub_registry
-            //     .map(|registry| (registry, Default::default()));
-
             let snappy_transform = SnappyTransform::new(config.gs_config.max_transmit_size());
             let gossipsub = Gossipsub::new_with_subscription_filter_and_transform(
                 MessageAuthenticity::Anonymous,
-                // MessageAuthenticity::Signed(local_keypair.clone()),
                 config.gs_config.clone(),
                 None,
                 filter,
@@ -270,21 +201,15 @@ impl<AppReqId: ReqId> Network<AppReqId> {
             )
             .map_err(|e| format!("Could not construct gossipsub: {:?}", e))?;
 
-            // gossipsub
-            //     .with_peer_score(params, thresholds)
-            //     .expect("Valid score params and thresholds");
-
             (gossipsub, update_gossipsub_scores)
         };
         
         let network_params = NetworkParams {
-            max_chunk_size: 1048576,//ctx.chain_spec.max_chunk_size as usize,
-            ttfb_timeout: Duration::new(1000, 1000),//ctx.chain_spec.ttfb_timeout(),
-            resp_timeout: Duration::new(1000, 1000),//ctx.chain_spec.resp_timeout(),
+            max_chunk_size: 1048576,
+            ttfb_timeout: Duration::new(1000, 1000),
+            resp_timeout: Duration::new(1000, 1000),
         };
         let eth2_rpc = RPC::new(
-            // ctx.fork_context.clone(),
-            // config.enable_light_client_server,
             config.inbound_rate_limiter_config.clone(),
             config.outbound_rate_limiter_config.clone(),
             log.clone(),
@@ -372,26 +297,13 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                 build_transport(local_keypair.clone(), !config.disable_quic_support)
                     .map_err(|e| format!("Failed to build transport: {:?}", e))?;
 
-            // use the executor for libp2p
-            struct Executor(task_executor::TaskExecutor);
-            impl libp2p::swarm::Executor for Executor {
-                fn exec(&self, f: Pin<Box<dyn futures::Future<Output = ()> + Send>>) {
-                    self.0.spawn(f, "libp2p");
-                }
-            }
-
-            // sets up the libp2p connection limits
+            // Configure the swarm with tokio executor
+            let swarm_config = SwarmConfig::with_tokio_executor()
+                .with_notify_handler_buffer_size(std::num::NonZeroUsize::new(7).expect("Not zero"))
+                .with_per_connection_event_buffer_size(4);
 
             (
-                SwarmBuilder::with_executor(
-                    transport,
-                    behaviour,
-                    local_peer_id,
-                    Executor(executor),
-                )
-                .notify_handler_buffer_size(std::num::NonZeroUsize::new(7).expect("Not zero"))
-                .per_connection_event_buffer_size(4)
-                .build(),
+                Swarm::new(transport, behaviour, local_peer_id, swarm_config),
                 bandwidth,
             )
         };
@@ -399,9 +311,7 @@ impl<AppReqId: ReqId> Network<AppReqId> {
         let mut network = Network {
             swarm,
             network_globals,
-            // enr_fork_id,
             network_dir: config.network_dir.clone(),
-            // fork_context: ctx.fork_context,
             score_settings,
             update_gossipsub_scores,
             gossip_cache,
@@ -601,45 +511,6 @@ impl<AppReqId: ReqId> Network<AppReqId> {
         self.subscribe(gossip_topic)
     }
 
-    // /// Unsubscribes from a gossipsub topic kind, letting the network service determine the
-    // /// encoding and fork version.
-    // pub fn unsubscribe_kind(&mut self, kind: GossipKind) -> bool {
-    //     let gossip_topic = GossipTopic::new(
-    //         kind,
-    //         GossipEncoding::default(),
-    //         self.enr_fork_id.fork_digest,
-    //     );
-    //     self.unsubscribe(gossip_topic)
-    // }
-
-    // /// Subscribe to all required topics for the `new_fork` with the given `new_fork_digest`.
-    // pub fn subscribe_new_fork_topics(&mut self, new_fork: ForkName, new_fork_digest: [u8; 4]) {
-    //     // Subscribe to existing topics with new fork digest
-    //     let subscriptions = self.network_globals.gossipsub_subscriptions.read().clone();
-    //     for mut topic in subscriptions.into_iter() {
-    //         topic.fork_digest = new_fork_digest;
-    //         self.subscribe(topic);
-    //     }
-
-    //     // Subscribe to core topics for the new fork
-    //     for kind in fork_core_topics(&new_fork) {
-    //         let topic = GossipTopic::new(kind, GossipEncoding::default(), new_fork_digest);
-    //         self.subscribe(topic);
-    //     }
-    // }
-
-    // /// Unsubscribe from all topics that doesn't have the given fork_digest
-    // pub fn unsubscribe_from_fork_topics_except(&mut self, except: [u8; 4]) {
-    //     let subscriptions = self.network_globals.gossipsub_subscriptions.read().clone();
-    //     for topic in subscriptions
-    //         .iter()
-    //         .filter(|topic| topic.fork_digest != except)
-    //         .cloned()
-    //     {
-    //         self.unsubscribe(topic);
-    //     }
-    // }
-
     /// Subscribes to a gossipsub topic.
     ///
     /// Returns `true` if the subscription was successful and `false` otherwise.
@@ -664,36 +535,17 @@ impl<AppReqId: ReqId> Network<AppReqId> {
         }
     }
 
-    // /// Unsubscribe from a gossipsub topic.
-    // pub fn unsubscribe(&mut self, topic: GossipTopic) -> bool {
-    //     // update the network globals
-    //     self.network_globals
-    //         .gossipsub_subscriptions
-    //         .write()
-    //         .remove(&topic);
-
-    //     // unsubscribe from the topic
-    //     let libp2p_topic: Topic = topic.clone().into();
-
-    //     match self.gossipsub_mut().unsubscribe(&libp2p_topic) {
-    //         Err(_) => {
-    //             warn!(self.log, "Failed to unsubscribe from topic"; "topic" => %libp2p_topic);
-    //             false
-    //         }
-    //         Ok(v) => {
-    //             // Inform the network
-    //             debug!(self.log, "Unsubscribed to topic"; "topic" => %topic);
-    //             v
-    //         }
-    //     }
-    // }
-
     /// Publishes a list of messages on the pubsub (gossipsub) behaviour, choosing the encoding.
     pub fn publish(&mut self, messages: Vec<PubsubMessage>, mempool_ids: Vec<String>) {
         for message in messages {
-            let topics: Vec<GossipTopic> = mempool_ids.iter().map(|mempool_id|GossipTopic::new(message.kind(), GossipEncoding::default(), mempool_id.clone())).collect();
+            let topics: Vec<GossipTopic> = mempool_ids
+                .iter()
+                .map(|mempool_id| {
+                    GossipTopic::new(message.kind(), GossipEncoding::default(), mempool_id.clone())
+                })
+                .collect();
 
-            for topic in topics{//message.topics(GossipEncoding::default(), "Qmf7P3CuhzSbpJa8LqXPwRzfPqsvoQ6RG7aXvthYTzGxb2".to_string()) {
+            for topic in topics {
                 let message_data = message.encode(GossipEncoding::default());
                 if let Err(e) = self
                     .gossipsub_mut()
@@ -701,25 +553,12 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                 {
                     slog::warn!(self.log, "Could not publish message"; "error" => ?e);
 
-                    // add to metrics
-                    match topic.kind() {
-                        // GossipKind::Attestation(subnet_id) => {
-                        //     if let Some(v) = metrics::get_int_gauge(
-                        //         &metrics::FAILED_ATTESTATION_PUBLISHES_PER_SUBNET,
-                        //         &[subnet_id.as_ref()],
-                        //     ) {
-                        //         v.inc()
-                        //     };
-                        // }
-                        kind => {
-                            if let Some(v) = metrics::get_int_gauge(
-                                &metrics::FAILED_PUBLISHES_PER_MAIN_TOPIC,
-                                &[&format!("{:?}", kind)],
-                            ) {
-                                v.inc()
-                            };
-                        }
-                    }
+                    if let Some(v) = metrics::get_int_gauge(
+                        &metrics::FAILED_PUBLISHES_PER_MAIN_TOPIC,
+                        &[&format!("{:?}", topic.kind())],
+                    ) {
+                        v.inc()
+                    };
 
                     if let PublishError::InsufficientPeers = e {
                         self.gossip_cache.insert(topic, message_data);
@@ -765,48 +604,6 @@ impl<AppReqId: ReqId> Network<AppReqId> {
         }
     }
 
-    // /// Updates the current gossipsub scoring parameters based on the validator count and current
-    // /// slot.
-    // pub fn update_gossipsub_parameters(
-    //     &mut self,
-    //     active_validators: usize,
-    //     // current_slot: Slot,
-    // ) -> error::Result<()> {
-    //     // let (beacon_block_params, beacon_aggregate_proof_params, beacon_attestation_subnet_params) =
-    //     //     self.score_settings
-    //     //         .get_dynamic_topic_params(active_validators/*, current_slot*/)?;
-
-    //     let fork_digest = self.enr_fork_id.fork_digest;
-    //     let get_topic = |kind: GossipKind| -> Topic {
-    //         GossipTopic::new(kind, GossipEncoding::default(), fork_digest).into()
-    //     };
-
-    //     debug!(self.log, "Updating gossipsub score parameters";
-    //         "active_validators" => active_validators);
-    //     // trace!(self.log, "Updated gossipsub score parameters";
-    //     //     "beacon_block_params" => ?beacon_block_params,
-    //     //     "beacon_aggregate_proof_params" => ?beacon_aggregate_proof_params,
-    //     //     "beacon_attestation_subnet_params" => ?beacon_attestation_subnet_params,
-    //     // );
-
-    //     // self.gossipsub_mut()
-    //     //     .set_topic_params(get_topic(GossipKind::BeaconBlock), beacon_block_params)?;
-
-    //     // self.gossipsub_mut().set_topic_params(
-    //     //     get_topic(GossipKind::BeaconAggregateAndProof),
-    //     //     beacon_aggregate_proof_params,
-    //     // )?;
-
-    //     // for i in 0..self.score_settings.attestation_subnet_count() {
-    //     //     self.gossipsub_mut().set_topic_params(
-    //     //         get_topic(GossipKind::Attestation(SubnetId::new(i))),
-    //     //         beacon_attestation_subnet_params.clone(),
-    //     //     )?;
-    //     // }
-
-    //     Ok(())
-    // }
-
     /* Eth2 RPC behaviour functions */
 
     /// Send a request to a peer over RPC.
@@ -818,19 +615,14 @@ impl<AppReqId: ReqId> Network<AppReqId> {
         )
     }
 
-     /// Get all peers on a subnet.
-    pub fn get_all_peers(&mut self)->Vec<PeerId>{
-        let peers = self
-        .network_globals
-        .peers
-        .read();
-
-        // let peers_on_subnet = peers.good_peers_on_subnet(subnet);
-        let peers_and_peers_info = peers.peers();
-
-        peers_and_peers_info.map(|(peer_id, _)|{
-            *peer_id
-        }).collect()
+    /// Get all peers.
+    pub fn get_all_peers(&mut self) -> Vec<PeerId> {
+        self.network_globals
+            .peers
+            .read()
+            .peers()
+            .map(|(peer_id, _)| *peer_id)
+            .collect()
     }
 
     /// Send a request to all peers over RPC.
@@ -908,17 +700,6 @@ impl<AppReqId: ReqId> Network<AppReqId> {
         self.discovery_mut().add_enr(enr);
     }
 
-    // /// Updates a subnet value to the ENR attnets/syncnets bitfield.
-    // ///
-    // /// The `value` is `true` if a subnet is being added and false otherwise.
-    // pub fn update_enr_subnet(&mut self, subnet_id: Subnet, value: bool) {
-    //     if let Err(e) = self.discovery_mut().update_enr_bitfield(subnet_id, value) {
-    //         crit!(self.log, "Could not update ENR bitfield"; "error" => e);
-    //     }
-    //     // update the local meta data which informs our peers of the update during PINGS
-    //     self.update_metadata_bitfields();
-    // }
-
     /// Attempts to discover new peers for a given subnet. The `min_ttl` gives the time at which we
     /// would like to retain the peers for.
     pub fn discover_subnet_peers(&mut self, subnets_to_discover: Vec<SubnetDiscovery>) {
@@ -930,23 +711,11 @@ impl<AppReqId: ReqId> Network<AppReqId> {
         let filtered: Vec<SubnetDiscovery> = subnets_to_discover
             .into_iter()
             .filter(|s| {
-                // // Extend min_ttl of connected peers on required subnets
-                // if let Some(min_ttl) = s.min_ttl {
-                //     self.network_globals
-                //         .peers
-                //         .write()
-                //         .extend_peers_on_subnet(&s.subnet, min_ttl);
-                //     if let Subnet::SyncCommittee(sync_subnet) = s.subnet {
-                //         self.peer_manager_mut()
-                //             .add_sync_subnet(sync_subnet, min_ttl);
-                //     }
-                // }
-                // Already have target number of peers, no need for subnet discovery
                 let peers_on_subnet = self
                     .network_globals
                     .peers
                     .read()
-                    .good_peers_on_subnet(/*s.subnet*/)
+                    .good_peers_on_subnet()
                     .count();
                 if peers_on_subnet >= TARGET_SUBNET_PEERS {
                     trace!(
@@ -958,11 +727,7 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                         "target_subnet_peers" => TARGET_SUBNET_PEERS,
                     );
                     false
-                // Queue an outgoing connection request to the cached peers that are on `s.subnet_id`.
-                // If we connect to the cached peers before the discovery query starts, then we potentially
-                // save a costly discovery query.
                 } else {
-                    // self.dial_cached_enrs_in_subnet(s.subnet);
                     true
                 }
             })
@@ -973,48 +738,6 @@ impl<AppReqId: ReqId> Network<AppReqId> {
             self.discovery_mut().discover_subnet_peers(filtered);
         }
     }
-
-    // /// Updates the local ENR's "eth2" field with the latest EnrForkId.
-    // pub fn update_fork_version(&mut self, enr_fork_id: EnrForkId) {
-    //     self.discovery_mut().update_eth2_enr(enr_fork_id.clone());
-
-    //     // update the local reference
-    //     self.enr_fork_id = enr_fork_id;
-    // }
-
-    /* Private internal functions */
-
-    // /// Updates the current meta data of the node to match the local ENR.
-    // fn update_metadata_bitfields(&mut self) {
-    //     let local_mempool_nets = self
-    //         .discovery_mut()
-    //         .local_enr()
-    //         .mempools_bitfield::()
-    //         .expect("Local discovery must have attestation bitfield");
-
-    //     // let local_syncnets = self
-    //     //     .discovery_mut()
-    //     //     .local_enr()
-    //     //     .sync_committee_bitfield::()
-    //     //     .expect("Local discovery must have sync committee bitfield");
-
-    //     {
-    //         // write lock scope
-    //         let mut meta_data = self.network_globals.local_metadata.write();
-
-    //         meta_data.seq_number += 1;
-    //         meta_data.mempool_nets = local_mempool_nets;
-    //         // if let Ok(syncnets) = meta_data.syncnets_mut() {
-    //         //     *syncnets = local_syncnets;
-    //         // }
-    //     }
-    //     // Save the updated metadata to disk
-    //     utils::save_metadata_to_disk(
-    //         &self.network_dir,
-    //         self.network_globals.local_metadata.read().clone(),
-    //         &self.log,
-    //     );
-    // }
 
     /// Sends a Ping request to the peer.
     fn ping(&mut self, peer_id: PeerId) {
@@ -1053,10 +776,6 @@ impl<AppReqId: ReqId> Network<AppReqId> {
         peer_id: PeerId,
     ) {
         let metadata = self.network_globals.local_metadata.read().clone();
-        // let metadata = match req {
-        //     MetadataRequest::V1(_) => metadata.metadata(),
-        //     MetadataRequest::V2(_) => metadata,
-        // };
         let event = RPCCodedResponse::Success(RPCResponse::MetaData(metadata));
         self.eth2_rpc_mut().send_response(peer_id, id, event);
     }
@@ -1098,14 +817,8 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                             response,
                         })
                     },
-                }    
-
-                // Some(NetworkEvent::ResponseReceivedFromInternal {
-                //     peer_id,
-                //     response,
-                // })
-        
-        },
+                }
+            }
         }
     }
 
@@ -1133,32 +846,6 @@ impl<AppReqId: ReqId> Network<AppReqId> {
             peer_id,
             id,
             request,
-        }
-    }
-
-    /// Dial cached Enrs in discovery service that are in the given `subnet_id` and aren't
-    /// in Connected, Dialing or Banned state.
-    #[allow(dead_code)]
-    fn dial_cached_enrs_in_subnet(&mut self, _subnet: Subnet) {
-        // let predicate = subnet_predicate(vec![subnet], &self.log);
-        let peers_to_dial: Vec<Enr> = self
-            .discovery()
-            .cached_enrs()
-            .filter_map(|(_peer_id, _enr)| {
-                // if predicate(enr) {
-                //     Some(enr.clone())
-                // } else {
-                //     None
-                // }
-                None
-            })
-            .collect();
-
-        // Remove the ENR from the cache to prevent continual re-dialing on disconnects
-        for enr in peers_to_dial {
-            debug!(self.log, "Dialing cached ENR peer"; "peer_id" => %enr.peer_id());
-            self.discovery_mut().remove_cached_enr(&enr.peer_id());
-            self.peer_manager_mut().dial_peer(enr);
         }
     }
 
@@ -1204,15 +891,8 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                     }
                 }
             }
-            gossipsub::Event::Subscribed { peer_id: _peer_id, topic } => {
+            gossipsub::Event::Subscribed { peer_id: _, topic } => {
                 if let Ok(topic) = GossipTopic::decode(topic.as_str(), topic_v07, topic_v06) {
-                    // if let Some(subnet_id) = topic.subnet_id() {
-                    //     self.network_globals
-                    //         .peers
-                    //         .write()
-                    //         .add_subscription(&peer_id, subnet_id);
-                    // }
-                    // Try to send the cached messages for this topic
                     if let Some(msgs) = self.gossip_cache.retrieve(&topic) {
                         for data in msgs {
                             let topic_str: &str = topic.kind().as_ref();
@@ -1245,14 +925,7 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                     }
                 }
             }
-            gossipsub::Event::Unsubscribed { peer_id: _peer_id, topic: _topic } => {
-                // if let Some(subnet_id) = subnet_from_topic_hash(&topic) {
-                //     self.network_globals
-                //         .peers
-                //         .write()
-                //         .remove_subscription(&peer_id, &subnet_id);
-                // }
-            }
+            gossipsub::Event::Unsubscribed { .. } => {}
             gossipsub::Event::GossipsubNotSupported { peer_id } => {
                 debug!(self.log, "Peer does not support gossipsub"; "peer_id" => %peer_id);
                 self.peer_manager_mut().report_peer(
