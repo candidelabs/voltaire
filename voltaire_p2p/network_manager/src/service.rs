@@ -222,35 +222,11 @@ impl NetworkService {
         let (libp2p, network_globals) =
             Network::new(config.clone(),&network_log).await?;
 
-        // // Repopulate the DHT with stored ENR's if discovery is not disabled.
-        // if !config.disable_discovery {
-        //     let enrs_to_load = load_dht::<T::EthSpec, T::HotStore, T::ColdStore>(store.clone());
-        //     debug!(
-        //         network_log,
-        //         "Loading peers into the routing table"; "peers" => enrs_to_load.len()
-        //     );
-        //     for enr in enrs_to_load {
-        //         libp2p.add_enr(enr.clone());
-        //     }
-        // }
-
-        // router task
-        // let router_send = Router::spawn(
-        //     network_globals.clone(),
-        //     network_senders.network_send(),
-        //     executor.clone(),
-        //     network_log.clone(),
-        // ).await.unwrap();
-
         // create a timer for updating network metrics
         let metrics_update = tokio::time::interval(Duration::from_secs(METRIC_UPDATE_INTERVAL));
 
-        // // create a timer for updating gossipsub parameters
-        // let gossipsub_parameter_update = tokio::time::interval(Duration::from_secs(60));
-
         let NetworkReceivers {
             network_recv,
-            // validator_subscription_recv,
         } = network_recievers;
         let network = HandlerNetworkContext::new(network_senders.network_send(), network_log.clone());
         // create the network service and spawn the task
@@ -258,7 +234,6 @@ impl NetworkService {
         let network_service:NetworkService = NetworkService {
             libp2p,
             network_recv,
-            // router_send,
             network,
             network_globals: network_globals.clone(),
             upnp_mappings: EstablishedUPnPMappings::default(),
@@ -271,14 +246,6 @@ impl NetworkService {
         
         Ok(network_globals)
     }
-
-
-    // fn send_to_router(&mut self, msg: RouterMessage) {
-    //     if let Err(mpsc::error::SendError(msg)) = self.router_send.send(msg) {
-    //         // debug!(self.log, "Failed to send msg to router"; "msg" => ?msg);
-    //         debug!(self.log, "Failed to send msg to router");
-    //     }
-    // }
 
     fn spawn_service(mut self, executor: task_executor::TaskExecutor, network_send: mpsc::UnboundedSender<NetworkMessage>){//} -> impl Future{
         let mut shutdown_sender = executor.shutdown_sender();
@@ -379,9 +346,6 @@ impl NetworkService {
     ) {
         match ev {
             NetworkEvent::PeerConnectedOutgoing(peer_id) => {
-                // self.send_to_router(RouterMessage::StatusPeer(peer_id));
-                // let status_message = status_message(0, H256::default(),0);
-
                 let message_to_send = BundlerGossibRequest {
                     request_type:"p2p_status_received".to_string(), 
                     request_arguments:MessageTypeToBundler::StatusToBundler()
@@ -394,13 +358,8 @@ impl NetworkService {
 
                 self.network.send_processor_request(peer_id, Request::Status(status_message));
             }
-            NetworkEvent::PeerConnectedIncoming(_) => {
-                // No action required for this event.
-            }
-            NetworkEvent::PeerDisconnected(_peer_id) => {
-                // self.send_to_router(RouterMessage::PeerDisconnected(peer_id));
-                // self.network.send_to_sync(SyncMessage::Disconnect(peer_id));
-            }
+            NetworkEvent::PeerConnectedIncoming(_) => {}
+            NetworkEvent::PeerDisconnected(_peer_id) => {}
             NetworkEvent::RequestReceived {
                 peer_id,
                 id,
@@ -444,22 +403,12 @@ impl NetworkService {
                 id,
                 response,
             } => {
-                // self.send_to_router(RouterMessage::RPCResponseReceived {
-                //     peer_id,
-                //     request_id: id,
-                //     response,
-                // });
                 self.handle_rpc_response(peer_id, id, response);
             }
             NetworkEvent::RPCFailed { id, peer_id } => {
-                // self.send_to_router(RouterMessage::RPCFailed {
-                //     peer_id,
-                //     request_id: id,
-                // });
                 self.on_rpc_error(peer_id, id);
             }
             NetworkEvent::StatusPeer(peer_id) => {
-                //self.send_to_router(RouterMessage::StatusPeer(peer_id));
                 self.send_status(peer_id).await;
             }
             NetworkEvent::PubsubMessage {
@@ -613,44 +562,14 @@ impl NetworkService {
                 reason,
                 source,
             } => self.libp2p.goodbye_peer(&peer_id, reason, source),
-            NetworkMessage::SubscribeCoreTopics => {
-                // if self.subscribed_core_topics() {
-                //     return;
-                // }
-
-                // let mut subscribed_topics: Vec<GossipTopic> = vec![];
-                // let topic = GossipTopic::new(GossipKind::VerifiedUserOperation, GossipEncoding::default(), "Qmf7P3CuhzSbpJa8LqXPwRzfPqsvoQ6RG7aXvthYTzGxb2".to_string());
-                // if self.libp2p.subscribe(topic.clone()) {
-                //     subscribed_topics.push(topic);
-                // } else {
-                //     warn!(self.log, "Could not subscribe to topic"; "topic" => %topic);
-                // }
-
-                // if !subscribed_topics.is_empty() {
-                //     info!(
-                //         self.log,
-                //         "Subscribed to topics";
-                //         "topics" => ?subscribed_topics.into_iter().map(|topic| format!("{}", topic)).collect::<Vec<_>>()
-                //     );
-                // }
-            }
+            NetworkMessage::SubscribeCoreTopics => {}
             NetworkMessage::PooledUserOpHashesRequestMessageToAllPeers { pooled_user_op_hashes_request: _ } => {
                 self.libp2p.send_outbound_pooled_user_op_hashes_request_to_all_peers()
             },
             NetworkMessage::PooledUserOpHashesRequestMessage { id, peer_id, pooled_user_op_hashes_request } => {
-                // self.send_to_router(RouterMessage::PooledUserOpHashesRequest (
-                //     RequestId::FromMainBundler(id),
-                //     PeerId::from_str(&peer_id).unwrap() ,
-                //     pooled_user_op_hashes_request
-                // ));
                 self.network.send_request(RequestId::FromMainBundler(id), PeerId::from_str(&peer_id).unwrap(), Request::PooledUserOpHashes(pooled_user_op_hashes_request));
             },
             NetworkMessage::PooledUserOpsByHashRequestMessage { id, peer_id, pooled_user_ops_by_hash_request } => {
-                // self.send_to_router(RouterMessage::PooledUserOpsByHashRequest (
-                //     RequestId::FromMainBundler(id),
-                //     PeerId::from_str(&peer_id).unwrap() ,
-                //     pooled_user_ops_by_hash_request
-                // ));
                 self.network.send_request(
                     RequestId::FromMainBundler(id), PeerId::from_str(&peer_id).unwrap(), Request::PooledUserOpsByHash(pooled_user_ops_by_hash_request));
             },
@@ -770,12 +689,11 @@ impl NetworkService {
     ) {
         match response {
             Response::Status(status_message) => {
-                debug!(self.log, "Received Status Response"; "peer_id" => %peer_id, 
+                debug!(self.log, "Received Status Response"; "peer_id" => %peer_id,
                     "chain_id" => status_message.chain_id,
                     "block_hash" => status_message.block_hash.to_string(),
                     "block_number" => status_message.block_number,
                 );
-                // let status_message = status_message_op.unwrap();
 
                 self.network.inform_network(NetworkMessage::StatusResponse {
                     peer_id,
@@ -817,8 +735,6 @@ impl NetworkService {
 
 
     async fn send_status(&mut self, peer_id: PeerId) {
-        // let status_message = status_message(0, H256::default(),0);
-
         let message_to_send = BundlerGossibRequest {
             request_type:"p2p_status_received".to_string(), 
             request_arguments:MessageTypeToBundler::StatusToBundler()
