@@ -69,24 +69,6 @@ impl NetworkBehaviour for PeerManager {
             }
         }
 
-        // if !matches!(
-        //     self.network_globals.sync_state(),
-        //     SyncState::SyncingFinalized { .. } | SyncState::SyncingHead { .. }
-        // ) {
-        //     loop {
-        //         match self.status_peers.poll_next_unpin(cx) {
-        //             Poll::Ready(Some(Ok(peer_id))) => {
-        //                 self.status_peers.insert(peer_id);
-        //                 self.events.push(PeerManagerEvent::Status(peer_id))
-        //             }
-        //             Poll::Ready(Some(Err(e))) => {
-        //                 error!(self.log, "Failed to check for peers to ping"; "error" => e.to_string())
-        //             }
-        //             Poll::Ready(None) | Poll::Pending => break,
-        //         }
-        //     }
-        // }
-
         if !self.events.is_empty() {
             return Poll::Ready(ToSwarm::GenerateEvent(self.events.remove(0)));
         } else {
@@ -266,12 +248,6 @@ impl PeerManager {
         let count_dialing = endpoint.is_listener();
         // Check the connection limits
         if self.peer_limit_reached(count_dialing)
-            // && self
-            //     .network_globals
-            //     .peers
-            //     .read()
-            //     .peer_info(&peer_id)
-            //     .map_or(true, |peer| !peer.has_future_duty())
         {
             // Gracefully disconnect the peer.
             self.disconnect_peer(peer_id, GoodbyeReason::TooManyPeers);

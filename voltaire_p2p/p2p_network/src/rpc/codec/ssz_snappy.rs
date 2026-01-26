@@ -121,9 +121,6 @@ impl Decoder for SSZSnappyInboundCodec {
         if self.protocol.versioned_protocol == SupportedProtocol::MetaDataV1 {
             return Ok(Some(InboundRequest::MetaData(MetadataRequest::new())));
         }
-        // if self.protocol.versioned_protocol == SupportedProtocol::MetaDataV2 {
-        //     return Ok(Some(InboundRequest::MetaData(MetadataRequest::new_v2())));
-        // }
         let length = match handle_length(&mut self.inner, &mut self.len, src)? {
             Some(len) => len,
             None => return Ok(None),

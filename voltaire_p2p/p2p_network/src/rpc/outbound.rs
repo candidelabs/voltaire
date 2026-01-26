@@ -150,7 +150,6 @@ where
                 let ssz_snappy_codec = BaseOutboundCodec::new(SSZSnappyOutboundCodec::new(
                     protocol,
                     self.max_rpc_size,
-                    // self.fork_context.clone(),
                 ));
                 OutboundCodec::SSZSnappy(ssz_snappy_codec)
             }

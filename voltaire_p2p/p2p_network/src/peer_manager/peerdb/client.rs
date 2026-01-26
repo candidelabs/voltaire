@@ -9,7 +9,7 @@ use strum::{AsRefStr, EnumIter, IntoStaticStr};
 /// Various client and protocol information related to a node.
 #[derive(Clone, Debug, Serialize)]
 pub struct Client {
-    /// The client's name (Ex: Voltaire, prism, nimbus, etc)
+    /// The client's name (Ex: Voltaire, Skandha, etc)
     pub kind: ClientKind,
     /// The client's version.
     pub version: String,
@@ -25,14 +25,8 @@ pub struct Client {
 pub enum ClientKind {
     /// A Voltaire node (the best kind).
     Voltaire,
-    /// A Nimbus node.
-    Nimbus,
     /// A Skandha node.
     Skandha,
-    /// A Prysm node.
-    Prysm,
-    /// A lodestar node.
-    Lodestar,
     /// An unknown client.
     Unknown,
 }
@@ -77,17 +71,6 @@ impl std::fmt::Display for Client {
                 "Skandha: version: {}, os_version: {}",
                 self.version, self.os_version
             ),
-            ClientKind::Nimbus => write!(
-                f,
-                "Nimbus: version: {}, os_version: {}",
-                self.version, self.os_version
-            ),
-            ClientKind::Prysm => write!(
-                f,
-                "Prysm: version: {}, os_version: {}",
-                self.version, self.os_version
-            ),
-            ClientKind::Lodestar => write!(f, "Lodestar: version: {}", self.version),
             ClientKind::Unknown => {
                 if let Some(agent_string) = &self.agent_string {
                     write!(f, "Unknown: {}", agent_string)
@@ -132,63 +115,6 @@ fn client_from_agent_version(agent_version: &str) -> (ClientKind, String, String
                     if let Some(agent_os_version) = agent_split.next() {
                         os_version = agent_os_version.into();
                     }
-                }
-            }
-            (kind, version, os_version)
-        }
-        Some("github.com") => {
-            let kind = ClientKind::Prysm;
-            let unknown = String::from("unknown");
-            (kind, unknown.clone(), unknown)
-        }
-        Some("Prysm") => {
-            let kind = ClientKind::Prysm;
-            let mut version = String::from("unknown");
-            let mut os_version = version.clone();
-            if agent_split.next().is_some() {
-                if let Some(agent_version) = agent_split.next() {
-                    version = agent_version.into();
-                    if let Some(agent_os_version) = agent_split.next() {
-                        os_version = agent_os_version.into();
-                    }
-                }
-            }
-            (kind, version, os_version)
-        }
-        Some("nimbus") => {
-            let kind = ClientKind::Nimbus;
-            let mut version = String::from("unknown");
-            let mut os_version = version.clone();
-            if agent_split.next().is_some() {
-                if let Some(agent_version) = agent_split.next() {
-                    version = agent_version.into();
-                    if let Some(agent_os_version) = agent_split.next() {
-                        os_version = agent_os_version.into();
-                    }
-                }
-            }
-            (kind, version, os_version)
-        }
-        Some("nim-libp2p") => {
-            let kind = ClientKind::Nimbus;
-            let mut version = String::from("unknown");
-            let mut os_version = version.clone();
-            if let Some(agent_version) = agent_split.next() {
-                version = agent_version.into();
-                if let Some(agent_os_version) = agent_split.next() {
-                    os_version = agent_os_version.into();
-                }
-            }
-            (kind, version, os_version)
-        }
-        Some("js-libp2p") | Some("lodestar") => {
-            let kind = ClientKind::Lodestar;
-            let mut version = String::from("unknown");
-            let mut os_version = version.clone();
-            if let Some(agent_version) = agent_split.next() {
-                version = agent_version.into();
-                if let Some(agent_os_version) = agent_split.next() {
-                    os_version = agent_os_version.into();
                 }
             }
             (kind, version, os_version)
