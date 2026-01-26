@@ -8,7 +8,6 @@ use if_addrs::get_if_addrs;
 use slog::{debug, info};
 use std::net::{IpAddr, SocketAddr, SocketAddrV4};
 use tokio::sync::mpsc;
-//use types::eth_spec::EthSpec;
 
 /// Configuration required to construct the UPnP port mappings.
 pub struct UPnPConfig {
