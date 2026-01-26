@@ -8,7 +8,7 @@ use libp2p::identity::PeerId;
 use libp2p::swarm::behaviour::{ConnectionClosed, ConnectionEstablished, DialFailure, FromSwarm};
 use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use libp2p::swarm::dummy::ConnectionHandler;
-use libp2p::swarm::{ConnectionId, NetworkBehaviour, PollParameters, ToSwarm};
+use libp2p::swarm::{ConnectionId, NetworkBehaviour, ToSwarm};
 use slog::{debug, error};
 
 use crate::discovery::enr_ext::EnrExt;
@@ -37,8 +37,7 @@ impl NetworkBehaviour for PeerManager {
     fn poll(
         &mut self,
         cx: &mut Context<'_>,
-        _params: &mut impl PollParameters,
-    ) -> Poll<ToSwarm<Self::ToSwarm, void::Void>> {
+    ) -> Poll<ToSwarm<Self::ToSwarm, std::convert::Infallible>> {
         // perform the heartbeat when necessary
         while self.heartbeat.poll_tick(cx).is_ready() {
             self.heartbeat();
@@ -119,7 +118,7 @@ impl NetworkBehaviour for PeerManager {
         Poll::Pending
     }
 
-    fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {
+    fn on_swarm_event(&mut self, event: FromSwarm) {
         match event {
             FromSwarm::ConnectionEstablished(ConnectionEstablished {
                 peer_id,
@@ -165,6 +164,7 @@ impl NetworkBehaviour for PeerManager {
                 // The rest of the events we ignore since they are handled in their associated
                 // `SwarmEvent`
             }
+            _ => {}
         }
     }
 
@@ -185,6 +185,7 @@ impl NetworkBehaviour for PeerManager {
         _peer: PeerId,
         _addr: &libp2p::Multiaddr,
         _role_override: libp2p::core::Endpoint,
+        _port_use: libp2p::core::transport::PortUse,
     ) -> Result<libp2p::swarm::THandler<Self>, libp2p::swarm::ConnectionDenied> {
         // TODO: we might want to check if we accept this peer or not in the future.
         Ok(ConnectionHandler)

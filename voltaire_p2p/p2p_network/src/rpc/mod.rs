@@ -7,10 +7,10 @@
 use futures::future::FutureExt;
 use handler::{HandlerEvent, RPCHandler};
 use libp2p::swarm::{
-    handler::ConnectionHandler, ConnectionId, NetworkBehaviour, NotifyHandler, PollParameters,
-    ToSwarm,
+    handler::ConnectionHandler, ConnectionId, NetworkBehaviour, NotifyHandler,
+    ToSwarm, SubstreamProtocol,
 };
-use libp2p::swarm::{FromSwarm, SubstreamProtocol, THandlerInEvent};
+use libp2p::swarm::{FromSwarm, THandlerInEvent};
 use libp2p::PeerId;
 use rate_limiter::{RPCRateLimiter as RateLimiter, RateLimitedErr};
 use slog::{crit, debug, o};
@@ -251,6 +251,7 @@ where
         peer_id: PeerId,
         _addr: &libp2p::Multiaddr,
         _role_override: libp2p::core::Endpoint,
+        _port_use: libp2p::core::transport::PortUse,
     ) -> Result<libp2p::swarm::THandler<Self>, libp2p::swarm::ConnectionDenied> {
         let protocol = SubstreamProtocol::new(
             RPCProtocol {
@@ -273,7 +274,7 @@ where
         Ok(handler)
     }
 
-    fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {
+    fn on_swarm_event(&mut self, event: FromSwarm) {
         match event {
             FromSwarm::ConnectionClosed(_)
             | FromSwarm::ConnectionEstablished(_)
@@ -291,6 +292,7 @@ where
                 // Rpc Behaviour does not act on these swarm events. We use a comprehensive match
                 // statement to ensure future events are dealt with appropriately.
             }
+            _ => {}
         }
     }
 
@@ -367,7 +369,6 @@ where
     fn poll(
         &mut self,
         cx: &mut Context,
-        _: &mut impl PollParameters,
     ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         // let the rate limiter prune.
         if let Some(limiter) = self.limiter.as_mut() {

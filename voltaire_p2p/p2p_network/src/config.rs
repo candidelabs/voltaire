@@ -1,7 +1,7 @@
 use crate::listen_addr::{ListenAddr, ListenAddress};
 use crate::rpc::config::{InboundRateLimiterConfig, OutboundRateLimiterConfig};
 use crate::{Enr, PeerIdSerialized};
-use discv5::{Discv5Config, Discv5ConfigBuilder};
+use discv5::{Config as Discv5Config, ConfigBuilder as Discv5ConfigBuilder};
 use libp2p::gossipsub;
 use libp2p::Multiaddr;
 use serde_derive::{Deserialize, Serialize};
@@ -408,12 +408,6 @@ pub fn gossipsub_config(
     network_load: u8,
     gossipsub_config_params: GossipsubConfigParams,
 ) -> gossipsub::Config {
-    // The function used to generate a gossipsub message id
-    // We use the first 8 bytes of SHA256(topic, data) for content addressing
-    let fast_gossip_message_id = |message: &gossipsub::RawMessage| {
-        let data = [message.topic.as_str().as_bytes(), &message.data].concat();
-        gossipsub::FastMessageId::from(&Sha256::digest(&data)[..8])
-    };
     fn prefix(
         prefix: [u8; 4],
         message: &gossipsub::Message,
@@ -459,7 +453,6 @@ pub fn gossipsub_config(
         .validation_mode(gossipsub::ValidationMode::Anonymous)
         .duplicate_cache_time(DUPLICATE_CACHE_TIME)
         .message_id_fn(gossip_message_id)
-        .fast_message_id_fn(fast_gossip_message_id)
         .allow_self_origin(true)
         .build()
         .expect("valid gossipsub configuration")
