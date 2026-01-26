@@ -5,7 +5,6 @@ use crate::rpc::{InboundRequest, OutboundRequest, RPCCodedResponse, RPCResponse}
 use libp2p::bytes::BufMut;
 use libp2p::bytes::BytesMut;
 use tokio_util::codec::{Decoder, Encoder};
-// use types::EthSpec;
 
 pub trait OutboundCodec<TItem>: Encoder<TItem> + Decoder {
     type CodecErrorType;
