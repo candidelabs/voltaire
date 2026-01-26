@@ -521,7 +521,7 @@ impl PeerManager {
                 RPCResponseErrorCode::RateLimited => match protocol {
                     Protocol::Ping => PeerAction::MidToleranceError,
                     Protocol::PooledUserOpHashes => PeerAction::MidToleranceError,
-                    Protocol::PooledUserOpsByHashV07 => PeerAction::MidToleranceError,
+                    Protocol::PooledUserOpsByHashV07V08V09 => PeerAction::MidToleranceError,
                     Protocol::PooledUserOpsByHashV06 => PeerAction::MidToleranceError,
                     Protocol::Goodbye => PeerAction::LowToleranceError,
                     Protocol::MetaData => PeerAction::LowToleranceError,
@@ -537,7 +537,7 @@ impl PeerManager {
                 match protocol {
                     Protocol::Ping => PeerAction::Fatal,
                     Protocol::PooledUserOpHashes => return,
-                    Protocol::PooledUserOpsByHashV07 => return,
+                    Protocol::PooledUserOpsByHashV07V08V09 => return,
                     Protocol::PooledUserOpsByHashV06 => return,
                     Protocol::Goodbye => return,
                     Protocol::MetaData => PeerAction::Fatal,
@@ -553,7 +553,7 @@ impl PeerManager {
                 ConnectionDirection::Outgoing => match protocol {
                     Protocol::Ping => PeerAction::LowToleranceError,
                     Protocol::PooledUserOpHashes => PeerAction::MidToleranceError,
-                    Protocol::PooledUserOpsByHashV07 => PeerAction::MidToleranceError,
+                    Protocol::PooledUserOpsByHashV07V08V09 => PeerAction::MidToleranceError,
                     Protocol::PooledUserOpsByHashV06 => PeerAction::MidToleranceError,
                     Protocol::Goodbye => return,
                     Protocol::MetaData => return,

@@ -112,7 +112,7 @@ pub struct Eip7702Auth {
     // arbitrary::Arbitrary,
 )]
 #[ssz(struct_behaviour = "container")]
-pub struct UserOperationV07 {
+pub struct UserOperationV07V08V09 {
     /// The account making the operation.
     pub sender: Address,
     /// Anti-replay parameter (see "Semi-abstracted Nonce Support" ).
@@ -168,9 +168,9 @@ pub struct UserOperationV07 {
     Decode,
     // TreeHash,
 )]
-pub struct VerifiedUserOperationV07 {
+pub struct VerifiedUserOperationV07V08V09 {
     /// The user operations.
-    pub user_operation: UserOperationV07,
+    pub user_operation: UserOperationV07V08V09,
     /// The entrypoint contract address.
     pub entry_point_contract: Address,
     //// The block where the useroperations are verified.

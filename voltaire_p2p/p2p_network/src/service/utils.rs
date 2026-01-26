@@ -195,7 +195,7 @@ pub(crate) fn create_whitelist_filter(
             possible_hashes.insert(topic.hash());
         };
 
-        add(GossipKind::VerifiedUserOperationV07);
+        add(GossipKind::VerifiedUserOperationV07V08V09);
         add(GossipKind::VerifiedUserOperationV06);
     }
     gossipsub::WhitelistSubscriptionFilter(possible_hashes)
