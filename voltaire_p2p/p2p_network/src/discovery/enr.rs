@@ -195,7 +195,7 @@ fn compare_enr(local_enr: &Enr, disk_enr: &Enr) -> bool {
         && (local_enr.udp6().is_none() || local_enr.udp6() == disk_enr.udp6())
         // we need the mempools_bitfield_ENR_KEY and SYNC_COMMITTEE_BITFIELD_ENR_KEY key to match,
         // otherwise we use a new ENR. This will likely only be true for non-validating nodes
-        && local_enr.get(CHAIN_ID) == disk_enr.get(CHAIN_ID)
+        && local_enr.get_raw_rlp(CHAIN_ID) == disk_enr.get_raw_rlp(CHAIN_ID)
         // && local_enr.get(SYNC_COMMITTEE_BITFIELD_ENR_KEY) == disk_enr.get(SYNC_COMMITTEE_BITFIELD_ENR_KEY)
 }
 

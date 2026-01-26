@@ -220,7 +220,7 @@ impl NetworkService {
 
         // launch libp2p service
         let (libp2p, network_globals) =
-            Network::new(executor.clone(), /*service_context,*/ config.clone(),&network_log).await?;
+            Network::new(config.clone(),&network_log).await?;
 
         // // Repopulate the DHT with stored ENR's if discovery is not disabled.
         // if !config.disable_discovery {
@@ -356,9 +356,6 @@ impl NetworkService {
                    
 
                     _ = self.metrics_update.tick(), if self.metrics_enabled => {
-                        // update various network metrics
-                        metrics::update_gossip_metrics();
-                      
                     }
 
                     // handle a message sent to the network
@@ -367,7 +364,6 @@ impl NetworkService {
                     event = self.libp2p.next_event() => self.on_libp2p_event(event, &mut shutdown_sender).await,
 
                 }
-                metrics::update_bandwidth_metrics(self.libp2p.bandwidth.clone());
             } 
            
         };
