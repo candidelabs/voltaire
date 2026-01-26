@@ -417,8 +417,8 @@ impl<AppReqId: ReqId> Network<AppReqId> {
         let mut subscribed_topics: Vec<GossipKind> = vec![];
 
         for topic_kind in &config.topics {
-            if self.subscribe_kind(GossipKind::VerifiedUserOperationV07, topic_kind.to_string()) {
-                subscribed_topics.push(GossipKind::VerifiedUserOperationV07);
+            if self.subscribe_kind(GossipKind::VerifiedUserOperationV07V08V09, topic_kind.to_string()) {
+                subscribed_topics.push(GossipKind::VerifiedUserOperationV07V08V09);
             }else if self.subscribe_kind(GossipKind::VerifiedUserOperationV06, topic_kind.to_string()) {
                 subscribed_topics.push(GossipKind::VerifiedUserOperationV06);
             } else {
@@ -791,7 +791,7 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                             response,
                         })
                     },
-                    Response::PooledUserOpsByHashV07(_) => {
+                    Response::PooledUserOpsByHashV07V08V09(_) => {
                         Some(NetworkEvent::ResponseReceivedFromInternal {
                             peer_id,
                             response,
@@ -844,7 +844,7 @@ impl<AppReqId: ReqId> Network<AppReqId> {
     ) -> Option<NetworkEvent<AppReqId>> {
         let subscriptions = self.network_globals.gossipsub_subscriptions.read().clone();
         let mut subscriptions_iter = subscriptions.iter();
-        let topic_v07 = subscriptions_iter.next().unwrap();
+        let topic_v07v08v09 = subscriptions_iter.next().unwrap();
         let topic_v06 = subscriptions_iter.next().unwrap();
         match event {
             gossipsub::Event::Message {
@@ -854,7 +854,7 @@ impl<AppReqId: ReqId> Network<AppReqId> {
             } => {
                 // Note: We are keeping track here of the peer that sent us the message, not the
                 // peer that originally published the message.
-                match PubsubMessage::decode(&gs_msg.topic, &gs_msg.data, topic_v07, topic_v06) {
+                match PubsubMessage::decode(&gs_msg.topic, &gs_msg.data, topic_v07v08v09, topic_v06) {
                     Err(e) => {
                         debug!(self.log, "Could not decode gossipsub message"; "topic" => ?gs_msg.topic,"error" => e);
                         //reject the message
@@ -878,7 +878,7 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                 }
             }
             gossipsub::Event::Subscribed { peer_id: _, topic } => {
-                if let Ok(topic) = GossipTopic::decode(topic.as_str(), topic_v07, topic_v06) {
+                if let Ok(topic) = GossipTopic::decode(topic.as_str(), topic_v07v08v09, topic_v06) {
                     if let Some(msgs) = self.gossip_cache.retrieve(&topic) {
                         for data in msgs {
                             let topic_str: &str = topic.kind().as_ref();
@@ -1056,8 +1056,8 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                     RPCResponse::PooledUserOpHashes(pooled_user_op_hashes) => {
                         self.build_response(id, peer_id, Response::PooledUserOpHashes(Some(pooled_user_op_hashes)))
                     }
-                    RPCResponse::PooledUserOpsByHashV07(resp) => {
-                        self.build_response(id, peer_id, Response::PooledUserOpsByHashV07(Some(resp)))
+                    RPCResponse::PooledUserOpsByHashV07V08V09(resp) => {
+                        self.build_response(id, peer_id, Response::PooledUserOpsByHashV07V08V09(Some(resp)))
                     }
                     RPCResponse::PooledUserOpsByHashV06(resp) => {
                         self.build_response(id, peer_id, Response::PooledUserOpsByHashV06(Some(resp)))
@@ -1068,7 +1068,7 @@ impl<AppReqId: ReqId> Network<AppReqId> {
 
                 let response = match termination {
                     ResponseTermination::PooledUserOpHashes => Response::PooledUserOpHashes(None),
-                    ResponseTermination::PooledUserOpsByHashV07 => Response::PooledUserOpsByHashV07(None),
+                    ResponseTermination::PooledUserOpsByHashV07V08V09 => Response::PooledUserOpsByHashV07V08V09(None),
                     ResponseTermination::PooledUserOpsByHashV06 => Response::PooledUserOpsByHashV06(None),
                 };
               

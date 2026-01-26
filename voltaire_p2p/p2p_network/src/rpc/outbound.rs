@@ -68,7 +68,7 @@ impl OutboundRequest {
             )],
             OutboundRequest::PooledUserOpsByHash(_) => vec![
                 ProtocolId::new(
-                    SupportedProtocol::PooledUserOpsByHashV07,
+                    SupportedProtocol::PooledUserOpsByHashV07V08V09,
                     Encoding::SSZSnappy,
                 ),
                 ProtocolId::new(
@@ -106,7 +106,7 @@ impl OutboundRequest {
             OutboundRequest::Status(_) => SupportedProtocol::StatusV1,
             OutboundRequest::Goodbye(_) => SupportedProtocol::GoodbyeV1,
             OutboundRequest::PooledUserOpHashes(_) => SupportedProtocol::PooledUserOpHashesV1,
-            OutboundRequest::PooledUserOpsByHash(_) => SupportedProtocol::PooledUserOpsByHashV07,
+            OutboundRequest::PooledUserOpsByHash(_) => SupportedProtocol::PooledUserOpsByHashV07V08V09,
             OutboundRequest::Ping(_) => SupportedProtocol::PingV1,
             OutboundRequest::MetaData(_) => SupportedProtocol::MetaDataV1,
         }
@@ -119,7 +119,7 @@ impl OutboundRequest {
             // this only gets called after `multiple_responses()` returns true. Therefore, only
             // variants that have `multiple_responses()` can have values.
             OutboundRequest::PooledUserOpHashes(_) => ResponseTermination::PooledUserOpHashes,
-            OutboundRequest::PooledUserOpsByHash(_) => ResponseTermination::PooledUserOpsByHashV07,
+            OutboundRequest::PooledUserOpsByHash(_) => ResponseTermination::PooledUserOpsByHashV07V08V09,
             OutboundRequest::Status(_) => unreachable!(),
             OutboundRequest::Goodbye(_) => unreachable!(),
             OutboundRequest::Ping(_) => unreachable!(),
