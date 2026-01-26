@@ -1,13 +1,11 @@
 //! A collection of variables that are accessible outside of the network thread itself.
 use crate::peer_manager::peerdb::PeerDB;
 use crate::rpc::MetaData;
-// use crate::types::{BackFillState, SyncState};
 use crate::Client;
 use crate::EnrExt;
 use crate::{Enr, GossipTopic, Multiaddr, PeerId};
 use parking_lot::RwLock;
 use std::collections::HashSet;
-// use types::EthSpec;
 
 pub struct NetworkGlobals {
     /// The current local ENR.

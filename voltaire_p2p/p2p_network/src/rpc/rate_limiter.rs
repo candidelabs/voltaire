@@ -10,7 +10,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 use tokio::time::Interval;
-// use types::EthSpec;
 
 /// Nanoseconds since a given time.
 // Maintained as u64 to reduce footprint

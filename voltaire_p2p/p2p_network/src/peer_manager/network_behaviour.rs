@@ -13,7 +13,6 @@ use slog::{debug, error};
 
 use crate::discovery::enr_ext::EnrExt;
 use crate::rpc::GoodbyeReason;
-// use crate::types::SyncState;
 use crate::{metrics, ClearDialError};
 
 use super::peerdb::BanResult;

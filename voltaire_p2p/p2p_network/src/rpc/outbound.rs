@@ -16,7 +16,7 @@ use tokio_util::{
     codec::Framed,
     compat::{Compat, FuturesAsyncReadCompatExt},
 };
-// use types::{EthSpec, ForkContext};
+
 /* Outbound request */
 
 // Combines all the RPC requests into a single enum to implement `UpgradeInfo` and
