@@ -21,7 +21,6 @@ use crate::{error, metrics, Enr, NetworkGlobals, PubsubMessage, TopicHash};
 use api_types::{PeerRequestId, Request, RequestId, Response};
 use futures::stream::StreamExt;
 use gossipsub_scoring_parameters::{voltaire_gossip_thresholds, PeerScoreSettings};
-use libp2p::bandwidth::BandwidthSinks;
 use libp2p::gossipsub::{
     self, IdentTopic as Topic, MessageAcceptance, MessageAuthenticity, MessageId, PublishError,
 };
@@ -121,8 +120,6 @@ pub struct Network<AppReqId: ReqId> {
     /// The interval for updating gossipsub scores
     update_gossipsub_scores: tokio::time::Interval,
     gossip_cache: GossipCache,
-    /// The bandwidth logger for the underlying libp2p transport.
-    pub bandwidth: Arc<BandwidthSinks>,
     /// This node's PeerId.
     pub local_peer_id: PeerId,
     /// Logger for behaviour actions.
@@ -195,7 +192,6 @@ impl<AppReqId: ReqId> Network<AppReqId> {
             let gossipsub = Gossipsub::new_with_subscription_filter_and_transform(
                 MessageAuthenticity::Anonymous,
                 config.gs_config.clone(),
-                None,
                 filter,
                 snappy_transform,
             )
@@ -291,9 +287,9 @@ impl<AppReqId: ReqId> Network<AppReqId> {
             }
         };
 
-        let (swarm, bandwidth) = {
+        let swarm = {
             // Set up the transport - tcp/ws with noise and mplex
-            let (transport, bandwidth) =
+            let transport =
                 build_transport(local_keypair.clone(), !config.disable_quic_support)
                     .map_err(|e| format!("Failed to build transport: {:?}", e))?;
 
@@ -302,10 +298,7 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                 .with_notify_handler_buffer_size(std::num::NonZeroUsize::new(7).expect("Not zero"))
                 .with_per_connection_event_buffer_size(4);
 
-            (
-                Swarm::new(transport, behaviour, local_peer_id, swarm_config),
-                bandwidth,
-            )
+            Swarm::new(transport, behaviour, local_peer_id, swarm_config)
         };
 
         let mut network = Network {
@@ -315,7 +308,6 @@ impl<AppReqId: ReqId> Network<AppReqId> {
             score_settings,
             update_gossipsub_scores,
             gossip_cache,
-            bandwidth,
             local_peer_id,
             log,
         };
@@ -560,7 +552,7 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                         v.inc()
                     };
 
-                    if let PublishError::InsufficientPeers = e {
+                    if let PublishError::NoPeersSubscribedToTopic = e {
                         self.gossip_cache.insert(topic, message_data);
                     }
                 }
@@ -595,12 +587,12 @@ impl<AppReqId: ReqId> Network<AppReqId> {
             }
         }
 
-        if let Err(e) = self.gossipsub_mut().report_message_validation_result(
+        if ! self.gossipsub_mut().report_message_validation_result(
             &message_id,
             propagation_source,
             validation_result,
         ) {
-            warn!(self.log, "Failed to report message validation"; "message_id" => %message_id, "peer_id" => %propagation_source, "error" => ?e);
+            warn!(self.log, "Failed to report message validation"; "message_id" => %message_id, "peer_id" => %propagation_source);
         }
     }
 
@@ -872,12 +864,12 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                     Err(e) => {
                         debug!(self.log, "Could not decode gossipsub message"; "topic" => ?gs_msg.topic,"error" => e);
                         //reject the message
-                        if let Err(e) = self.gossipsub_mut().report_message_validation_result(
+                        if !self.gossipsub_mut().report_message_validation_result(
                             &id,
                             &propagation_source,
                             MessageAcceptance::Reject,
                         ) {
-                            warn!(self.log, "Failed to report message validation"; "message_id" => %id, "peer_id" => %propagation_source, "error" => ?e);
+                            warn!(self.log, "Failed to report message validation"; "message_id" => %id, "peer_id" => %propagation_source);
                         }
                     }
                     Ok(msg) => {
@@ -936,6 +928,7 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                     "does_not_support_gossipsub",
                 );
             }
+            gossipsub::Event::SlowPeer { .. } => {}
         }
         None
     }
@@ -1096,7 +1089,7 @@ impl<AppReqId: ReqId> Network<AppReqId> {
         event: identify::Event,
     ) -> Option<NetworkEvent<AppReqId>> {
         match event {
-            identify::Event::Received { peer_id, mut info } => {
+            identify::Event::Received { peer_id, mut info, .. } => {
                 if info.listen_addrs.len() > MAX_IDENTIFY_ADDRESSES {
                     debug!(
                         self.log,
@@ -1188,7 +1181,7 @@ impl<AppReqId: ReqId> Network<AppReqId> {
             let maybe_event = match swarm_event {
                 SwarmEvent::Behaviour(behaviour_event) => match behaviour_event {
                     // Handle sub-behaviour events.
-                    BehaviourEvent::BannedPeers(void) => void::unreachable(void),
+                    BehaviourEvent::BannedPeers(v) => match v {},
                     BehaviourEvent::Gossipsub(ge) => self.inject_gs_event(ge),
                     BehaviourEvent::Eth2Rpc(re) => self.inject_rpc_event(re),
                     // Inform the peer manager about discovered peers.
@@ -1201,7 +1194,7 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                     }
                     BehaviourEvent::Identify(ie) => self.inject_identify_event(ie),
                     BehaviourEvent::PeerManager(pe) => self.inject_pm_event(pe),
-                    BehaviourEvent::ConnectionLimits(le) => void::unreachable(le),
+                    BehaviourEvent::ConnectionLimits(v) => match v {},
                 },
                 SwarmEvent::ConnectionEstablished { .. } => None,
                 SwarmEvent::ConnectionClosed { .. } => None,
@@ -1218,6 +1211,7 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                     send_back_addr,
                     error,
                     connection_id: _,
+                    peer_id: _,
                 } => {
                     let error_repr = match error {
                         libp2p::swarm::ListenError::Aborted => {
@@ -1226,8 +1220,8 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                         libp2p::swarm::ListenError::WrongPeerId { obtained, endpoint } => {
                             format!("Wrong peer id, obtained {obtained}, endpoint {endpoint:?}")
                         }
-                        libp2p::swarm::ListenError::LocalPeerId { endpoint } => {
-                            format!("Dialing local peer id {endpoint:?}")
+                        libp2p::swarm::ListenError::LocalPeerId { address } => {
+                            format!("Dialing local peer id {address:?}")
                         }
                         libp2p::swarm::ListenError::Denied { cause } => {
                             format!("Connection was denied with cause: {cause:?}")
@@ -1281,6 +1275,7 @@ impl<AppReqId: ReqId> Network<AppReqId> {
                     }
                 }
                 SwarmEvent::Dialing { .. } => None,
+                _ => None,
             };
 
             if let Some(ev) = maybe_event {

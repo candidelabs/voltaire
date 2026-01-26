@@ -3,12 +3,10 @@ use crate::rpc::MetaData;
 use crate::types::{GossipEncoding, GossipKind};
 use crate::{GossipTopic, NetworkConfig};
 use futures::future::Either;
-use libp2p::bandwidth::BandwidthSinks;
 use libp2p::core::{multiaddr::Multiaddr, muxing::StreamMuxerBox, transport::Boxed};
 use libp2p::gossipsub;
 use libp2p::identity::{secp256k1, Keypair};
-use libp2p::{core, noise, yamux, PeerId, Transport, TransportExt};
-use libp2p_quic;
+use libp2p::{core, noise, quic, yamux, PeerId, Transport};
 use prometheus_client::registry::Registry;
 use slog::{debug, warn};
 use ssz::Decode;
@@ -18,7 +16,6 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
-use std::sync::Arc;
 use std::time::Duration;
 
 pub const NETWORK_KEY_FILENAME: &str = "key";
@@ -39,15 +36,14 @@ type BoxedTransport = Boxed<(PeerId, StreamMuxerBox)>;
 pub fn build_transport(
     local_private_key: Keypair,
     quic_support: bool,
-) -> std::io::Result<(BoxedTransport, Arc<BandwidthSinks>)> {
+) -> std::io::Result<BoxedTransport> {
     // mplex config
-    let mut mplex_config = libp2p_mplex::MplexConfig::new();
+    let mut mplex_config = libp2p_mplex::Config::new();
     mplex_config.set_max_buffer_size(256);
     mplex_config.set_max_buffer_behaviour(libp2p_mplex::MaxBufferBehaviour::Block);
 
     // yamux config
-    let mut yamux_config = yamux::Config::default();
-    yamux_config.set_window_update_mode(yamux::WindowUpdateMode::on_read());
+    let yamux_config = yamux::Config::default();
 
     // Creates the TCP transport layer
     let tcp = libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default().nodelay(true))
@@ -59,23 +55,23 @@ pub fn build_transport(
         ))
         .timeout(Duration::from_secs(10));
 
-    let (transport, bandwidth) = if quic_support {
+    let transport = if quic_support {
         // Enables Quic
         // The default quic configuration suits us for now.
-        let quic_config = libp2p_quic::Config::new(&local_private_key);
-        tcp.or_transport(libp2p_quic::tokio::Transport::new(quic_config))
+        let quic_config = quic::Config::new(&local_private_key);
+        tcp.or_transport(quic::tokio::Transport::new(quic_config))
             .map(|either_output, _| match either_output {
                 Either::Left((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
                 Either::Right((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
             })
-            .with_bandwidth_logging()
+            .boxed()
     } else {
-        tcp.with_bandwidth_logging()
+        tcp.map(|(peer_id, muxer), _| (peer_id, StreamMuxerBox::new(muxer))).boxed()
     };
 
-    let transport = libp2p::dns::TokioDnsConfig::system(transport)?.boxed();
+    let transport = libp2p::dns::tokio::Transport::system(transport)?.boxed();
 
-    Ok((transport, bandwidth))
+    Ok(transport)
 }
 
 /// Loads a private key from disk. If this fails, a new key is

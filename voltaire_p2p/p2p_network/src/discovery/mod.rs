@@ -9,7 +9,7 @@ pub mod enr_ext;
 // Allow external use of the voltaire ENR builder
 use crate::{error, Enr, NetworkConfig, NetworkGlobals, Subnet, SubnetDiscovery};
 use crate::{metrics, ClearDialError};
-use discv5::{enr::NodeId, Discv5, Discv5Event};
+use discv5::{enr::NodeId, Discv5, Event as Discv5Event};
 pub use enr::{
     build_enr, create_enr_builder_from_config, load_enr_from_disk, use_or_load_enr, CombinedKey,
 };
@@ -25,7 +25,7 @@ pub use libp2p::{
     identity::PeerId,
     swarm::{
         dummy::ConnectionHandler, ConnectionId, DialError, NetworkBehaviour, NotifyHandler,
-        PollParameters, SubstreamProtocol, ToSwarm,
+        ToSwarm,
     },
 };
 use lru::LruCache;
@@ -126,7 +126,7 @@ enum EventStream {
     Awaiting(
         Pin<
             Box<
-                dyn Future<Output = Result<mpsc::Receiver<Discv5Event>, discv5::Discv5Error>>
+                dyn Future<Output = Result<mpsc::Receiver<Discv5Event>, discv5::Error>>
                     + Send,
             >,
         >,
@@ -868,6 +868,7 @@ impl NetworkBehaviour for Discovery {
         _peer: PeerId,
         _addr: &Multiaddr,
         _role_override: libp2p::core::Endpoint,
+        _port_use: libp2p::core::transport::PortUse,
     ) -> Result<libp2p::swarm::THandler<Self>, libp2p::swarm::ConnectionDenied> {
         Ok(ConnectionHandler)
     }
@@ -876,7 +877,7 @@ impl NetworkBehaviour for Discovery {
         &mut self,
         _peer_id: PeerId,
         _connection_id: ConnectionId,
-        _event: void::Void,
+        _event: std::convert::Infallible,
     ) {
     }
 
@@ -884,7 +885,6 @@ impl NetworkBehaviour for Discovery {
     fn poll(
         &mut self,
         cx: &mut Context,
-        _: &mut impl PollParameters,
     ) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         if !self.started {
             return Poll::Pending;
@@ -957,10 +957,10 @@ impl NetworkBehaviour for Discovery {
                             // NOTE: We assume libp2p itself can keep track of IP changes and we do
                             // not inform it about IP changes found via discovery.
                         }
-                        Discv5Event::EnrAdded { .. }
-                        | Discv5Event::TalkRequest(_)
+                        Discv5Event::TalkRequest(_)
                         | Discv5Event::NodeInserted { .. }
                         | Discv5Event::SessionEstablished { .. } => {} // Ignore all other discv5 server events
+                        _ => {} // Ignore any other discv5 events
                     }
                 }
             }
@@ -968,7 +968,7 @@ impl NetworkBehaviour for Discovery {
         Poll::Pending
     }
 
-    fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {
+    fn on_swarm_event(&mut self, event: FromSwarm) {
         match event {
             FromSwarm::DialFailure(DialFailure { peer_id, error, .. }) => {
                 self.on_dial_failure(peer_id, error)
@@ -987,6 +987,7 @@ impl NetworkBehaviour for Discovery {
             | FromSwarm::ExternalAddrConfirmed(_) => {
                 // Ignore events not relevant to discovery
             }
+            _ => {}
         }
     }
 }
