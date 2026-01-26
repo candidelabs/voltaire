@@ -24,12 +24,7 @@ const PROTOCOL_PREFIX: &str = "/account_abstraction/req";
 const REQUEST_TIMEOUT: u64 = 15;
 
 /// Returns the maximum bytes that can be sent across the RPC.
-pub fn max_rpc_size(/*fork_context: &ForkContext,*/ max_chunk_size: usize) -> usize {
-    // match fork_context.current_fork() {
-    //     ForkName::Altair | ForkName::Base => max_chunk_size / 10,
-    //     ForkName::Merge => max_chunk_size,
-    //     ForkName::Capella => max_chunk_size,
-    // }
+pub fn max_rpc_size(max_chunk_size: usize) -> usize {
     max_chunk_size
 }
 
@@ -141,12 +136,6 @@ impl UpgradeInfo for RPCProtocol {
     /// The list of supported RPC protocols for Voltaire.
     fn protocol_info(&self) -> Self::InfoIter {
         let supported_protocols = SupportedProtocol::currently_supported();
-        // if self.enable_light_client_server {
-        //     supported_protocols.push(ProtocolId::new(
-        //         SupportedProtocol::LightClientBootstrapV1,
-        //         Encoding::SSZSnappy,
-        //     ));
-        // }
         supported_protocols
     }
 }
@@ -312,7 +301,6 @@ where
                     let ssz_snappy_codec = BaseInboundCodec::new(SSZSnappyInboundCodec::new(
                         protocol,
                         self.max_rpc_size,
-                        // self.fork_context.clone(),
                     ));
                     InboundCodec::SSZSnappy(ssz_snappy_codec)
                 }

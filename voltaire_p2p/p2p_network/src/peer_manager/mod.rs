@@ -825,46 +825,6 @@ impl PeerManager {
             .notify_disconnecting(&peer_id, false);
     }
 
-    // /// Run discovery query for additional sync committee peers if we fall below `TARGET_PEERS`.
-    // fn maintain_sync_committee_peers(&mut self) {
-    //     // Remove expired entries
-    //     self.sync_committee_subnets
-    //         .retain(|_, v| *v > Instant::now());
-
-    //     let subnets_to_discover: Vec<SubnetDiscovery> = self
-    //         .sync_committee_subnets
-    //         .iter()
-    //         .filter_map(|(k, v)| {
-    //             if self
-    //                 .network_globals
-    //                 .peers
-    //                 .read()
-    //                 .good_peers_on_subnet(/*Subnet::SyncCommittee(*k)*/Subnet::Mempool(SubnetId::new(1)))
-    //                 .count()
-    //                 < TARGET_SUBNET_PEERS
-    //             {
-    //                 Some(SubnetDiscovery {
-    //                     subnet: Subnet::Mempool(SubnetId::new(1)),//Subnet::SyncCommittee(*k),
-    //                     min_ttl: Some(*v),
-    //                 })
-    //             } else {
-    //                 None
-    //             }
-    //         })
-    //         .collect();
-
-    //     // request the subnet query from discovery
-    //     if !subnets_to_discover.is_empty() {
-    //         debug!(
-    //             self.log,
-    //             "Making subnet queries for maintaining sync committee peers";
-    //             "subnets" => ?subnets_to_discover.iter().map(|s| s.subnet).collect::<Vec<_>>()
-    //         );
-    //         self.events
-    //             .push(PeerManagerEvent::DiscoverSubnetPeers(subnets_to_discover));
-    //     }
-    // }
-
     /// This function checks the status of our current peers and optionally requests a discovery
     /// query if we need to find more peers to maintain the current number of peers
     fn maintain_peer_count(&mut self, dialing_peers: usize) {
@@ -1004,28 +964,6 @@ impl PeerManager {
                 if info.is_trusted() || peers_to_prune.contains(peer_id) {
                     continue;
                 }
-
-                // // Count based on long-lived subnets not short-lived subnets
-                // // NOTE: There are only 4 sync committees. These are likely to be denser than the
-                // // subnets, so our priority here to make the subnet peer count uniform, ignoring
-                // // the dense sync committees.
-                // for subnet in info.long_lived_subnets() {
-                //     match subnet {
-                //         Subnet::Mempool(_) => {
-                //             subnet_to_peer
-                //                 .entry(subnet)
-                //                 .or_insert_with(Vec::new)
-                //                 .push((*peer_id, info.clone()));
-                //         }
-                //         // Subnet::SyncCommittee(id) => {
-                //         //     *sync_committee_peer_count.entry(id).or_default() += 1;
-                //         //     peer_to_sync_committee
-                //         //         .entry(*peer_id)
-                //         //         .or_default()
-                //         //         .insert(id);
-                //         // }
-                //     }
-                // }
             }
 
             // Add to the peers to prune mapping

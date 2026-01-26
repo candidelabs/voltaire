@@ -20,7 +20,7 @@ use crate::EnrExt;
 use crate::{error, metrics, Enr, NetworkGlobals, PubsubMessage, TopicHash};
 use api_types::{PeerRequestId, Request, RequestId, Response};
 use futures::stream::StreamExt;
-use gossipsub_scoring_parameters::{voltaire_gossip_thresholds, PeerScoreSettings};
+use gossipsub_scoring_parameters::voltaire_gossip_thresholds;
 use libp2p::gossipsub::{
     self, IdentTopic as Topic, MessageAcceptance, MessageAuthenticity, MessageId, PublishError,
 };
@@ -114,9 +114,6 @@ pub struct Network<AppReqId: ReqId> {
     /// Directory where metadata is stored.
     #[allow(dead_code)]
     network_dir: PathBuf,
-    /// Gossipsub score parameters.
-    #[allow(dead_code)]
-    score_settings: PeerScoreSettings,
     /// The interval for updating gossipsub scores
     update_gossipsub_scores: tokio::time::Interval,
     gossip_cache: GossipCache,
@@ -161,8 +158,6 @@ impl<AppReqId: ReqId> Network<AppReqId> {
             
             Arc::new(globals)
         };
-
-        let score_settings = PeerScoreSettings::new(&config.gs_config);
 
         let gossip_cache = GossipCache::builder().build();
         
@@ -305,7 +300,6 @@ impl<AppReqId: ReqId> Network<AppReqId> {
             swarm,
             network_globals,
             network_dir: config.network_dir.clone(),
-            score_settings,
             update_gossipsub_scores,
             gossip_cache,
             local_peer_id,

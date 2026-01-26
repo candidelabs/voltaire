@@ -83,7 +83,6 @@ pub fn use_or_load_enr(
 pub fn build_or_load_enr(
     local_key: Keypair,
     config: &NetworkConfig,
-    // enr_fork_id: &EnrForkId,
     log: &slog::Logger,
 ) -> Result<Enr, String> {
     // Build the local ENR.
