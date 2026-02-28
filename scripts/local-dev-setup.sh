@@ -30,7 +30,11 @@ BUNDLER_SECRET="${BUNDLER_SECRET:-0x897368deaa9f3797c02570ef7d3fa4df179b0fc7ad8d
 BUNDLER_ADDRESS="0x084178a5fd956e624fcb61c3c2209e3dcf42c8e8"
 DETERMINISTIC_FACTORY="0x4e59b44847b379578588920ca78fbf26c0b4956c"
 FACTORY_DEPLOYER="0x3fab184622dc19b6109349b94811493bf2a45362"
+
+ENTRYPOINT_V06="0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"
+ENTRYPOINT_V07="0x0000000071727De22E5E9d8BAf0edAc6f37da032"
 ENTRYPOINT_V08="0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108"
+ENTRYPOINT_V09="0x433709009B8330FDa32311DF1C2AFA402eD8D009"
 
 # Anvil default account[0] — pre-funded with 10000 ETH
 ANVIL_FUNDER="0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
@@ -51,6 +55,22 @@ rpc() {
     curl -s -X POST "http://127.0.0.1:${ANVIL_PORT}" \
         -H 'Content-Type: application/json' \
         -d "$1"
+}
+
+# Extract deploy data from deploy.js for a given EntryPoint version.
+# Usage: extract_deploy_data "v0.06" "entrypointDeployDataV6"
+extract_deploy_data() {
+    local version_label="$1"
+    local var_name="$2"
+    python3 -c "
+import re
+with open('$PROJECT_DIR/scripts/deploy.js') as f:
+    content = f.read()
+idx = content.find('Deploy Entrypoint $version_label')
+section = content[idx:idx+200000]
+match = re.search(r'var $var_name\s*=\s*\"(0x[0-9a-fA-F]+)\"', section)
+print(match.group(1))
+"
 }
 
 # ─── Start anvil ──────────────────────────────────────────────
@@ -77,33 +97,55 @@ echo "=== Funding bundler signer ==="
 rpc "{\"jsonrpc\":\"2.0\",\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"$ANVIL_FUNDER\",\"to\":\"$BUNDLER_ADDRESS\",\"value\":\"0x56BC75E2D63100000\",\"gas\":\"0x5208\"}],\"id\":1}" > /dev/null
 echo "Funded $BUNDLER_ADDRESS with 100 ETH"
 
+# ─── Deploy EntryPoint v0.6 ──────────────────────────────────
+echo "=== Deploying EntryPoint v0.6 ==="
+DEPLOY_DATA=$(extract_deploy_data "v0.06" "entrypointDeployDataV6")
+rpc "{\"jsonrpc\":\"2.0\",\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"$ANVIL_FUNDER\",\"to\":\"$DETERMINISTIC_FACTORY\",\"data\":\"$DEPLOY_DATA\",\"gas\":\"0x1C9C380\"}],\"id\":1}" > /dev/null
+echo "EntryPoint v0.6 deployed at $ENTRYPOINT_V06"
+
+# ─── Deploy EntryPoint v0.7 ──────────────────────────────────
+echo "=== Deploying EntryPoint v0.7 ==="
+DEPLOY_DATA=$(extract_deploy_data "v0.07" "entrypointDeployDataV7")
+rpc "{\"jsonrpc\":\"2.0\",\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"$ANVIL_FUNDER\",\"to\":\"$DETERMINISTIC_FACTORY\",\"data\":\"$DEPLOY_DATA\",\"gas\":\"0x1C9C380\"}],\"id\":1}" > /dev/null
+echo "EntryPoint v0.7 deployed at $ENTRYPOINT_V07"
+
 # ─── Deploy EntryPoint v0.8 ──────────────────────────────────
 echo "=== Deploying EntryPoint v0.8 ==="
-DEPLOY_DATA=$(python3 -c "
-import re
-with open('$PROJECT_DIR/scripts/deploy.js') as f:
-    content = f.read()
-idx = content.find('Deploy Entrypoint v0.08')
-section = content[idx:idx+200000]
-match = re.search(r'var entrypointDeployDataV8\s*=\"(0x[0-9a-fA-F]+)\"', section)
-print(match.group(1))
-")
+DEPLOY_DATA=$(extract_deploy_data "v0.08" "entrypointDeployDataV8")
 rpc "{\"jsonrpc\":\"2.0\",\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"$ANVIL_FUNDER\",\"to\":\"$DETERMINISTIC_FACTORY\",\"data\":\"$DEPLOY_DATA\",\"gas\":\"0x1C9C380\"}],\"id\":1}" > /dev/null
 echo "EntryPoint v0.8 deployed at $ENTRYPOINT_V08"
 
-# ─── Deposit ETH into EntryPoint for bundler ──────────────────
-echo "=== Depositing 10 ETH into EntryPoint for bundler ==="
+# ─── Deploy EntryPoint v0.9 ──────────────────────────────────
+# v0.9 uses a vanity address on mainnet. We deploy via the factory (produces a
+# different address), then copy the runtime bytecode to the expected address.
+echo "=== Deploying EntryPoint v0.9 ==="
+DEPLOY_DATA=$(extract_deploy_data "v0.09" "entrypointDeployDataV9")
+RESULT=$(rpc "{\"jsonrpc\":\"2.0\",\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"$ANVIL_FUNDER\",\"to\":\"$DETERMINISTIC_FACTORY\",\"data\":\"$DEPLOY_DATA\",\"gas\":\"0x1C9C380\"}],\"id\":1}")
+# The factory deploys to a non-vanity address. Get the runtime bytecode and
+# place it at the expected mainnet vanity address using anvil_setCode.
+V09_FACTORY_ADDR="0x40be45b895e2553602327bdf3adf2553d2a24a70"
+RUNTIME_CODE=$(rpc "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getCode\",\"params\":[\"$V09_FACTORY_ADDR\",\"latest\"],\"id\":1}" | python3 -c "import sys,json; print(json.load(sys.stdin)['result'])")
+rpc "{\"jsonrpc\":\"2.0\",\"method\":\"anvil_setCode\",\"params\":[\"$ENTRYPOINT_V09\",\"$RUNTIME_CODE\"],\"id\":1}" > /dev/null
+echo "EntryPoint v0.9 deployed at $ENTRYPOINT_V09 (via anvil_setCode)"
+
+# ─── Deposit ETH into EntryPoints for bundler ──────────────────
+echo "=== Depositing 10 ETH into each EntryPoint for bundler ==="
 # depositTo(address) selector = 0xb760faf9
 BUNDLER_PADDED="000000000000000000000000${BUNDLER_ADDRESS:2}"
-rpc "{\"jsonrpc\":\"2.0\",\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"$ANVIL_FUNDER\",\"to\":\"$ENTRYPOINT_V08\",\"data\":\"0xb760faf9${BUNDLER_PADDED}\",\"value\":\"0x8AC7230489E80000\",\"gas\":\"0x30000\"}],\"id\":1}" > /dev/null
-echo "Deposited 10 ETH for bundler in EntryPoint"
+for EP in "$ENTRYPOINT_V06" "$ENTRYPOINT_V07" "$ENTRYPOINT_V08" "$ENTRYPOINT_V09"; do
+    rpc "{\"jsonrpc\":\"2.0\",\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"$ANVIL_FUNDER\",\"to\":\"$EP\",\"data\":\"0xb760faf9${BUNDLER_PADDED}\",\"value\":\"0x8AC7230489E80000\",\"gas\":\"0x30000\"}],\"id\":1}" > /dev/null
+done
+echo "Deposited 10 ETH for bundler in all EntryPoints"
 
 # ─── Summary ──────────────────────────────────────────────────
 echo ""
 echo "=== Local environment ready ==="
 echo "  Anvil node:     http://127.0.0.1:${ANVIL_PORT}"
 echo "  Chain ID:       $CHAIN_ID"
+echo "  EntryPoint v06: $ENTRYPOINT_V06"
+echo "  EntryPoint v07: $ENTRYPOINT_V07"
 echo "  EntryPoint v08: $ENTRYPOINT_V08"
+echo "  EntryPoint v09: $ENTRYPOINT_V09"
 echo "  Bundler addr:   $BUNDLER_ADDRESS"
 echo ""
 echo "To deploy a smart account contract at a specific address:"
@@ -124,8 +166,6 @@ poetry run python3 -m voltaire_bundler \
     --verbose --unsafe \
     --bundle_interval 2 \
     --disable_p2p \
-    --disable_v6 \
-    --disable_entrypoints_code_check \
     --eip7702 &
 BUNDLER_PID=$!
 sleep 3
