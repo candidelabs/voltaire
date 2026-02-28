@@ -59,7 +59,7 @@ docker run --net=host --rm -ti ghcr.io/candidelabs/voltaire/voltaire-bundler:lat
 
 ### Local Development Setup
 ```bash
-# One-command setup: starts anvil, deploys EntryPoint v0.8, and launches the bundler
+# One-command setup: starts anvil, deploys all EntryPoints (v0.6-v0.9), and launches the bundler
 ./scripts/local-dev-setup.sh
 
 # Bundler RPC: http://127.0.0.1:3000/rpc
@@ -72,22 +72,22 @@ Or manually:
 # 1. Start anvil with high gas limit (EntryPoint deployment needs ~15M gas)
 anvil --chain-id 1337 --gas-limit 30000000 --port 8545 --block-time 1
 
-# 2. Run the setup script (deploys factory + EntryPoint v0.8 + funds bundler)
+# 2. Run the setup script (deploys factory + all EntryPoints + funds bundler)
 ./scripts/local-dev-setup.sh
 
-# Or start the bundler manually:
+# Or start the bundler manually (after deploying contracts):
 poetry run python3 -m voltaire_bundler \
   --bundler_secret 0x897368deaa9f3797c02570ef7d3fa4df179b0fc7ad8d8fc2547d04701604eb72 \
   --chain_id 1337 --rpc_port 3000 \
   --ethereum_node_url http://127.0.0.1:8545 \
   --verbose --unsafe --bundle_interval 2 \
-  --disable_p2p --disable_v6 --disable_entrypoints_code_check --eip7702
+  --disable_p2p --eip7702
 ```
 
 **Important CLI flags:**
 - `--debug`: Disables automatic bundle submission. UserOps stay in mempool until `debug_bundler_sendBundleNow` is called manually. Do NOT use for end-to-end testing.
 - `--unsafe`: Skips `debug_traceCall` validation (required for local dev without tracing support)
-- `--disable_v6`: Skip v0.6 EntryPoint (avoids deployment check failure)
+- `--disable_v6`: Skip v0.6 EntryPoint
 - `--disable_entrypoints_code_check`: Skip checking if all EntryPoints are deployed
 - `--eip7702`: Enable EIP-7702 authorization tuple support (required for 7702 accounts)
 - `--bundle_interval N`: Seconds between bundle submission attempts (default: 2)
