@@ -67,15 +67,8 @@ docker run --net=host --rm -ti ghcr.io/candidelabs/voltaire/voltaire-bundler:lat
 # Chain ID:    1337
 ```
 
-Or manually:
+To start only the bundler (if anvil and contracts are already running):
 ```bash
-# 1. Start anvil with high gas limit (EntryPoint deployment needs ~15M gas)
-anvil --chain-id 1337 --gas-limit 30000000 --port 8545 --block-time 1
-
-# 2. Run the setup script (deploys factory + all EntryPoints + funds bundler)
-./scripts/local-dev-setup.sh
-
-# Or start the bundler manually (after deploying contracts):
 poetry run python3 -m voltaire_bundler \
   --bundler_secret 0x897368deaa9f3797c02570ef7d3fa4df179b0fc7ad8d8fc2547d04701604eb72 \
   --chain_id 1337 --rpc_port 3000 \
@@ -99,12 +92,13 @@ poetry run python3 -m voltaire_bundler \
 1. **ExecutionEndpoint** (`voltaire_bundler/execution_endpoint.py`):
    - Central coordinator managing all bundler operations
    - Handles user operation validation, mempool management, and bundle execution
-   - Integrates with Ethereum nodes and manages different EntryPoint versions (v0.6, v0.7, v0.8)
+   - Integrates with Ethereum nodes and manages different EntryPoint versions (v0.6, v0.7, v0.8, v0.9)
 
 2. **Mempool Management**:
    - `LocalMempoolManagerV6`: Handles v0.6 EntryPoint operations
    - `LocalMempoolManagerV7`: Handles v0.7 EntryPoint operations
    - `LocalMempoolManagerV8`: Handles v0.8 EntryPoint operations
+   - `LocalMempoolManagerV9`: Handles v0.9 EntryPoint operations
    - Each version has different validation rules and gas handling
 
 3. **Bundle Management** (`voltaire_bundler/bundle/bundle_manager.py`):
