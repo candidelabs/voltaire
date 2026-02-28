@@ -120,11 +120,20 @@ echo "EntryPoint v0.8 deployed at $ENTRYPOINT_V08"
 # different address), then copy the runtime bytecode to the expected address.
 echo "=== Deploying EntryPoint v0.9 ==="
 DEPLOY_DATA=$(extract_deploy_data "v0.09" "entrypointDeployDataV9")
-RESULT=$(rpc "{\"jsonrpc\":\"2.0\",\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"$ANVIL_FUNDER\",\"to\":\"$DETERMINISTIC_FACTORY\",\"data\":\"$DEPLOY_DATA\",\"gas\":\"0x1C9C380\"}],\"id\":1}")
-# The factory deploys to a non-vanity address. Get the runtime bytecode and
-# place it at the expected mainnet vanity address using anvil_setCode.
+rpc "{\"jsonrpc\":\"2.0\",\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"$ANVIL_FUNDER\",\"to\":\"$DETERMINISTIC_FACTORY\",\"data\":\"$DEPLOY_DATA\",\"gas\":\"0x1C9C380\"}],\"id\":1}" > /dev/null
+
+# Mine pending txs so all EntryPoints are available before continuing.
+rpc '{"jsonrpc":"2.0","method":"anvil_mine","params":["0x4"],"id":1}' > /dev/null
+sleep 1
+
+# The factory deploys v0.9 to a non-vanity address. Get the runtime bytecode
+# and place it at the expected mainnet vanity address using anvil_setCode.
 V09_FACTORY_ADDR="0x40be45b895e2553602327bdf3adf2553d2a24a70"
 RUNTIME_CODE=$(rpc "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getCode\",\"params\":[\"$V09_FACTORY_ADDR\",\"latest\"],\"id\":1}" | python3 -c "import sys,json; print(json.load(sys.stdin)['result'])")
+if [ ${#RUNTIME_CODE} -lt 10 ]; then
+    echo "ERROR: Failed to fetch v0.9 runtime bytecode from $V09_FACTORY_ADDR"
+    exit 1
+fi
 rpc "{\"jsonrpc\":\"2.0\",\"method\":\"anvil_setCode\",\"params\":[\"$ENTRYPOINT_V09\",\"$RUNTIME_CODE\"],\"id\":1}" > /dev/null
 echo "EntryPoint v0.9 deployed at $ENTRYPOINT_V09 (via anvil_setCode)"
 
@@ -135,6 +144,8 @@ BUNDLER_PADDED="000000000000000000000000${BUNDLER_ADDRESS:2}"
 for EP in "$ENTRYPOINT_V06" "$ENTRYPOINT_V07" "$ENTRYPOINT_V08" "$ENTRYPOINT_V09"; do
     rpc "{\"jsonrpc\":\"2.0\",\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"$ANVIL_FUNDER\",\"to\":\"$EP\",\"data\":\"0xb760faf9${BUNDLER_PADDED}\",\"value\":\"0x8AC7230489E80000\",\"gas\":\"0x30000\"}],\"id\":1}" > /dev/null
 done
+# Mine deposit txs before starting the bundler.
+rpc '{"jsonrpc":"2.0","method":"anvil_mine","params":["0x4"],"id":1}' > /dev/null
 echo "Deposited 10 ETH for bundler in all EntryPoints"
 
 # ─── Summary ──────────────────────────────────────────────────
