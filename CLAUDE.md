@@ -16,7 +16,7 @@ Voltaire is a modular and lightning-fast Python-Rust Bundler for Ethereum EIP-43
 poetry install
 
 # Set correct Python version
-poetry env use python3.11
+poetry env use python3.13
 
 # Install Rust build dependencies (for P2P component)
 sudo apt install musl-tools

@@ -27,7 +27,7 @@ ANVIL_PORT="${ANVIL_PORT:-8545}"
 BUNDLER_PORT="${BUNDLER_PORT:-3000}"
 CHAIN_ID="${CHAIN_ID:-1337}"
 BUNDLER_SECRET="${BUNDLER_SECRET:-0x897368deaa9f3797c02570ef7d3fa4df179b0fc7ad8d8fc2547d04701604eb72}"
-BUNDLER_ADDRESS="0x084178a5fd956e624fcb61c3c2209e3dcf42c8e8"
+BUNDLER_ADDRESS=$(cast wallet address --private-key "$BUNDLER_SECRET" 2>/dev/null)
 DETERMINISTIC_FACTORY="0x4e59b44847b379578588920ca78fbf26c0b4956c"
 FACTORY_DEPLOYER="0x3fab184622dc19b6109349b94811493bf2a45362"
 
@@ -80,7 +80,8 @@ anvil --chain-id "$CHAIN_ID" --gas-limit 30000000 --port "$ANVIL_PORT" --block-t
 ANVIL_PID=$!
 sleep 2
 
-if ! rpc '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' | grep -q "0x539"; then
+EXPECTED_CHAIN_ID_HEX="0x$(printf '%x' "$CHAIN_ID")"
+if ! rpc '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' | grep -q "$EXPECTED_CHAIN_ID_HEX"; then
     echo "ERROR: anvil failed to start"
     exit 1
 fi
