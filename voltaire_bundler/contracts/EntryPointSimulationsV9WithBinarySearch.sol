@@ -6,6 +6,7 @@ pragma solidity ^0.8.28;
 
 import "https://github.com/eth-infinitism/account-abstraction/blob/releases/v0.9/contracts/core/EntryPoint.sol";
 import "https://github.com/eth-infinitism/account-abstraction/blob/releases/v0.9/contracts/interfaces/IEntryPointSimulations.sol";
+import "https://github.com/eth-infinitism/account-abstraction/blob/releases/v0.9/contracts/interfaces/IAccountExecute.sol";
 
 /*
  * This contract inherits the EntryPoint and extends it with the view-only methods that are executed by
@@ -241,6 +242,26 @@ contract EntryPointSimulationsV9WithBinarySearch is EntryPoint, IEntryPointSimul
             uint256 paymasterValidationData
         ) = _validatePrepayment(0, op, opInfo);
 
+        // Handle IAccountExecute: if callData starts with executeUserOp selector,
+        // rewrite to abi.encodeCall(IAccountExecute.executeUserOp, (op, userOpHash))
+        // just like the real EntryPoint does in _executeUserOp.
+        bytes memory executionCallData;
+        {
+            bytes calldata callData = op.callData;
+            bytes4 methodSig;
+            assembly {
+                let len := callData.length
+                if gt(len, 3) {
+                    methodSig := calldataload(callData.offset)
+                }
+            }
+            if (methodSig == IAccountExecute.executeUserOp.selector) {
+                executionCallData = abi.encodeCall(IAccountExecute.executeUserOp, (op, opInfo.userOpHash));
+            } else {
+                executionCallData = op.callData;
+            }
+        }
+
         uint256 callGasLimitMin = args.callGasLimitMin;
         uint256 callGasLimitMax = args.callGasLimitMax;
         uint256 highestGasUsed = 0;
@@ -251,7 +272,7 @@ contract EntryPointSimulationsV9WithBinarySearch is EntryPoint, IEntryPointSimul
                 bool success,
                 uint256 gasUsed,
                 bytes memory revertData
-            ) = innerCall(op.sender, op.callData, callGasLimitMax);
+            ) = innerCall(op.sender, executionCallData, callGasLimitMax);
             if (!success) {
                 revert EstimateCallGasRevertAtMax(revertData);
             }
@@ -276,10 +297,10 @@ contract EntryPointSimulationsV9WithBinarySearch is EntryPoint, IEntryPointSimul
 
             (bool success, uint256 gasUsed, ) = innerCall(
                 op.sender,
-                op.callData,
+                executionCallData,
                 guess
             );
-            
+
             if (success && gasUsed >= highestGasUsed) {
                 callGasLimitMax = guess;
                 highestGasUsed = gasUsed;
@@ -295,7 +316,7 @@ contract EntryPointSimulationsV9WithBinarySearch is EntryPoint, IEntryPointSimul
 
     function innerCall(
         address sender,
-        bytes calldata callData,
+        bytes memory callData,
         uint256 gas
     ) private returns (bool success, uint256 gasUsed, bytes memory revertData) {
         try this.callGasLimitCheck(sender, callData, gas) {
@@ -324,7 +345,7 @@ contract EntryPointSimulationsV9WithBinarySearch is EntryPoint, IEntryPointSimul
      * @return gasUsed aproximate gas used during callData execution, used by the bundler to estimate the maximum and minimum callGasLimit values.
      * @return data the returned data from callData execution.
      */
-    function callGasLimitCheck(address sender, bytes calldata callData, uint256 callGasLimit)public returns (bool success, uint256 gasUsed, bytes memory data){
+    function callGasLimitCheck(address sender, bytes memory callData, uint256 callGasLimit)public returns (bool success, uint256 gasUsed, bytes memory data){
         uint256 preGas = gasleft();
 
         (success, data) = sender.call{gas: callGasLimit}(callData);
