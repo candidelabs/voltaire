@@ -690,9 +690,9 @@ def check_if_valid_rpc_url_and_port(rpc_url, rpc_port) -> None:
         soc.close()
 
 
-async def check_valid_ethereum_rpc_nodes_and_get_chain_id(
+async def check_and_rearrange_valid_ethereum_rpc_nodes_and_get_chain_id(
     ethereum_node_urls: list[str]
-) -> str:
+) -> tuple[str, list[str]]:
     chain_id_hex: str | None = None
     valid_urls: list[str] = []
     failed_urls: list[str] = []
@@ -737,8 +737,8 @@ async def check_valid_ethereum_rpc_nodes_and_get_chain_id(
         logging.warning(
             f"Some Eth nodes are unavailable and will be skipped: {failed_urls}"
         )
-
-    return chain_id_hex
+    rearranged_ethereum_node_urls = valid_urls + failed_urls
+    return chain_id_hex, rearranged_ethereum_node_urls
 
 
 async def check_valid_entrypoint(ethereum_node_url: str, entrypoint: Address):
@@ -778,7 +778,7 @@ async def get_init_data(args: Namespace) -> InitData:
     check_if_valid_rpc_url_and_port(args.rpc_url, args.rpc_port)
 
     ethereum_node_urls = args.ethereum_node_url.split(',')
-    ethereum_node_chain_id_hex = await check_valid_ethereum_rpc_nodes_and_get_chain_id(
+    ethereum_node_chain_id_hex, ethereum_node_urls_rearranged= await check_and_rearrange_valid_ethereum_rpc_nodes_and_get_chain_id(
         ethereum_node_urls
     )
 
@@ -789,7 +789,7 @@ async def get_init_data(args: Namespace) -> InitData:
         sys.exit(1)
 
     bundler_address, bundler_pk = await init_bundler_address_and_secret(
-        args, ethereum_node_urls[0])
+        args, ethereum_node_urls_rearranged[0])
 
     if args.bundle_node_url is None:
         bundle_node_urls = ethereum_node_urls
@@ -812,8 +812,8 @@ async def get_init_data(args: Namespace) -> InitData:
         flashbots_protect_node_urls = None
 
     if bundle_node_urls != ethereum_node_urls:
-        ethereum_node_debug_chain_id_hex = (
-            await check_valid_ethereum_rpc_nodes_and_get_chain_id(
+        ethereum_node_debug_chain_id_hex, _ = (
+            await check_and_rearrange_valid_ethereum_rpc_nodes_and_get_chain_id(
                 bundle_node_urls
             )
         )
@@ -825,8 +825,8 @@ async def get_init_data(args: Namespace) -> InitData:
             sys.exit(1)
 
     if ethereum_node_debug_trace_call_urls != ethereum_node_urls:
-        ethereum_node_debug_chain_id_hex = (
-            await check_valid_ethereum_rpc_nodes_and_get_chain_id(
+        ethereum_node_debug_chain_id_hex, _ = (
+            await check_and_rearrange_valid_ethereum_rpc_nodes_and_get_chain_id(
                 ethereum_node_debug_trace_call_urls
             )
         )
@@ -839,7 +839,7 @@ async def get_init_data(args: Namespace) -> InitData:
 
     if ethereum_node_eth_get_logs_urls != ethereum_node_urls:
         eth_get_logs_url_chain_id_hex = (
-            await check_valid_ethereum_rpc_nodes_and_get_chain_id(
+            await check_and_rearrange_valid_ethereum_rpc_nodes_and_get_chain_id(
                 ethereum_node_eth_get_logs_urls
             )
         )
@@ -858,7 +858,7 @@ async def get_init_data(args: Namespace) -> InitData:
 
     if not args.disable_entrypoints_code_check:
         await check_valid_entrypoints(
-            ethereum_node_urls[0], args.disable_v6)
+            ethereum_node_urls_rearranged[0], args.disable_v6)
 
     if not args.disable_p2p:
         if args.p2p_canonical_mempool_id_08 is None:
