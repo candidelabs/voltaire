@@ -694,35 +694,51 @@ async def check_valid_ethereum_rpc_nodes_and_get_chain_id(
     ethereum_node_urls: list[str]
 ) -> str:
     chain_id_hex: str | None = None
-    try:
-        chosen_ethereum_node_url = None
-        for ethereum_node_url in ethereum_node_urls:
-            chosen_ethereum_node_url = ethereum_node_url
+    valid_urls: list[str] = []
+    failed_urls: list[str] = []
+    for ethereum_node_url in ethereum_node_urls:
+        try:
             chain_id_hex_res = await send_rpc_request_to_eth_client_no_retry(
                 ethereum_node_url,
                 "eth_chainId",
                 [],
             )
             if "result" not in chain_id_hex_res:
-                logging.critical(f"Invalid Eth node {ethereum_node_url}")
-                sys.exit(1)
-            else:
-                if (
-                    chain_id_hex is not None and
-                    chain_id_hex != chain_id_hex_res["result"]
-                ):
-                    logging.critical(f"Invalid Eth node {ethereum_node_url}")
-                    sys.exit(1)
+                logging.warning(f"Invalid Eth node {ethereum_node_url} - no result in response")
+                failed_urls.append(ethereum_node_url)
+                continue
 
-                chain_id_hex = chain_id_hex_res["result"]
-        assert chain_id_hex is not None
-        return chain_id_hex
-    except aiohttp.client_exceptions.ClientConnectorError:
-        logging.critical(f"Connection refused for Eth node {chosen_ethereum_node_url}")
+            if (
+                chain_id_hex is not None and
+                chain_id_hex != chain_id_hex_res["result"]
+            ):
+                logging.critical(
+                    f"Chain ID mismatch for Eth node {ethereum_node_url}: "
+                    f"expected {chain_id_hex}, got {chain_id_hex_res['result']}"
+                )
+                sys.exit(1)
+
+            chain_id_hex = chain_id_hex_res["result"]
+            valid_urls.append(ethereum_node_url)
+        except aiohttp.client_exceptions.ClientConnectorError:
+            logging.warning(f"Connection refused for Eth node {ethereum_node_url}")
+            failed_urls.append(ethereum_node_url)
+        except Exception:
+            logging.warning(f"Error when connecting to Eth node {ethereum_node_url}")
+            failed_urls.append(ethereum_node_url)
+
+    if not valid_urls or chain_id_hex is None:
+        logging.critical(
+            f"All Eth nodes failed: {failed_urls}"
+        )
         sys.exit(1)
-    except Exception:
-        logging.critical(f"Error when connecting to Eth node {chosen_ethereum_node_url}")
-        sys.exit(1)
+
+    if failed_urls:
+        logging.warning(
+            f"Some Eth nodes are unavailable and will be skipped: {failed_urls}"
+        )
+
+    return chain_id_hex
 
 
 async def check_valid_entrypoint(ethereum_node_url: str, entrypoint: Address):
