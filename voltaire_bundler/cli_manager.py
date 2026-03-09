@@ -838,7 +838,7 @@ async def get_init_data(args: Namespace) -> InitData:
             sys.exit(1)
 
     if ethereum_node_eth_get_logs_urls != ethereum_node_urls:
-        eth_get_logs_url_chain_id_hex = (
+        eth_get_logs_url_chain_id_hex, _ = (
             await check_and_rearrange_valid_ethereum_rpc_nodes_and_get_chain_id(
                 ethereum_node_eth_get_logs_urls
             )
