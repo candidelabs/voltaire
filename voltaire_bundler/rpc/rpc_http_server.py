@@ -379,6 +379,7 @@ async def run_rpc_http_server(
     host: str = "localhost",
     rpc_cors_domain: str = "*",
     port: int = 3000,
+    rpc_path: str = "/rpc",
     is_debug: bool = False,
 ) -> None:
     if is_debug:
@@ -394,9 +395,9 @@ async def run_rpc_http_server(
         }
         METHODS.update(debug_methods)
 
-    logging.info(f"Starting HTTP RPC Server at: {host}:{port}/rpc")
+    logging.info(f"Starting HTTP RPC Server at: {host}:{port}{rpc_path}")
     app = web.Application()
-    app.router.add_post("/rpc", handle)
+    app.router.add_post(rpc_path, handle)
 
     app.router.add_post(
         "/health",

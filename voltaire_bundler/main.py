@@ -105,6 +105,7 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
                     host=init_data.rpc_url,
                     rpc_cors_domain=init_data.rpc_cors_domain,
                     port=init_data.rpc_port,
+                    rpc_path=init_data.rpc_path,
                     is_debug=init_data.is_debug,
                 )
             )

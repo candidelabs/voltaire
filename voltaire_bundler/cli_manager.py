@@ -57,6 +57,7 @@ class InitData:
     max_priority_fee_per_gas_percentage_multiplier: int
     is_metrics: bool
     rpc_cors_domain: str
+    rpc_path: str
     enforce_gas_price_tolerance: int
     ethereum_node_debug_trace_call_urls: list[str]
     ethereum_node_eth_get_logs_urls: list[str]
@@ -178,6 +179,15 @@ def initialize_argument_parser() -> ArgumentParser:
         nargs="?",
         const="*",
         default=_get_env_or_default("VOLTAIRE_RPC_CORS_DOMAIN", "*", str),
+    )
+
+    parser.add_argument(
+        "--rpc_path",
+        type=str,
+        help="RPC serve path - defaults to '/rpc'",
+        nargs="?",
+        const="/rpc",
+        default=_get_env_or_default("VOLTAIRE_RPC_PATH", "/rpc", str),
     )
 
     parser.add_argument(
@@ -911,6 +921,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.max_priority_fee_per_gas_percentage_multiplier,
         args.metrics,
         args.rpc_cors_domain,
+        args.rpc_path,
         args.enforce_gas_price_tolerance,
         ethereum_node_debug_trace_call_urls,
         ethereum_node_eth_get_logs_urls,
