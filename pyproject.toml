@@ -18,6 +18,7 @@ classifiers = [
 [tool.poetry.dependencies]
 python = "^3.13.2"
 uvloop = "^0.21.0"
+uvloop = {version = "^0.21.0", markers = "sys_platform != 'win32'"}
 eth-abi = "^5.2.0"
 eth-account = "^0.13.5"
 prometheus-client = "^0.21.1"
