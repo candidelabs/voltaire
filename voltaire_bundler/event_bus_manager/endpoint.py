@@ -1,13 +1,14 @@
 """
 This module is a simple event bus implementation for message based interprocess
-communiction.
-It is uses unix IPC sockets to send messages between python threads,
-also between python threads and the Rust p2p thread.
+communication.
+On non-Windows systems, it uses Unix IPC sockets to send messages between
+python threads, and also between python threads and the Rust p2p thread.
+On Windows, it uses TCP on localhost with .port files for service discovery.
 Note: Voltaire p2p implementation is written in rust, as the python libp2p
 implementation is not maintained.
 The main architecture consist of Endpoints(server) and Clients.
 Each Endpoint can receive requests from Clients.
-Each Endpoint has its own IPC file which it listens to for messages
+Each Endpoint has its own IPC/port file which it listens to for messages
 from clients.
 
 based on :https://github.com/ethereum/trinity/issues/507
@@ -17,9 +18,12 @@ import asyncio
 import inspect
 import logging
 import pickle
+import sys
 from dataclasses import field
 from functools import partial
 from typing import Any, Awaitable, Callable, Dict, Optional
+
+IS_WINDOWS = sys.platform == "win32"
 
 RequestEvent = Dict[str, Any]
 ResponseEvent = Dict[str, Any]
@@ -53,13 +57,23 @@ class Endpoint:
 
     async def start_server(self, filepath: str) -> None:
         """
-        Starts the Enpoint server to listen to requests on an IPC socket
-        It creates the .ipc file if it doesn't exist
+        Starts the Enpoint server to listen to requests on an IPC socket.
+        On non-Windows, uses Unix domain sockets (.ipc files).
+        On Windows, uses TCP on localhost with a .port file for discovery.
         """
         logging.info("Starting " + self.id)
-        # filepath = self.id + ".ipc"
-        server = await asyncio.start_unix_server(
-                self._handle_request_cb, filepath)
+        if IS_WINDOWS:
+            server = await asyncio.start_server(
+                    self._handle_request_cb, '127.0.0.1', 0)
+            port = server.sockets[0].getsockname()[1]
+            port_filepath = filepath.replace('.ipc', '.port')
+            with open(port_filepath, 'w') as f:
+                f.write(str(port))
+            logging.info(
+                f"Started {self.id} on 127.0.0.1:{port}")
+        else:
+            server = await asyncio.start_unix_server(
+                    self._handle_request_cb, filepath)
         async with server:
             await server.serve_forever()
 
@@ -154,11 +168,19 @@ class Client:
 
     async def request(self, request_event: RequestEvent) -> ResponseEvent:
         """
-        This function establish a Unix socket connection to an Endpoint
+        This function establish a connection to an Endpoint
         and sends a RequestEvents and waits for a ResponseEvent.
+        Uses Unix sockets on non-Windows, TCP on localhost on Windows.
         """
-        filepath = self.server_id + ".ipc"
-        reader, writer = await asyncio.open_unix_connection(filepath)
+        if IS_WINDOWS:
+            port_filepath = self.server_id + ".port"
+            with open(port_filepath, 'r') as f:
+                port = int(f.read().strip())
+            reader, writer = await asyncio.open_connection(
+                    '127.0.0.1', port)
+        else:
+            filepath = self.server_id + ".ipc"
+            reader, writer = await asyncio.open_unix_connection(filepath)
 
         await _broadcast(request_event, writer)
         response_event: ResponseEvent = await _listen(reader)
@@ -167,15 +189,25 @@ class Client:
 
     async def broadcast_only(self, request_event: RequestEvent) -> None:
         """
-        This function establish a Unix socket connection to an Endpoint and
-        sends a RequestEvents and waits for a ResponseEvent.
+        This function establish a connection to an Endpoint and
+        sends a RequestEvent without waiting for a response.
+        Uses Unix sockets on non-Windows, TCP on localhost on Windows.
         """
-        # filepath = self.server_id + ".ipc"
-        filepath = "p2p_endpoint.ipc"
-        try:
-            _, writer = await asyncio.open_unix_connection(filepath)
-        except ConnectionRefusedError:
-            return
+        if IS_WINDOWS:
+            port_filepath = "p2p_endpoint.port"
+            try:
+                with open(port_filepath, 'r') as f:
+                    port = int(f.read().strip())
+                _, writer = await asyncio.open_connection(
+                        '127.0.0.1', port)
+            except (ConnectionRefusedError, FileNotFoundError, ValueError):
+                return
+        else:
+            filepath = "p2p_endpoint.ipc"
+            try:
+                _, writer = await asyncio.open_unix_connection(filepath)
+            except ConnectionRefusedError:
+                return
 
         await _broadcast(request_event, writer)
 

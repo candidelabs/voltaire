@@ -3,6 +3,7 @@ import logging
 import traceback
 import math
 import os
+import sys
 from typing import Any, Optional, cast
 
 from voltaire_bundler.bundle.exceptions import \
@@ -216,7 +217,10 @@ class ExecutionEndpoint(Endpoint):
             )
 
             p2pClient: Client = Client("p2p_endpoint")
-            while not os.path.exists("p2p_endpoint.ipc"):
+            p2p_file = ("p2p_endpoint.port"
+                        if sys.platform == "win32"
+                        else "p2p_endpoint.ipc")
+            while not os.path.exists(p2p_file):
                 await asyncio.sleep(1)
 
             await self.send_pooled_user_op_hashes_to_all_peers()
