@@ -103,6 +103,15 @@ def unsigned_int(value):
     return ivalue
 
 
+def rpc_path(value: str):
+    if not value.startswith("/"):
+        value = "/" + value
+    path_pattern = r"^(/[a-zA-Z0-9._~:@!$&'()*+,;=\-]*)+$"
+    if not re.match(path_pattern, value):
+        raise ArgumentTypeError(f"Invalid RPC path: {value}")
+    return value
+
+
 def url_no_port(ep: str):
     address_pattern = "^(((https|http)://)?((?:[a-zA-Z0-9-]+\\.)+[a-zA-Z]{2,}|(?:\\d{1,3}\\.){3}\\d{1,3}))$"
     if not isinstance(ep, str) or re.match(address_pattern, ep) is None:
@@ -183,11 +192,11 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--rpc_path",
-        type=str,
+        type=rpc_path,
         help="RPC serve path - defaults to '/rpc'",
         nargs="?",
         const="/rpc",
-        default=_get_env_or_default("VOLTAIRE_RPC_PATH", "/rpc", str),
+        default=_get_env_or_default("VOLTAIRE_RPC_PATH", "/rpc", rpc_path),
     )
 
     parser.add_argument(
