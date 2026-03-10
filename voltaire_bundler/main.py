@@ -89,6 +89,12 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
                 init_data.bundle_gas_estimation_multiplier
             )
             task_group.create_task(execution_endpoint.start_execution_endpoint())
+            bundler_endpoint_file = (
+                "bundler_endpoint.port" if sys.platform == "win32"
+                else "bundler_endpoint.ipc"
+            )
+            while not os.path.exists(bundler_endpoint_file):
+                await asyncio.sleep(0.1)
 
             node_urls_to_check = init_data.ethereum_node_urls
             if init_data.ethereum_node_urls != init_data.ethereum_node_debug_trace_call_urls:
