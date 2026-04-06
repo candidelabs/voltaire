@@ -379,7 +379,7 @@ def initialize_argument_parser() -> ArgumentParser:
         ),
         nargs="?",
         const=3,
-        default=_get_env_or_default("VOLTAIRE_ENFORCE_PRE_VERIFICATION_GAS_TOLERANCE", 10, unsigned_int),
+        default=_get_env_or_default("VOLTAIRE_ENFORCE_PRE_VERIFICATION_GAS_TOLERANCE", 3, unsigned_int),
     )
 
     parser.add_argument(
