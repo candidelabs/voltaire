@@ -59,6 +59,7 @@ class InitData:
     rpc_cors_domain: str
     rpc_path: str
     enforce_gas_price_tolerance: int
+    enforce_pre_verification_gas_tolerance: int
     ethereum_node_debug_trace_call_urls: list[str]
     ethereum_node_eth_get_logs_urls: list[str]
     p2p_enr_address: str
@@ -364,6 +365,21 @@ def initialize_argument_parser() -> ArgumentParser:
         nargs="?",
         const=10,
         default=_get_env_or_default("VOLTAIRE_ENFORCE_GAS_PRICE_TOLERANCE", 10, unsigned_int),
+    )
+
+    parser.add_argument(
+        "--enforce_pre_verification_gas_tolerance",
+        type=unsigned_int,
+        help=(
+            "eth_sendUserOperation will return an error if the UserOperation's "
+            "preVerificationGas is less than min_pre_verification_gas, "
+            "takes a tolerance percentage as a parameter as the following formula "
+            "min_pre_verification_gas = expected_pre_verification_gas * (1-tolerance/100), "
+            "tolerance defaults to 3"
+        ),
+        nargs="?",
+        const=3,
+        default=_get_env_or_default("VOLTAIRE_ENFORCE_PRE_VERIFICATION_GAS_TOLERANCE", 10, unsigned_int),
     )
 
     parser.add_argument(
@@ -932,6 +948,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.rpc_cors_domain,
         args.rpc_path,
         args.enforce_gas_price_tolerance,
+        args.enforce_pre_verification_gas_tolerance,
         ethereum_node_debug_trace_call_urls,
         ethereum_node_eth_get_logs_urls,
         args.p2p_enr_address,

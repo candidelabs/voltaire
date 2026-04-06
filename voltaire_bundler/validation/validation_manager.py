@@ -16,6 +16,7 @@ class ValidationManager(ABC, Generic[UserOperationType]):
     is_unsafe: bool
     is_legacy_mode: bool
     enforce_gas_price_tolerance: int
+    enforce_pre_verification_gas_tolerance: int
     ethereum_node_debug_trace_call_urls: list[str]
 
     @abstractmethod

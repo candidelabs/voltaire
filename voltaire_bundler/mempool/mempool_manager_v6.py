@@ -23,6 +23,7 @@ class LocalMempoolManagerV6(LocalMempoolManager):
         chain_id: int,
         is_unsafe: bool,
         enforce_gas_price_tolerance: int,
+        enforce_pre_verification_gas_tolerance: int,
         is_legacy_mode: bool,
         ethereum_node_debug_trace_call_urls: list[str],
         reputation_whitelist: list[str],
@@ -38,6 +39,7 @@ class LocalMempoolManagerV6(LocalMempoolManager):
             is_unsafe,
             is_legacy_mode,
             enforce_gas_price_tolerance,
+            enforce_pre_verification_gas_tolerance,
             ethereum_node_debug_trace_call_urls,
         )
         self.user_operation_handler = user_operation_handler
@@ -48,6 +50,7 @@ class LocalMempoolManagerV6(LocalMempoolManager):
         self.chain_id = chain_id
         self.is_unsafe = is_unsafe
         self.enforce_gas_price_tolerance = enforce_gas_price_tolerance
+        self.enforce_pre_verification_gas_tolerance = enforce_pre_verification_gas_tolerance
         self.senders_to_senders_mempools = {}
         self.paymasters_and_factories_to_ops_hashes_in_mempool = {}
         self.verified_useroperations_standard_mempool_gossip_queue = []
