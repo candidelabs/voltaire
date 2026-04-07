@@ -179,6 +179,7 @@ class ExecutionEndpoint(Endpoint):
                 chain_id,
                 is_unsafe,
                 enforce_gas_price_tolerance,
+                enforce_pre_verification_gas_tolerance,
                 is_legacy_mode,
                 ethereum_node_debug_trace_call_urls,
                 reputation_whitelist,
