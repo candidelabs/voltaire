@@ -37,7 +37,6 @@ class LocalMempoolManager():
     senders_to_senders_mempools: dict[Address, SenderMempool]
     is_unsafe: bool
     enforce_gas_price_tolerance: int
-    enforce_pre_verification_gas_tolerance: int
     paymasters_and_factories_to_ops_hashes_in_mempool: dict[Address, set[str]]
     verified_useroperations_standard_mempool_gossip_queue: List[Any]
     canonical_mempool_id: MempoolId
@@ -71,7 +70,6 @@ class LocalMempoolManager():
                 self.user_operation_handler.gas_manager.verify_preverification_gas_and_verification_gas_limit(
                     user_operation,
                     self.entrypoint,
-                    self.enforce_pre_verification_gas_tolerance,
                 ),
                 self.user_operation_handler.gas_manager.verify_gas_fees_and_get_price(
                     user_operation, self.enforce_gas_price_tolerance
@@ -203,7 +201,6 @@ class LocalMempoolManager():
                 self.user_operation_handler.gas_manager.verify_preverification_gas_and_verification_gas_limit(
                     user_operation,
                     self.entrypoint,
-                    self.enforce_pre_verification_gas_tolerance,
                 ),
                 self.user_operation_handler.gas_manager.verify_gas_fees_and_get_price(
                     user_operation, self.enforce_gas_price_tolerance

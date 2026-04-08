@@ -114,24 +114,18 @@ class GasManager(ABC, Generic[UserOperationType]):
         self,
         user_operation: UserOperationType,
         entrypoint: str,
-        enforce_pre_verification_gas_tolerance: int = 0,
     ) -> None:
         expected_preverification_gas = await self.get_preverification_gas(
             user_operation,
             entrypoint,
         )
 
-        min_preverification_gas = math.ceil(
-            expected_preverification_gas * (1 - (enforce_pre_verification_gas_tolerance / 100))
-        )
-
-        if enforce_pre_verification_gas_tolerance < 100:
-            if user_operation.pre_verification_gas < min_preverification_gas:
-                raise ValidationException(
-                    ValidationExceptionCode.InvalidFields,
-                    "preVerificationGas is too low. " +
-                    f"it should be minimum : {hex(min_preverification_gas)}",
-                )
+        if user_operation.pre_verification_gas < expected_preverification_gas:
+            raise ValidationException(
+                ValidationExceptionCode.InvalidFields,
+                "preVerificationGas gas is too low." +
+                f"it should be minimum : {hex(expected_preverification_gas)}",
+            )
 
         if user_operation.verification_gas_limit > self.max_verification_gas:
             raise ValidationException(

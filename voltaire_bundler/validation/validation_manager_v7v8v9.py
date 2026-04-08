@@ -40,7 +40,6 @@ class ValidationManagerV7V8V9(ValidationManager):
         is_unsafe: bool,
         is_legacy_mode: bool,
         enforce_gas_price_tolerance: int,
-        enforce_pre_verification_gas_tolerance: int,
         ethereum_node_debug_trace_call_urls: list[str],
     ):
         self.user_operation_handler = user_operation_handler
@@ -51,7 +50,6 @@ class ValidationManagerV7V8V9(ValidationManager):
         self.is_unsafe = is_unsafe
         self.is_legacy_mode = is_legacy_mode
         self.enforce_gas_price_tolerance = enforce_gas_price_tolerance
-        self.enforce_pre_verification_gas_tolerance = enforce_pre_verification_gas_tolerance
         self.ethereum_node_debug_trace_call_urls = ethereum_node_debug_trace_call_urls
 
         package_directory = os.path.dirname(os.path.abspath(voltaire_bundler.__file__))
