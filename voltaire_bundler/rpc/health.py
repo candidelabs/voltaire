@@ -1,7 +1,7 @@
 import aiohttp
 import asyncio
 import logging
-from voltaire_bundler.typing import Address
+from voltaire_bundler.custom_types import Address
 from voltaire_bundler.utils.eth_client_utils import \
         send_rpc_request_to_eth_client_no_retry
 

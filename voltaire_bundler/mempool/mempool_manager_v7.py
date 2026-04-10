@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from .mempool_manager import LocalMempoolManager
 from .mempool_info import DEFAULT_MEMPOOL_INFO
-from voltaire_bundler.typing import Address, MempoolId
+from voltaire_bundler.custom_types import Address, MempoolId
 from voltaire_bundler.user_operation.user_operation_handler_v7v8v9 import \
     UserOperationHandlerV7V8V9
 

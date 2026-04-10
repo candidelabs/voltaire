@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import logging
 
-from voltaire_bundler.typing import Address
+from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.user_operation import UserOperation
 
 from voltaire_bundler.bundle.exceptions import \

@@ -24,7 +24,7 @@ from voltaire_bundler.user_operation.models import (
         ReturnInfoV7, SenderValidationData, StakeInfo)
 from voltaire_bundler.validation.tracer_manager import TracerManager
 from .validation_manager import ValidationManager
-from voltaire_bundler.typing import Address
+from voltaire_bundler.custom_types import Address
 from voltaire_bundler.utils.eip7702 import format_hex_array_for_rlp_encode
 
 
