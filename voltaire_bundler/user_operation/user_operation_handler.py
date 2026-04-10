@@ -7,7 +7,7 @@ from functools import reduce
 from eth_abi import encode, decode
 from voltaire_bundler.bundle.exceptions import UserOpReceiptFoundException
 from voltaire_bundler.mempool.sender_mempool import VerifiedUserOperation
-from voltaire_bundler.typing import Address
+from voltaire_bundler.custom_types import Address
 from voltaire_bundler.utils.eth_client_utils import \
         get_block_info, send_rpc_request_to_eth_client
 from typing import Any

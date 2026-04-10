@@ -14,7 +14,7 @@ from voltaire_bundler.mempool.mempool_info import DEFAULT_MEMPOOL_INFO
 from voltaire_bundler.utils.eth_client_utils import \
     send_rpc_request_to_eth_client_no_retry
 
-from .typing import Address, MempoolId
+from .custom_types import Address, MempoolId
 from .utils.import_key import (import_bundler_account,
                                public_address_from_private_key)
 

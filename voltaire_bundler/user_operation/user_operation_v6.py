@@ -4,7 +4,7 @@ from eth_abi import encode
 from eth_utils import keccak
 from voltaire_bundler.bundle.exceptions import \
     ValidationException, ValidationExceptionCode
-from voltaire_bundler.typing import Address, MempoolId
+from voltaire_bundler.custom_types import Address, MempoolId
 from .user_operation import \
     verify_and_get_uint, verify_and_get_bytes, verify_and_get_address
 from .user_operation import UserOperation

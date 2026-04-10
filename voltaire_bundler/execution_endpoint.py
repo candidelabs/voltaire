@@ -12,7 +12,7 @@ from voltaire_bundler.bundle.exceptions import \
 from voltaire_bundler.cli_manager import ConditionalRpc
 from voltaire_bundler.event_bus_manager.endpoint import Client, Endpoint
 from voltaire_bundler.mempool.mempool_manager import encode_address, encode_uint256
-from voltaire_bundler.typing import Address
+from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.user_operation_handler import \
         get_deposit_info
 from voltaire_bundler.user_operation.user_operation_v6 import \

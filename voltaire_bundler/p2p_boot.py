@@ -1,7 +1,7 @@
 import functools
 import subprocess
 
-from voltaire_bundler.typing import MempoolId
+from voltaire_bundler.custom_types import MempoolId
 
 
 def p2p_boot(

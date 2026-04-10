@@ -16,7 +16,7 @@ from voltaire_bundler.event_bus_manager.endpoint import Client, RequestEvent
 from voltaire_bundler.rpc.health import check_bundler_balance, check_nodes_health
 from voltaire_bundler.rpc.jsonrpc import \
     RPCFault, RPCInvalidMethodParams, validate_and_load_json_rpc_request
-from voltaire_bundler.typing import Address
+from voltaire_bundler.custom_types import Address
 
 from aiohttp.abc import AbstractAccessLogger
 

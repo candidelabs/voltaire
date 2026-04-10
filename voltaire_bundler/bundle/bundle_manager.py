@@ -16,7 +16,7 @@ from voltaire_bundler.mempool.mempool_manager_v6 import LocalMempoolManagerV6
 from voltaire_bundler.mempool.mempool_manager_v7 import LocalMempoolManagerV7
 from voltaire_bundler.mempool.mempool_manager_v8 import LocalMempoolManagerV8
 from voltaire_bundler.mempool.mempool_manager_v9 import LocalMempoolManagerV9
-from voltaire_bundler.typing import Address
+from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.user_operation_handler import \
         decode_failed_op_event, decode_failed_op_with_revert_event, \
         get_deposit_info, get_user_operation_logs_for_block_range

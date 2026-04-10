@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from voltaire_bundler.typing import Address
+from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.user_operation_v6 import UserOperationV6
 from voltaire_bundler.user_operation.user_operation_v7v8v9 import UserOperationV7V8V9
 from typing import TypeVar

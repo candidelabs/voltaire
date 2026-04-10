@@ -3,7 +3,7 @@ import logging
 from eth_utils import to_checksum_address
 from eth_abi import decode
 from voltaire_bundler.bundle.exceptions import UserOpFoundException
-from voltaire_bundler.typing import Address
+from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.user_operation_handler import UserOperationHandler, del_user_operation_logs_cache_entry, get_transaction_by_hash
 from ..gas.gas_manager_v7v8v9 import GasManagerV7V8V9
 

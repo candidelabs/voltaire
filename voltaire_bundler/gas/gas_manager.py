@@ -8,7 +8,7 @@ from functools import cache
 from eth_abi import encode, decode
 from eth_utils import keccak
 
-from voltaire_bundler.typing import Address
+from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.models import UserOperationType
 from voltaire_bundler.bundle.exceptions import \
     ValidationException, ValidationExceptionCode

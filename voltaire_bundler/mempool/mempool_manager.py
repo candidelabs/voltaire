@@ -16,7 +16,7 @@ from voltaire_bundler.user_operation.models import StakeInfo
 from voltaire_bundler.user_operation.user_operation_handler import UserOperationHandler, get_deposit_info
 from voltaire_bundler.event_bus_manager.endpoint import RequestEvent
 from voltaire_bundler.validation.validation_manager import ValidationManager
-from voltaire_bundler.typing import Address, MempoolId
+from voltaire_bundler.custom_types import Address, MempoolId
 from voltaire_bundler.user_operation.user_operation import UserOperation
 from voltaire_bundler.utils.eth_client_utils import get_block_info, send_rpc_request_to_eth_client
 

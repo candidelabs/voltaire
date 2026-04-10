@@ -3,7 +3,7 @@ from datetime import datetime
 import re
 from voltaire_bundler.bundle.exceptions import \
         ValidationException, ValidationExceptionCode
-from voltaire_bundler.typing import Address, MempoolId
+from voltaire_bundler.custom_types import Address, MempoolId
 
 
 class UserOperation(ABC):
