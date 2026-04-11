@@ -15,6 +15,10 @@ from ..gas.gas_manager import GasManager
 from .models import (Log, ReceiptInfo, UserOperationReceiptInfo)
 
 
+HANDLE_OPS_SELECTOR_V6 = "0x1fad948c"
+HANDLE_OPS_SELECTOR_V7V8V9 = "0x765e827f"
+
+
 class UserOperationHandler(ABC):
     ethereum_node_urls: list[str]
     bundler_address: Address
@@ -23,6 +27,56 @@ class UserOperationHandler(ABC):
     gas_manager: GasManager
     logs_incremental_range: int
     logs_number_of_ranges: int
+
+    async def _find_handle_ops_calldata(
+        self,
+        transaction_hash: str,
+        transaction_input: str,
+        handle_ops_selector: str,
+    ) -> str:
+        """Return the handleOps calldata from a transaction.
+
+        Fast path: if transaction_input starts with the expected selector,
+        return it directly.
+
+        Fallback: call trace_transaction to walk the call trace and find
+        the internal call whose input starts with the selector.
+        """
+        if transaction_input.startswith(handle_ops_selector):
+            return transaction_input
+
+        logging.info(
+            f"Transaction {transaction_hash} input does not start "
+            f"with {handle_ops_selector}, tracing to find internal "
+            "handleOps call."
+        )
+
+        params = [transaction_hash]
+        res: Any = await send_rpc_request_to_eth_client(
+            self.ethereum_node_urls,
+            "trace_transaction",
+            params,
+        )
+
+        if "result" not in res:
+            error_msg = str(res.get("error", res))
+            raise ValueError(
+                f"trace_transaction failed for "
+                f"{transaction_hash}: {error_msg}"
+            )
+
+        trace = res["result"]
+        calldata = _find_handle_ops_input_in_trace(
+            trace, handle_ops_selector
+        )
+        if calldata is None:
+            raise ValueError(
+                f"No internal call with selector "
+                f"{handle_ops_selector} found in trace "
+                f"for transaction {transaction_hash}"
+            )
+
+        return calldata
 
     async def get_user_operation_receipt(
         self, user_operation_hash: str, entrypoint: str
@@ -264,6 +318,21 @@ class UserOperationHandler(ABC):
             return user_operation_by_hash_json
         else:
             return None
+
+
+def _find_handle_ops_input_in_trace(
+    trace: Any,
+    handle_ops_selector: str,
+) -> str | None:
+    """Walk a trace_transaction result to find a call whose input starts
+    with the given handleOps selector. Returns the input string or None."""
+    if isinstance(trace, list):
+        for entry in trace:
+            action = entry.get("action", {})
+            input_data = action.get("input", "")
+            if input_data.startswith(handle_ops_selector):
+                return input_data
+    return None
 
 
 async def get_deposit_info(
