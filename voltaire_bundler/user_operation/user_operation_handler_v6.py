@@ -3,7 +3,12 @@ import logging
 from eth_utils import to_checksum_address
 from eth_abi import decode
 from voltaire_bundler.bundle.exceptions import UserOpFoundException
-from voltaire_bundler.user_operation.user_operation_handler import UserOperationHandler, del_user_operation_logs_cache_entry, get_transaction_by_hash
+from voltaire_bundler.user_operation.user_operation_handler import (
+    HANDLE_OPS_SELECTOR_V6,
+    UserOperationHandler,
+    del_user_operation_logs_cache_entry,
+    get_transaction_by_hash,
+)
 from ..gas.gas_manager_v6 import GasManagerV6
 
 
@@ -109,7 +114,10 @@ class UserOperationHandlerV6(UserOperationHandler):
         block_number = transaction["blockNumber"]
         transaction_input = transaction["input"]
 
-        user_operations_lists = decode_handle_op_input(transaction_input)
+        handle_ops_calldata = await self._find_handle_ops_calldata(
+            transaction_hash, transaction_input, HANDLE_OPS_SELECTOR_V6,
+        )
+        user_operations_lists = decode_handle_op_input(handle_ops_calldata)
 
         for user_operation_list in user_operations_lists:
             if (
