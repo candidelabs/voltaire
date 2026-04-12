@@ -115,7 +115,8 @@ class UserOperationHandlerV6(UserOperationHandler):
         transaction_input = transaction["input"]
 
         handle_ops_calldata = await self._find_handle_ops_calldata(
-            transaction_hash, transaction_input, HANDLE_OPS_SELECTOR_V6,
+            transaction_hash, transaction_input,
+            HANDLE_OPS_SELECTOR_V6, entrypoint,
         )
         user_operations_lists = decode_handle_op_input(handle_ops_calldata)
 
