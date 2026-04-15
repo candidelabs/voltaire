@@ -47,12 +47,13 @@ class ValidationManager(ABC, Generic[UserOperationType]):
         sig_failed: bool | None,
         valid_until: int,
         valid_after: int,
-        latest_block_timestamp: int
+        latest_block_timestamp: int,
+        source: str = "account or paymaster",
     ) -> None:
         if sig_failed:
             raise ValidationException(
                 ValidationExceptionCode.InvalidSignature,
-                "Invalid UserOp signature or paymaster signature",
+                f"Invalid {source} signature",
             )
 
         if valid_after is None or latest_block_timestamp < valid_after:
