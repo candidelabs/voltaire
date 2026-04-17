@@ -81,7 +81,7 @@ class SenderMempool:
         else:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
-                "invalid UserOperation struct/fields",
+                "invalid UserOperation struct/fields (can't replace useroperation)",
             )
 
     @staticmethod
