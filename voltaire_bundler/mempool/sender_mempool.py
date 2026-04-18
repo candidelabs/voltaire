@@ -79,9 +79,20 @@ class SenderMempool:
                 old_paymaster
             )
         else:
+            existing_operation = self.user_operation_hashs_to_verified_user_operation[
+                existing_user_operation_hash_with_same_nonce
+            ].user_operation
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
-                "invalid UserOperation struct/fields (can't replace useroperation)",
+                (
+                    f"invalid UserOperation struct/fields: a UserOperation with nonce "
+                    f"{hex(new_user_operation.nonce)} is already in the mempool for sender "
+                    f"{self.address} (maxFeePerGas: {hex(existing_operation.max_fee_per_gas)}, "
+                    f"maxPriorityFeePerGas: {hex(existing_operation.max_priority_fee_per_gas)}). "
+                    f"Wait for it to be included onchain; only resend if it fails. "
+                    f"To replace it, resubmit with both maxFeePerGas and maxPriorityFeePerGas "
+                    f"at least {MIN_PRICE_BUMP}% higher."
+                ),
             )
 
     @staticmethod
