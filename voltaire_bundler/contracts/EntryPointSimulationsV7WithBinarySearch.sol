@@ -186,7 +186,7 @@ contract EntryPointSimulationsV7WithBinarySearch is EntryPoint, IEntryPointSimul
     struct EstimateCallGasArgs {
         uint256 callGasLimitMin;
         uint256 callGasLimitMax;
-        uint256 tolerance;
+        uint256 tolerancePct; // convergence tolerance as a percentage (e.g. 10 = 10%)
         bool isContinuation;
         bool isCheckOnce;
     }
@@ -227,7 +227,6 @@ contract EntryPointSimulationsV7WithBinarySearch is EntryPoint, IEntryPointSimul
 
         uint256 callGasLimitMin = args.callGasLimitMin;
         uint256 callGasLimitMax = args.callGasLimitMax;
-        uint256 highestGasUsed = 0;
 
         if (!args.isContinuation) {
             // Make one call at full gas to make sure success is even possible.
@@ -242,8 +241,7 @@ contract EntryPointSimulationsV7WithBinarySearch is EntryPoint, IEntryPointSimul
             if(args.isCheckOnce) {
                 revert SimulationResult(opInfo.preOpGas - op.preVerificationGas, 0, 0);
             }
-            highestGasUsed = gasUsed;
-            callGasLimitMin = highestGasUsed;
+            callGasLimitMin = gasUsed;
         }
 
         //dividing here by five instead of two for the first guess in the binry search
@@ -251,22 +249,22 @@ contract EntryPointSimulationsV7WithBinarySearch is EntryPoint, IEntryPointSimul
         uint256 guess = callGasLimitMin + ((callGasLimitMax - callGasLimitMin) / 5);
 
         uint256 numRounds = 0;
-        while (callGasLimitMin + args.tolerance < callGasLimitMax) {
+        while (callGasLimitMax > callGasLimitMin + 1 &&
+               ((callGasLimitMax - callGasLimitMin) * 100) / callGasLimitMax > args.tolerancePct) {
             numRounds++;
 
             if (!isEnoughGasForGuess(guess)) {
                 revert EstimateCallGasContinuation(callGasLimitMin, callGasLimitMax,numRounds);
             }
 
-            (bool success, uint256 gasUsed, ) = innerCall(
+            (bool success, , ) = innerCall(
                 op.sender,
                 executionCallData,
                 guess
             );
-            
-            if (success && gasUsed >= highestGasUsed) {
+
+            if (success) {
                 callGasLimitMax = guess;
-                highestGasUsed = gasUsed;
             } else {
                 callGasLimitMin = guess + 1;
             }

@@ -100,7 +100,7 @@ class GasManagerV7V8V9(GasManager):
             result_verification_gas_limit = input_verification_gas_limit
 
         if input_call_gas_limit == 0:
-            result_call_gas_limit = estimated_call_gas_limit
+            result_call_gas_limit = estimated_call_gas_limit + 3_000
         else:
             result_call_gas_limit = input_call_gas_limit
 
@@ -186,7 +186,7 @@ class GasManagerV7V8V9(GasManager):
             ],
             [
                 user_operation.to_list(),
-                [min_gas, max_gas, 10_000, is_continious, is_check_once]
+                [min_gas, max_gas, 10, is_continious, is_check_once]
             ],
         )
         if entrypoint.lower() == "0x433709009b8330fda32311df1c2afa402ed8d009":
@@ -265,7 +265,7 @@ class GasManagerV7V8V9(GasManager):
         error_selector = str(error_data[:10])
         error_params = error_data[10:]
 
-        error_params_api = []
+        error_params_api: list[str] = []
         if error_selector == "0xdeb13018":  # SimulationResult
             error_params_api = [
                 "uint256",  # verificationGasLimit
@@ -313,8 +313,8 @@ class GasManagerV7V8V9(GasManager):
                 ValidationExceptionCode.SimulateValidation,
                 error_params,
             )
-        error_params_decoded = decode(
-                error_params_api, bytes.fromhex(error_params))
+        error_params_decoded = list(decode(
+                error_params_api, bytes.fromhex(error_params)))
 
         return error_selector, error_params_decoded
 
