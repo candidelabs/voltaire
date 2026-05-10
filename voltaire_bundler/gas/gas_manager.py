@@ -41,7 +41,11 @@ class GasManager(ABC, Generic[UserOperationType]):
 
         tasks_arr = [block_max_fee_per_gas_op]
 
-        if not self.is_legacy_mode:
+        # skip eth_maxPriorityFeePerGas in legacy mode and on HyperEVM
+        if not (
+            self.is_legacy_mode or
+            self.chain_id == 999 or self.chain_id == 998
+        ):
             block_max_priority_fee_per_gas_op = send_rpc_request_to_eth_client(
                 self.ethereum_node_urls, "eth_maxPriorityFeePerGas", None, None, "result"
             )
@@ -63,15 +67,17 @@ class GasManager(ABC, Generic[UserOperationType]):
         )
 
         if enforce_gas_price_tolerance < 100:
-            if self.is_legacy_mode:
-                block_max_priority_fee_per_gas = block_max_fee_per_gas
+            if self.is_legacy_mode or self.chain_id == 999 or self.chain_id == 998:
+                if self.is_legacy_mode:
+                    block_max_priority_fee_per_gas = block_max_fee_per_gas
+                else: # HyperEVM
+                    block_max_priority_fee_per_gas = 0
                 if max_fee_per_gas < block_max_fee_per_gas_with_tolerance:
                     raise ValidationException(
                         ValidationExceptionCode.InvalidFields,
                         "maxFeePerGas is too low. it should be minimum : " +
                         f"{block_max_fee_per_gas_with_tolerance_hex}",
                     )
-
             else:
                 block_max_priority_fee_per_gas = int(tasks[1]["result"], 16)
                 block_max_priority_fee_per_gas = math.ceil(
