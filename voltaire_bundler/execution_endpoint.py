@@ -695,20 +695,32 @@ class ExecutionEndpoint(Endpoint):
         return "ok"
 
     async def _event_voltaire_feesPerGas(self, _) -> dict:
-        max_fee_per_gas, max_priority_fee_per_gas = await asyncio.gather(
-            send_rpc_request_to_eth_client(
-                self.ethereum_node_urls, "eth_gasPrice",
-                None, None, "result"
-            ),
-            send_rpc_request_to_eth_client(
-                self.ethereum_node_urls, "eth_maxPriorityFeePerGas",
-                None, None, "result"
-            )
+        max_fee_per_gas_op = send_rpc_request_to_eth_client(
+            self.ethereum_node_urls, "eth_gasPrice", None, None, "result"
         )
+
+        tasks_arr = [max_fee_per_gas_op]
+
+        # skip eth_maxPriorityFeePerGas on HyperEVM
+        if not (self.chain_id == 999 or self.chain_id == 998):
+            max_priority_fee_per_gas_op = send_rpc_request_to_eth_client(
+                self.ethereum_node_urls, "eth_maxPriorityFeePerGas", None, None, "result"
+            )
+            tasks_arr.append(max_priority_fee_per_gas_op)
+
+        tasks: Any = await asyncio.gather(*tasks_arr)
+
+        max_fee_per_gas_hex = tasks[0]["result"]
+
+        if self.chain_id == 999 or self.chain_id == 998:  # HyperEVM
+            max_priority_fee_per_gas_with_buffer = "0x0"
+        else:
+            max_priority_fee_per_gas_hex = tasks[1]["result"]
+            max_priority_fee_per_gas_with_buffer = hex(math.ceil(
+                int(max_priority_fee_per_gas_hex, 16) * 1.2))  # 20% buffer
+
         max_fee_per_gas_with_buffer = hex(math.ceil(
-            int(max_fee_per_gas["result"], 16) * 1.2))  # 20% buffer
-        max_priority_fee_per_gas_with_buffer = hex(math.ceil(
-            int(max_priority_fee_per_gas["result"], 16) * 1.2))  # 20% buffer
+            int(max_fee_per_gas_hex, 16) * 1.2))  # 20% buffer
 
         return {
             "maxFeePerGas": max_fee_per_gas_with_buffer,

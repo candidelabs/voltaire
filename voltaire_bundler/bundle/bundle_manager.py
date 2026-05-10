@@ -290,7 +290,11 @@ class BundlerManager:
             nonce_op,
         ]
 
-        if not self.is_legacy_mode:
+        # skip eth_maxPriorityFeePerGas in legacy mode and on HyperEVM
+        if not (
+            self.is_legacy_mode or
+            self.chain_id == 999 or self.chain_id == 998
+        ):
             block_max_priority_fee_per_gas_op = send_rpc_request_to_eth_client(
                 self.ethereum_node_urls, "eth_maxPriorityFeePerGas",
                 None, None, "result"
@@ -326,8 +330,12 @@ class BundlerManager:
         )
         block_max_fee_per_gas_hex = hex(block_max_fee_per_gas_dec_mod)
 
-        block_max_priority_fee_per_gas_hex = "0x"
-        if not self.is_legacy_mode:
+        block_max_priority_fee_per_gas_hex = "0x0"
+        # skip eth_maxPriorityFeePerGas in legacy mode and on HyperEVM
+        if not (
+            self.is_legacy_mode or
+            self.chain_id == 999 or self.chain_id == 998
+        ):
             block_max_priority_fee_per_gas = tasks[3]["result"]
             block_max_priority_fee_per_gas_dec = int(
                     block_max_priority_fee_per_gas, 16)
@@ -337,7 +345,7 @@ class BundlerManager:
                 * (self.gas_price_percentage_multiplier / 100)
             )
 
-           # max priority fee per gas should be atleast 1
+            # max priority fee per gas should be atleast 1
             if block_max_priority_fee_per_gas_dec_mod <= 0:
                 block_max_priority_fee_per_gas_dec_mod = 1
 
