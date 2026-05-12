@@ -5,10 +5,43 @@ import traceback
 from typing import Any
 from eth_abi import encode
 
-from aiohttp import ClientSession
+from aiohttp import ClientSession, ClientTimeout, TCPConnector
 
 from eth_account import Account, messages
 from eth_utils import keccak
+
+
+_session: ClientSession | None = None
+
+
+def get_eth_client_session() -> ClientSession:
+    """Return the process-wide aiohttp ClientSession for outbound RPC calls.
+
+    Lazily created on first call so it binds to the running event loop.
+    Reused across all callers to enable HTTP keep-alive, DNS caching, and
+    connection pooling against each Ethereum node.
+
+    HTTP transport tuned for a bundler that fans out many small requests to
+    a handful of Ethereum providers per bundle round:
+      - `total=60` seconds: accommodates slow calls (debug_traceCall, wide
+        eth_getLogs) without letting a hung connection pin a coroutine
+        indefinitely.
+      - `connect=10` seconds: generous enough for TLS handshakes to remote
+        providers on slow networks.
+    """
+    global _session
+    if _session is None or _session.closed:
+        connector = TCPConnector(
+            limit=200,                  # max total open connections (all hosts)
+            limit_per_host=50,          # max concurrent connections per host
+            ttl_dns_cache=300,          # DNS cache TTL, in seconds
+            enable_cleanup_closed=True,
+        )
+        _session = ClientSession(
+            connector=connector,
+            timeout=ClientTimeout(total=60, connect=10),  # values in seconds
+        )
+    return _session
 
 
 def create_flashbots_signature(
@@ -58,14 +91,14 @@ async def send_rpc_request_to_eth_client(
             logging.info(f'retrying with node no: {node_index + 1}.')
         chosen_node_url = nodes_urls[node_index]  # iterate through nodes
         try:
-            async with ClientSession() as session:
-                async with session.post(
-                    chosen_node_url,
-                    json=json_request,
-                    headers=headers
-                ) as response:
-                    resp = await response.read()
-                    json_result = json.loads(resp)
+            session = get_eth_client_session()
+            async with session.post(
+                chosen_node_url,
+                json=json_request,
+                headers=headers
+            ) as response:
+                resp = await response.read()
+                json_result = json.loads(resp)
         except json.decoder.JSONDecodeError:
             logging.error(
                 f"Attempt No. {i+1} to call node rpc failed."
@@ -138,30 +171,30 @@ async def send_rpc_request_to_eth_client_no_retry(
         "content-type": "application/json",
         "connection": "keep-alive"
     }
-    async with ClientSession() as session:
-        async with session.post(
-            ethereum_node_url,
-            json=json_request,
-            headers=headers
-        ) as response:
-            try:
-                resp = await response.read()
-                return json.loads(resp)
-            except json.decoder.JSONDecodeError:
-                logging.critical("Invalid json response from eth client")
-                raise ValueError("Invalid json response from eth client")
-            except Exception as excp:
-                logging.error(
-                    "Call to node rpc failed." +
-                    str(traceback.format_exc()) +
-                    str(excp)
-                )
-                await asyncio.sleep(1)
-            except:
-                logging.error(
-                    str(traceback.format_exc())
-                )
-                await asyncio.sleep(1)
+    session = get_eth_client_session()
+    async with session.post(
+        ethereum_node_url,
+        json=json_request,
+        headers=headers
+    ) as response:
+        try:
+            resp = await response.read()
+            return json.loads(resp)
+        except json.decoder.JSONDecodeError:
+            logging.critical("Invalid json response from eth client")
+            raise ValueError("Invalid json response from eth client")
+        except Exception as excp:
+            logging.error(
+                "Call to node rpc failed." +
+                str(traceback.format_exc()) +
+                str(excp)
+            )
+            await asyncio.sleep(1)  # in seconds
+        except:
+            logging.error(
+                str(traceback.format_exc())
+            )
+            await asyncio.sleep(1)  # in seconds
 
 
 async def get_block_info(
