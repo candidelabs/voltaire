@@ -98,26 +98,25 @@ async def send_rpc_request_to_eth_client(
                 headers=headers
             ) as response:
                 resp = await response.read()
+                if response.status != 200:
+                    logging.warning(
+                        f"Attempt No. {i+1}: non-200 status {response.status} "
+                        f"from {chosen_node_url} for {method}: {resp[:200]!r}"
+                    )
                 json_result = json.loads(resp)
         except json.decoder.JSONDecodeError:
             logging.error(
                 f"Attempt No. {i+1} to call node rpc failed."
                 "Invalid json response from eth client."
             )
-            await asyncio.sleep(1)
+            await asyncio.sleep(1)  # in seconds
         except Exception as excp:
             logging.error(
                 f"Attempt No. {i+1} to call node rpc failed."
                 f"error: {str(excp)}"
             )
             logging.error(f"traceback: {str(traceback.format_exc())}")
-            await asyncio.sleep(1)
-        except:
-            logging.error(
-                f"Attempt No. {i+1} to call node rpc failed."
-            )
-            logging.error(f"traceback: {str(traceback.format_exc())}")
-            await asyncio.sleep(1)
+            await asyncio.sleep(1)  # in seconds
         else:
             if "error" in json_result:
                 if "message" in json_result["error"]:
@@ -177,24 +176,13 @@ async def send_rpc_request_to_eth_client_no_retry(
         json=json_request,
         headers=headers
     ) as response:
-        try:
-            resp = await response.read()
-            return json.loads(resp)
-        except json.decoder.JSONDecodeError:
-            logging.critical("Invalid json response from eth client")
-            raise ValueError("Invalid json response from eth client")
-        except Exception as excp:
-            logging.error(
-                "Call to node rpc failed." +
-                str(traceback.format_exc()) +
-                str(excp)
+        resp = await response.read()
+        if response.status != 200:
+            logging.warning(
+                f"Non-200 status {response.status} from {ethereum_node_url} "
+                f"for {method}: {resp[:200]!r}"
             )
-            await asyncio.sleep(1)  # in seconds
-        except:
-            logging.error(
-                str(traceback.format_exc())
-            )
-            await asyncio.sleep(1)  # in seconds
+        return json.loads(resp)
 
 
 async def get_block_info(
