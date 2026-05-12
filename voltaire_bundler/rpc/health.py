@@ -124,7 +124,7 @@ async def check_live_ethereum_rpc(
                     f"{ethereum_node_url}"
                 )
 
-    except aiohttp.client_exceptions.ClientConnectorError:
-        return False, f"Connection refused for Eth node {ethereum_node_url}"
+    except (aiohttp.ClientConnectionError, TimeoutError) as e:
+        return False, f"Connection error for Eth node {ethereum_node_url}: {e}"
     except Exception:
         return False, f"Error when connecting to Eth node {ethereum_node_url}"
