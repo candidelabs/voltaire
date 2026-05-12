@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import random
 import traceback
 from typing import Any
 from eth_abi import encode
@@ -9,6 +10,20 @@ from aiohttp import ClientSession, ClientTimeout, TCPConnector
 
 from eth_account import Account, messages
 from eth_utils import keccak
+
+
+# Retry backoff parameters for send_rpc_request_to_eth_client.
+# Full-jitter exponential backoff per AWS guidance: each retry waits a
+# uniform random delay in [0, min(base * 2**attempt, max)]. The jitter
+# prevents many concurrent failures from retrying in lockstep.
+_RETRY_BASE_DELAY_S = 0.1   # initial backoff window, in seconds
+_RETRY_MAX_DELAY_S = 2.0    # cap on the backoff window, in seconds
+
+
+def _retry_backoff_delay(attempt: int) -> float:
+    """Full-jitter exponential backoff. `attempt` is 0-indexed."""
+    window = min(_RETRY_BASE_DELAY_S * (2 ** attempt), _RETRY_MAX_DELAY_S)
+    return random.uniform(0, window)
 
 
 _session: ClientSession | None = None
@@ -63,7 +78,8 @@ async def send_rpc_request_to_eth_client(
     method: str,
     params=None,
     flashbots_signer_private_key_pair: tuple[str, str] | None = None,
-    expected_key: str | None = None
+    expected_key: str | None = None,
+    max_attempts: int = 60,
 ) -> Any:
     json_request = {
         "jsonrpc": "2.0",
@@ -82,10 +98,9 @@ async def send_rpc_request_to_eth_client(
             signer,
             private_key
         )
-    NUMBER_OF_RETRY_ATTEMPTS = 60
     json_result = None
     nodes_len = len(nodes_urls)
-    for i in range(NUMBER_OF_RETRY_ATTEMPTS):
+    for i in range(max_attempts):
         node_index = i % nodes_len
         if nodes_len > 1 and i > 0:
             logging.info(f'retrying with node no: {node_index + 1}.')
@@ -109,14 +124,14 @@ async def send_rpc_request_to_eth_client(
                 f"Attempt No. {i+1} to call node rpc failed."
                 "Invalid json response from eth client."
             )
-            await asyncio.sleep(1)  # in seconds
+            await asyncio.sleep(_retry_backoff_delay(i))
         except Exception as excp:
             logging.error(
                 f"Attempt No. {i+1} to call node rpc failed."
                 f"error: {str(excp)}"
             )
             logging.error(f"traceback: {str(traceback.format_exc())}")
-            await asyncio.sleep(1)  # in seconds
+            await asyncio.sleep(_retry_backoff_delay(i))
         else:
             if "error" in json_result:
                 if "message" in json_result["error"]:
@@ -143,6 +158,7 @@ async def send_rpc_request_to_eth_client(
                         f" with error code: {err_code}"
                         f" and error message: {err_message}."
                     )
+                    await asyncio.sleep(_retry_backoff_delay(i))
                     continue
                 elif expected_key is not None and expected_key not in json_result:
                     logging.error(
@@ -150,6 +166,7 @@ async def send_rpc_request_to_eth_client(
                         f"the request: {str(json_request)}"
                         f"as the key {expected_key} is not in the result: {str(json_result)}"
                     )
+                    await asyncio.sleep(_retry_backoff_delay(i))
                     continue
             return json_result
     raise ValueError("Failed rpc request to rpc node client")
