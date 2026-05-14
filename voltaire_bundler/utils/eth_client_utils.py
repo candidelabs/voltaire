@@ -13,17 +13,18 @@ from eth_utils import keccak
 
 
 # Retry backoff parameters for send_rpc_request_to_eth_client.
-# Full-jitter exponential backoff per AWS guidance: each retry waits a
-# uniform random delay in [0, min(base * 2**attempt, max)]. The jitter
-# prevents many concurrent failures from retrying in lockstep.
-_RETRY_BASE_DELAY_S = 0.1   # initial backoff window, in seconds
+# Exponential backoff with jitter: each retry waits a uniform random
+# delay in [base, min(base * 2**attempt, max)]. The floor guarantees a
+# minimum wait; the jitter prevents many concurrent failures from
+# retrying in lockstep.
+_RETRY_BASE_DELAY_S = 1.0   # minimum wait and initial window, in seconds
 _RETRY_MAX_DELAY_S = 2.0    # cap on the backoff window, in seconds
 
 
 def _retry_backoff_delay(attempt: int) -> float:
-    """Full-jitter exponential backoff. `attempt` is 0-indexed."""
+    """Exponential backoff with jitter and a 1s floor. `attempt` is 0-indexed."""
     window = min(_RETRY_BASE_DELAY_S * (2 ** attempt), _RETRY_MAX_DELAY_S)
-    return random.uniform(0, window)
+    return random.uniform(_RETRY_BASE_DELAY_S, window)
 
 
 _session: ClientSession | None = None
