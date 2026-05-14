@@ -41,10 +41,11 @@ class GasManager(ABC, Generic[UserOperationType]):
 
         tasks_arr = [block_max_fee_per_gas_op]
 
-        # skip eth_maxPriorityFeePerGas in legacy mode and on HyperEVM
+        # skip eth_maxPriorityFeePerGas in legacy mode and on HyperEVM and Arbitrum
         if not (
             self.is_legacy_mode or
-            self.chain_id == 999 or self.chain_id == 998
+            self.chain_id == 999 or self.chain_id == 998 or  # HyperEVM
+            self.chain_id == 42161 or self.chain_id == 421614  # Arbitrum
         ):
             block_max_priority_fee_per_gas_op = send_rpc_request_to_eth_client(
                 self.ethereum_node_urls, "eth_maxPriorityFeePerGas", None, None, "result"
@@ -67,10 +68,14 @@ class GasManager(ABC, Generic[UserOperationType]):
         )
 
         if enforce_gas_price_tolerance < 100:
-            if self.is_legacy_mode or self.chain_id == 999 or self.chain_id == 998:
+            if (
+                self.is_legacy_mode or
+                self.chain_id == 999 or self.chain_id == 998 or  # HyperEVM
+                self.chain_id == 42161 or self.chain_id == 421614  # Arbitrum
+            ):
                 if self.is_legacy_mode:
                     block_max_priority_fee_per_gas = block_max_fee_per_gas
-                else: # HyperEVM
+                else: # HyperEVM or Arbitrum
                     block_max_priority_fee_per_gas = 0
                 if max_fee_per_gas < block_max_fee_per_gas_with_tolerance:
                     raise ValidationException(
