@@ -701,9 +701,9 @@ async def init_bundler_address_and_secret(args: Namespace, ethereum_node_url: st
                     " as it should be an eoa without an eip7702 delegation."
                 )
                 sys.exit(1)
-    except aiohttp.client_exceptions.ClientConnectorError:
+    except (aiohttp.ClientConnectionError, TimeoutError) as e:
         logging.critical(
-            f"Error when connecting to Eth node {ethereum_node_url} for eth_getCode"
+            f"Connection error for Eth node {ethereum_node_url} for eth_getCode: {e}"
         )
         sys.exit(1)
     except Exception:
@@ -764,8 +764,8 @@ async def check_and_rearrange_valid_ethereum_rpc_nodes_and_get_chain_id(
 
             chain_id_hex = chain_id_hex_res["result"]
             valid_urls.append(ethereum_node_url)
-        except aiohttp.client_exceptions.ClientConnectorError:
-            logging.warning(f"Connection refused for Eth node {ethereum_node_url}")
+        except (aiohttp.ClientConnectionError, TimeoutError) as e:
+            logging.warning(f"Connection error for Eth node {ethereum_node_url}: {e}")
             failed_urls.append(ethereum_node_url)
         except Exception:
             logging.warning(f"Error when connecting to Eth node {ethereum_node_url}")
