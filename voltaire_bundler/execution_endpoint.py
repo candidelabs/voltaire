@@ -86,7 +86,7 @@ class ExecutionEndpoint(Endpoint):
         is_eip7702: bool,
         min_stake: int,
         min_unstake_delay: int,
-        bundle_gas_estimation_multiplier: int,
+        bundle_gas_estimation_multiplier: float,
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_urls = ethereum_node_urls
