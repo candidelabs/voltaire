@@ -39,49 +39,48 @@ async def periodic_health_check(
 async def check_bundler_balance(
     ethereum_node_url: str, bundler: Address, min_balance: int
 ) -> tuple[bool, dict]:
-    bundler_balance_res = await send_rpc_request_to_eth_client_no_retry(
-        ethereum_node_url,
-        "eth_getBalance",
-        [bundler, "latest"],
-    )
     try:
-        if bundler_balance_res is None or "result" not in bundler_balance_res:
-            error_message = f"eth_getBalance failed {ethereum_node_url}"
-            logging.critical(error_message)
-            return False, {
-                    "status": "ERROR",
-                    "message": error_message
-                }
-        else:
-            bundler_balance = bundler_balance_res["result"]
-            if int(bundler_balance, 16) >= min_balance:
-                return True, {
-                    "status": "OK",
-                    "message": (
-                        f"Bundler {bundler} balance {bundler_balance}" +
-                        f" is equal or more than minimum balance {hex(min_balance)}"
-                     )
-                }
-            else:
-                error_message = (
-                    f"Bundler {bundler} balance {bundler_balance}" +
-                    f" is less than minimum balance {hex(min_balance)}"
-                )
+        bundler_balance_res = await send_rpc_request_to_eth_client_no_retry(
+            ethereum_node_url,
+            "eth_getBalance",
+            [bundler, "latest"],
+        )
+    except (aiohttp.ClientConnectionError, TimeoutError) as e:
+        error_message = (
+            f"Connection error for Eth node {ethereum_node_url} "
+            f"for eth_getBalance: {e}"
+        )
+        logging.critical(error_message)
+        return False, {"status": "ERROR", "message": error_message}
+    except Exception:
+        error_message = (
+            f"Error when connecting to Eth node {ethereum_node_url} "
+            f"for eth_getBalance"
+        )
+        logging.critical(error_message)
+        return False, {"status": "ERROR", "message": error_message}
 
-                error_dict = {
-                    "status": "ERROR",
-                    "message": error_message
-                }
-
-                logging.warning(error_message)
-                return False, error_dict
-    except:
+    if bundler_balance_res is None or "result" not in bundler_balance_res:
         error_message = f"eth_getBalance failed {ethereum_node_url}"
-        logging.critical(f"eth_getBalance failed {ethereum_node_url}")
-        return False, {
-            "status": "ERROR",
-            "message": error_message
+        logging.critical(error_message)
+        return False, {"status": "ERROR", "message": error_message}
+
+    bundler_balance = bundler_balance_res["result"]
+    if int(bundler_balance, 16) >= min_balance:
+        return True, {
+            "status": "OK",
+            "message": (
+                f"Bundler {bundler} balance {bundler_balance}" +
+                f" is equal or more than minimum balance {hex(min_balance)}"
+             )
         }
+    else:
+        error_message = (
+            f"Bundler {bundler} balance {bundler_balance}" +
+            f" is less than minimum balance {hex(min_balance)}"
+        )
+        logging.warning(error_message)
+        return False, {"status": "ERROR", "message": error_message}
 
 
 async def check_nodes_health(
@@ -124,7 +123,7 @@ async def check_live_ethereum_rpc(
                     f"{ethereum_node_url}"
                 )
 
-    except aiohttp.client_exceptions.ClientConnectorError:
-        return False, f"Connection refused for Eth node {ethereum_node_url}"
+    except (aiohttp.ClientConnectionError, TimeoutError) as e:
+        return False, f"Connection error for Eth node {ethereum_node_url}: {e}"
     except Exception:
         return False, f"Error when connecting to Eth node {ethereum_node_url}"
