@@ -35,6 +35,7 @@ def get_eth_client_session() -> ClientSession:
             limit=200,                  # max total open connections (all hosts)
             limit_per_host=50,          # max concurrent connections per host
             ttl_dns_cache=300,          # DNS cache TTL, in seconds
+            keepalive_timeout=120,      # idle keepalive socket TTL, in seconds
             enable_cleanup_closed=True,
         )
         _session = ClientSession(
@@ -98,6 +99,11 @@ async def send_rpc_request_to_eth_client(
                 headers=headers
             ) as response:
                 resp = await response.read()
+                if response.status != 200:
+                    logging.warning(
+                        f"Attempt No. {i+1}: non-200 status {response.status} "
+                        f"from {chosen_node_url} for {method}: {resp[:200]!r}"
+                    )
                 json_result = json.loads(resp)
         except json.decoder.JSONDecodeError:
             logging.error(
@@ -144,6 +150,7 @@ async def send_rpc_request_to_eth_client(
                         f" with error code: {err_code}"
                         f" and error message: {err_message}."
                     )
+                    await asyncio.sleep(1)
                     continue
                 elif expected_key is not None and expected_key not in json_result:
                     logging.error(
@@ -151,6 +158,7 @@ async def send_rpc_request_to_eth_client(
                         f"the request: {str(json_request)}"
                         f"as the key {expected_key} is not in the result: {str(json_result)}"
                     )
+                    await asyncio.sleep(1)
                     continue
             return json_result
     raise ValueError("Failed rpc request to rpc node client")
@@ -179,6 +187,11 @@ async def send_rpc_request_to_eth_client_no_retry(
     ) as response:
         try:
             resp = await response.read()
+            if response.status != 200:
+                logging.warning(
+                    f"Non-200 status {response.status} from {ethereum_node_url} "
+                    f"for {method}: {resp[:200]!r}"
+                )
             return json.loads(resp)
         except json.decoder.JSONDecodeError:
             logging.critical("Invalid json response from eth client")
