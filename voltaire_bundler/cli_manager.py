@@ -86,7 +86,7 @@ class InitData:
     p2p_canonical_mempool_id_06: MempoolId | None
     min_stake: int
     min_unstake_delay: int
-    bundle_gas_estimation_multiplier: int
+    bundle_gas_estimation_multiplier: float
 
 
 def address(ep: str):
@@ -102,6 +102,14 @@ def unsigned_int(value):
         raise ArgumentTypeError(
                 "%s is an invalid unsigned int value" % value)
     return ivalue
+
+
+def float_at_least_one(value):
+    fvalue = float(value)
+    if fvalue < 1.0:
+        raise ArgumentTypeError(
+                "%s must be >= 1.0 (shrinking the gas estimate is unsafe)" % value)
+    return fvalue
 
 
 def rpc_path(value: str):
@@ -623,9 +631,10 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--bundle_gas_estimation_multiplier",
-        type=unsigned_int,
-        help="bundle gas estimation multiplier.",
-        default=_get_env_or_default("VOLTAIRE_BUNDLE_GAS_ESTIMATION_MULTIPLIER", 1, int),
+        type=float_at_least_one,
+        help="bundle gas estimation multiplier (>= 1.0).",
+        default=_get_env_or_default(
+            "VOLTAIRE_BUNDLE_GAS_ESTIMATION_MULTIPLIER", 1.1, float),
     )
 
     return parser

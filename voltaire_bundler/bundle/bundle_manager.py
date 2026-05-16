@@ -58,7 +58,7 @@ class BundlerManager:
     user_operations_to_ban: dict[
         str, tuple[UserOperationV6 | UserOperationV7V8V9, str, Address]]
     gas_price_percentage_multiplier: int
-    bundle_gas_estimation_multiplier: int
+    bundle_gas_estimation_multiplier: float
     entrypoint_v9_reentrant: str
 
     def __init__(
@@ -77,7 +77,7 @@ class BundlerManager:
         flashbots_protect_node_urls: list[str] | None,
         max_fee_per_gas_percentage_multiplier: int,
         max_priority_fee_per_gas_percentage_multiplier: int,
-        bundle_gas_estimation_multiplier: int,
+        bundle_gas_estimation_multiplier: float,
     ):
         self.local_mempool_manager_v6 = local_mempool_manager_v6
         self.local_mempool_manager_v7 = local_mempool_manager_v7
@@ -314,8 +314,8 @@ class BundlerManager:
                 "Sending bundle failed. failed call data or gas estimation.")
             return
         
-        gas_estimation_int = (
-            int(gas_estimation_hex) * self.bundle_gas_estimation_multiplier
+        gas_estimation_int = math.ceil(
+            gas_estimation_hex * self.bundle_gas_estimation_multiplier
         )
         gas_estimation_hex = hex(gas_estimation_int)
 
