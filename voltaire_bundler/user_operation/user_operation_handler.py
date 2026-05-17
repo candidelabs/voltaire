@@ -3,7 +3,6 @@ import asyncio
 from functools import cache
 import logging
 from functools import reduce
-from math import e
 
 from eth_abi import encode, decode
 from voltaire_bundler.bundle.exceptions import UserOpReceiptFoundException
