@@ -92,6 +92,9 @@ class InitData:
     # into memory-only mode.
     disable_persistent_cache: bool
     cache_dir: str
+    # When True, the cache_dir is wiped at startup. One-shot flag for
+    # discarding a corrupted or stale cache.
+    clear_cache: bool
 
 
 def address(ep: str):
@@ -518,6 +521,21 @@ def initialize_argument_parser() -> ArgumentParser:
         nargs="?",
         const="",
         default=_get_env_or_default("VOLTAIRE_CACHE_DIR", "", str),
+    )
+
+    parser.add_argument(
+        "--clear_cache",
+        type=bool,
+        help=(
+            "Wipe --cache_dir before startup. One-shot flag; useful for "
+            "discarding a stale or corrupted cache without manually "
+            "deleting files. Ignored when --disable_persistent_cache is set."
+        ),
+        nargs="?",
+        const=True,
+        default=_get_env_or_default(
+            "VOLTAIRE_CLEAR_CACHE", False, lambda v: v.lower() == "true",
+        ),
     )
 
     parser.add_argument(
@@ -1021,6 +1039,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.bundle_gas_estimation_multiplier,
         args.disable_persistent_cache,
         args.cache_dir,
+        args.clear_cache,
     )
 
     if args.verbose:

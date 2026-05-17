@@ -106,6 +106,9 @@ class PersistentFIFOCache:
         self._sqlite_path = sqlite_path
         self._sqlite_cache_size_kb = sqlite_cache_size_kb
         await asyncio.to_thread(self._open_db)
+        # Preload the freshest entries from disk so the first batch of RPCs
+        # after a restart get hot hits instead of falling through to disk.
+        await asyncio.to_thread(self._warm_memory_from_disk)
         self._write_queue = asyncio.Queue(maxsize=QUEUE_MAX)
         self._writer_task = asyncio.create_task(
             self._writer_loop(), name=f"cache-writer:{self.name}",
@@ -358,6 +361,23 @@ class PersistentFIFOCache:
         if row is None:
             return None
         return json.loads(row[0])
+
+    def _warm_memory_from_disk(self) -> None:
+        """Preload the most-recent ``memory_capacity`` rows into the hot
+        tier so the first reads after a restart don't need disk fallback.
+        Inserts in ascending seq order so the OrderedDict's FIFO order
+        mirrors on-disk insertion order (oldest first, newest last)."""
+        assert self._read_conn is not None
+        with self._read_lock:
+            cur = self._read_conn.execute(
+                f"SELECT key, value FROM {self.name} "
+                f"ORDER BY seq DESC LIMIT ?",
+                (self.memory_capacity,),
+            )
+            rows = cur.fetchall()
+        # rows came back newest-first; reverse so we insert oldest-first.
+        for key, value in reversed(rows):
+            self._memory[key] = json.loads(value)
 
     def _evict_oldest(self) -> None:
         assert self._write_conn is not None
