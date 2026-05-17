@@ -18,8 +18,9 @@ from voltaire_bundler.mempool.mempool_manager_v8 import LocalMempoolManagerV8
 from voltaire_bundler.mempool.mempool_manager_v9 import LocalMempoolManagerV9
 from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.user_operation_handler import \
-        decode_failed_op_event, decode_failed_op_with_revert_event, \
-        get_deposit_info, get_user_operation_logs_for_block_range
+        UserOperationHandler, decode_failed_op_event, \
+        decode_failed_op_with_revert_event, get_deposit_info, \
+        get_transaction_by_hash, get_user_operation_logs_for_block_range
 from voltaire_bundler.user_operation.user_operation_v6 import UserOperationV6
 from voltaire_bundler.user_operation.user_operation_v7v8v9 import UserOperationV7V8V9
 
@@ -29,6 +30,32 @@ from voltaire_bundler.utils.eth_client_utils import \
 from voltaire_bundler.utils.load_bytecode import load_bytecode
 
 from ..mempool.reputation_manager import ReputationManager
+
+
+async def _warm_inclusion_caches(
+    ethereum_node_urls: list[str],
+    user_operation_handler: UserOperationHandler,
+    transaction_hash: str,
+) -> None:
+    """Fire-and-forget warmup of ``transactions_cache`` and
+    ``transaction_receipts_cache`` once the monitor sees a userop's log
+    on-chain. By the time a client polls ``eth_getUserOperationByHash``
+    or ``eth_getUserOperationReceipt`` for this userop, both caches are
+    already warm, so the RPC handler avoids the eth_getTransactionByHash
+    and eth_getTransactionReceipt round trips against a live node.
+
+    Errors are logged and swallowed — nothing here is load-bearing; if
+    the warmup fails the caches fill lazily on the first client query."""
+    try:
+        await asyncio.gather(
+            get_transaction_by_hash(ethereum_node_urls, transaction_hash),
+            user_operation_handler.get_transaction_receipt(transaction_hash),
+        )
+    except Exception:
+        logging.exception(
+            "cache warmup after inclusion failed for tx %s",
+            transaction_hash,
+        )
 
 
 class BundlerManager:
@@ -574,6 +601,19 @@ class BundlerManager:
                 )
                 user_operations_hashes_to_remove_from_monitoring.append(
                     user_operation.user_operation_hash)
+                # Preemptively warm the tx-by-hash and tx-receipt caches in
+                # the background so the next client poll for this userop
+                # finds them hot instead of paying two more RPC round trips.
+                # The log entry's transactionHash is the only thing we need.
+                log_entry = user_operation_log[0]
+                if "transactionHash" in log_entry:
+                    asyncio.create_task(
+                        _warm_inclusion_caches(
+                            self.ethereum_node_urls,
+                            local_mempool.user_operation_handler,
+                            log_entry["transactionHash"],
+                        )
+                    )
             elif user_operation.number_of_add_to_mempool_attempts > 20:
                 logging.warning(
                     f"user operation: {user_operation.user_operation_hash} "
