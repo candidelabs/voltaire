@@ -38,6 +38,23 @@ from .mempool.reputation_manager import ReputationManager
 
 user_operation_by_hash_cache: dict[str, dict] = {}
 user_operation_receipt_cache: dict[str, dict] = {}
+user_operation_seen_cache: dict[str, dict[str, str]] = {
+    LocalMempoolManagerV6.entrypoint_lowercase: {},
+    LocalMempoolManagerV7.entrypoint_lowercase: {},
+    LocalMempoolManagerV8.entrypoint_lowercase: {},
+    LocalMempoolManagerV9.entrypoint_lowercase: {},
+}
+
+
+def search_user_operation_seen_cache(
+    user_operation_hash: str,
+) -> tuple[str, str] | None:
+    """Return ``(validated_at_block_hex, entrypoint_lowercase)`` if the hash
+    has been seen, else ``None``."""
+    for entrypoint_lowercase, hash_to_block in user_operation_seen_cache.items():
+        if user_operation_hash in hash_to_block:
+            return hash_to_block[user_operation_hash], entrypoint_lowercase
+    return None
 
 
 class ExecutionEndpoint(Endpoint):
@@ -487,6 +504,9 @@ class ExecutionEndpoint(Endpoint):
         (user_operation_hash, verified_at_block_hash, valid_mempools) = (
             await local_mempool.add_user_operation(user_operation)
         )
+        if user_operation.validated_at_block_hex is not None:
+            user_operation_seen_cache[input_entrypoint][user_operation_hash] = user_operation.validated_at_block_hex
+
         if not self.disable_p2p:
             if (input_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase):
                 user_operation_json = user_operation.get_user_operation_json()
@@ -525,48 +545,63 @@ class ExecutionEndpoint(Endpoint):
         if user_operation_hash in user_operation_by_hash_cache:
             return user_operation_by_hash_cache[user_operation_hash]
 
+        search_result = search_user_operation_seen_cache(user_operation_hash)
+        if search_result is not None:
+            cached_block_hex, cached_entrypoint = search_result
+        else:
+            cached_block_hex, cached_entrypoint = None, None
+
         user_operation_by_hash_json_ops = []
-        if (self.local_mempool_manager_v6 is not None and
-                self.user_operation_handler_v6 is not None):
+        if (
+            self.local_mempool_manager_v6 is not None and
+            self.user_operation_handler_v6 is not None and
+            (cached_entrypoint is None or cached_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase)
+        ):
             user_operation_by_hash_json_ops.append(
                 asyncio.create_task(
                     self.user_operation_handler_v6.get_user_operation_by_hash_rpc(
                         user_operation_hash,
                         LocalMempoolManagerV6.entrypoint,
                         self.local_mempool_manager_v6.senders_to_senders_mempools.values(),
+                        cached_block_hex,
+                    )
+                )
+            )
+        if cached_entrypoint is None or cached_entrypoint == LocalMempoolManagerV9.entrypoint_lowercase:
+            user_operation_by_hash_json_ops.append(
+                asyncio.create_task(
+                    self.user_operation_handler_v7v8v9.get_user_operation_by_hash_rpc(
+                        user_operation_hash,
+                        LocalMempoolManagerV9.entrypoint,
+                        self.local_mempool_manager_v9.senders_to_senders_mempools.values(),
+                        cached_block_hex,
                     )
                 )
             )
 
-        user_operation_by_hash_json_ops.append(
-            asyncio.create_task(
-                self.user_operation_handler_v7v8v9.get_user_operation_by_hash_rpc(
-                    user_operation_hash,
-                    LocalMempoolManagerV9.entrypoint,
-                    self.local_mempool_manager_v9.senders_to_senders_mempools.values(),
+        if cached_entrypoint is None or cached_entrypoint == LocalMempoolManagerV8.entrypoint_lowercase:
+            user_operation_by_hash_json_ops.append(
+                asyncio.create_task(
+                    self.user_operation_handler_v7v8v9.get_user_operation_by_hash_rpc(
+                        user_operation_hash,
+                        LocalMempoolManagerV8.entrypoint,
+                        self.local_mempool_manager_v8.senders_to_senders_mempools.values(),
+                        cached_block_hex,
+                    )
                 )
             )
-        )
 
-        user_operation_by_hash_json_ops.append(
-            asyncio.create_task(
-                self.user_operation_handler_v7v8v9.get_user_operation_by_hash_rpc(
-                    user_operation_hash,
-                    LocalMempoolManagerV8.entrypoint,
-                    self.local_mempool_manager_v8.senders_to_senders_mempools.values(),
+        if cached_entrypoint is None or cached_entrypoint == LocalMempoolManagerV7.entrypoint_lowercase:
+            user_operation_by_hash_json_ops.append(
+                asyncio.create_task(
+                    self.user_operation_handler_v7v8v9.get_user_operation_by_hash_rpc(
+                        user_operation_hash,
+                        LocalMempoolManagerV7.entrypoint,
+                        self.local_mempool_manager_v7.senders_to_senders_mempools.values(),
+                        cached_block_hex,
+                    )
                 )
             )
-        )
-
-        user_operation_by_hash_json_ops.append(
-            asyncio.create_task(
-                self.user_operation_handler_v7v8v9.get_user_operation_by_hash_rpc(
-                    user_operation_hash,
-                    LocalMempoolManagerV7.entrypoint,
-                    self.local_mempool_manager_v7.senders_to_senders_mempools.values(),
-                )
-            )
-        )
         done, _ = await asyncio.wait(
             user_operation_by_hash_json_ops,
             return_when=asyncio.FIRST_EXCEPTION
@@ -640,33 +675,49 @@ class ExecutionEndpoint(Endpoint):
         if user_operation_hash in user_operation_receipt_cache:
             return user_operation_receipt_cache[user_operation_hash]
 
+        search_result = search_user_operation_seen_cache(user_operation_hash)
+        if search_result is not None:
+            cached_block_hex, cached_entrypoint = search_result
+        else:
+            cached_block_hex, cached_entrypoint = None, None
+
         user_operation_receipt_info_json_ops = []
-        if self.user_operation_handler_v6 is not None:
+        if (
+            self.user_operation_handler_v6 is not None and
+            (cached_entrypoint is None or cached_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase)
+        ):
             user_operation_receipt_info_json_ops.append(asyncio.create_task(
                     self.user_operation_handler_v6.get_user_operation_receipt_rpc(
                         user_operation_hash,
                         LocalMempoolManagerV6.entrypoint,
+                        cached_block_hex,
                     ))
                 )
 
-        user_operation_receipt_info_json_ops.append(asyncio.create_task(
-            self.user_operation_handler_v7v8v9.get_user_operation_receipt_rpc(
-                user_operation_hash,
-                LocalMempoolManagerV9.entrypoint,
-            ))
-        )
-        user_operation_receipt_info_json_ops.append(asyncio.create_task(
-            self.user_operation_handler_v7v8v9.get_user_operation_receipt_rpc(
-                user_operation_hash,
-                LocalMempoolManagerV8.entrypoint,
-            ))
-        )
-        user_operation_receipt_info_json_ops.append(asyncio.create_task(
-            self.user_operation_handler_v7v8v9.get_user_operation_receipt_rpc(
-                user_operation_hash,
-                LocalMempoolManagerV7.entrypoint,
-            ))
-        )
+        if cached_entrypoint is None or cached_entrypoint == LocalMempoolManagerV9.entrypoint_lowercase:
+            user_operation_receipt_info_json_ops.append(asyncio.create_task(
+                self.user_operation_handler_v7v8v9.get_user_operation_receipt_rpc(
+                    user_operation_hash,
+                    LocalMempoolManagerV9.entrypoint,
+                    cached_block_hex,
+                ))
+            )
+        if cached_entrypoint is None or cached_entrypoint == LocalMempoolManagerV8.entrypoint_lowercase:
+            user_operation_receipt_info_json_ops.append(asyncio.create_task(
+                self.user_operation_handler_v7v8v9.get_user_operation_receipt_rpc(
+                    user_operation_hash,
+                    LocalMempoolManagerV8.entrypoint,
+                    cached_block_hex,
+                ))
+            )
+        if cached_entrypoint is None or cached_entrypoint == LocalMempoolManagerV7.entrypoint_lowercase:
+            user_operation_receipt_info_json_ops.append(asyncio.create_task(
+                self.user_operation_handler_v7v8v9.get_user_operation_receipt_rpc(
+                    user_operation_hash,
+                    LocalMempoolManagerV7.entrypoint,
+                    cached_block_hex,
+                ))
+            )
         done, _ = await asyncio.wait(
             user_operation_receipt_info_json_ops,
             return_when=asyncio.FIRST_EXCEPTION
