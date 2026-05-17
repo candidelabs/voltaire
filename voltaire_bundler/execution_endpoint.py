@@ -58,14 +58,21 @@ async def search_user_operation_seen_cache(
     user_operation_hash: str,
 ) -> tuple[str, str] | None:
     """Return ``(validated_at_block_hex, entrypoint_lowercase)`` if the hash
-    has been seen, else ``None``. Async because ``get`` may fall through to
-    the on-disk tier."""
+    has been seen, else ``None``. One bulk lookup covers all four entrypoint
+    versions: memory hits short-circuit at the dict level, and any keys that
+    miss memory go to disk in a single ``SELECT … WHERE key IN (…)`` instead
+    of four sequential round trips."""
+    keys = [
+        f"{ep}:{user_operation_hash}" for ep in _SEEN_CACHE_ENTRYPOINTS
+    ]
+    found = await user_operation_seen_cache.get_many(keys)
+    # Re-walk in entrypoint priority order so we return the same answer as
+    # the previous one-at-a-time loop if a hash somehow lives under more
+    # than one entrypoint key.
     for entrypoint_lowercase in _SEEN_CACHE_ENTRYPOINTS:
-        value = await user_operation_seen_cache.get(
-            f"{entrypoint_lowercase}:{user_operation_hash}"
-        )
-        if value is not None:
-            return value, entrypoint_lowercase
+        key = f"{entrypoint_lowercase}:{user_operation_hash}"
+        if key in found:
+            return found[key], entrypoint_lowercase
     return None
 
 
