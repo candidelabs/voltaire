@@ -95,6 +95,10 @@ class InitData:
     # When True, the cache_dir is wiped at startup. One-shot flag for
     # discarding a corrupted or stale cache.
     clear_cache: bool
+    # Per-deployment scale knobs for the cache caps. 1.0 keeps the
+    # built-in defaults; bump up on hosts with more RAM/disk headroom.
+    cache_memory_size: float
+    cache_disk_size: float
 
 
 def address(ep: str):
@@ -117,6 +121,13 @@ def float_at_least_one(value):
     if fvalue < 1.0:
         raise ArgumentTypeError(
                 "%s must be >= 1.0 (shrinking the gas estimate is unsafe)" % value)
+    return fvalue
+
+
+def positive_float(value):
+    fvalue = float(value)
+    if fvalue <= 0:
+        raise ArgumentTypeError("%s must be > 0" % value)
     return fvalue
 
 
@@ -535,6 +546,34 @@ def initialize_argument_parser() -> ArgumentParser:
         const=True,
         default=_get_env_or_default(
             "VOLTAIRE_CLEAR_CACHE", False, lambda v: v.lower() == "true",
+        ),
+    )
+
+    parser.add_argument(
+        "--cache_memory_size",
+        type=positive_float,
+        help=(
+            "Multiplier applied to every cache's in-memory capacity. "
+            "1.0 keeps the 10_000-entry default; 2.0 doubles it."
+        ),
+        nargs="?",
+        const=1.0,
+        default=_get_env_or_default(
+            "VOLTAIRE_CACHE_MEMORY_SIZE", 1.0, float,
+        ),
+    )
+
+    parser.add_argument(
+        "--cache_disk_size",
+        type=positive_float,
+        help=(
+            "Multiplier applied to every cache's on-disk capacity. "
+            "1.0 keeps the 500_000-row default."
+        ),
+        nargs="?",
+        const=1.0,
+        default=_get_env_or_default(
+            "VOLTAIRE_CACHE_DISK_SIZE", 1.0, float,
         ),
     )
 
@@ -1040,6 +1079,8 @@ async def get_init_data(args: Namespace) -> InitData:
         args.disable_persistent_cache,
         args.cache_dir,
         args.clear_cache,
+        args.cache_memory_size,
+        args.cache_disk_size,
     )
 
     if args.verbose:

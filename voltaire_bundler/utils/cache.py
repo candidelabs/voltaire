@@ -133,6 +133,19 @@ class PersistentFIFOCache:
         self._started = False
 
     @classmethod
+    def apply_capacity_multipliers(
+        cls, memory_mult: float, disk_mult: float,
+    ) -> None:
+        """Scale every registered cache's capacities by the given multipliers.
+        Must be called BEFORE ``start_all`` so warm-on-start observes the
+        new memory cap and disk eviction uses the new disk cap."""
+        if memory_mult <= 0 or disk_mult <= 0:
+            raise ValueError("cache size multipliers must be positive")
+        for cache in cls._instances:
+            cache.memory_capacity = max(1, int(cache.memory_capacity * memory_mult))
+            cache.disk_capacity = max(1, int(cache.disk_capacity * disk_mult))
+
+    @classmethod
     async def start_all(
         cls,
         cache_dir: Path | None,
