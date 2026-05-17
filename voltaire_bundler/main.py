@@ -156,7 +156,15 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
     except asyncio.exceptions.CancelledError:
         pass
     finally:
-        # Drain queued disk writes and close SQLite handles. Bounded by the
-        # write-queue size (~10k) × per-batch latency; typically well under a
-        # second.
+        # Drain queued disk writes and close SQLite handles cleanly. This only
+        # actually runs on a programmatic TaskGroup exit — the SIGTERM/SIGINT
+        # path goes through ``immediate_exit`` which stops the loop and raises
+        # SystemExit, so this ``await`` never resumes on a real shutdown.
+        #
+        # That's deliberate. The cached values are derived from chain state, so
+        # losing the asyncio.Queue's tail (typically <1 ms of writes, at most a
+        # few hundred ms under burst) just means a small cache-warm window on
+        # the next start. A synchronous drain on SIGTERM would add up to a few
+        # seconds of "RPC server frozen + new connections rejected" before exit
+        # for marginal durability gain, so we accept the loss instead.
         await PersistentFIFOCache.aclose_all()

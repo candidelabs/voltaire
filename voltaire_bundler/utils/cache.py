@@ -97,7 +97,12 @@ class PersistentFIFOCache:
         sqlite_cache_size_kb: int = 8_000,
     ) -> None:
         """Start the cache. With ``sqlite_path=None``, runs in memory-only
-        mode. Idempotent — repeat calls are a no-op."""
+        mode. Idempotent — repeat calls are a no-op.
+
+        If the disk tier is requested but the SQLite file can't be opened
+        (unwritable directory, full disk, corruption, etc.), the cache
+        soft-fails to memory-only mode with a warning. The bundler still
+        runs; the next restart re-attempts the disk tier."""
         if self._started:
             return
         if sqlite_path is None:
@@ -105,7 +110,24 @@ class PersistentFIFOCache:
             return
         self._sqlite_path = sqlite_path
         self._sqlite_cache_size_kb = sqlite_cache_size_kb
-        await asyncio.to_thread(self._open_db)
+        try:
+            await asyncio.to_thread(self._open_db)
+        except (OSError, sqlite3.Error) as exc:
+            # Most commonly: cache_dir isn't writable (container without a
+            # writable HOME, hardened systemd unit, read-only filesystem),
+            # the disk is full, or the existing DB file is corrupted. Log
+            # and fall through to memory-only so we don't take the bundler
+            # down for a non-load-bearing optimization.
+            logger.warning(
+                "cache %s: disk tier disabled (%s: %s); running memory-only. "
+                "Set --cache_dir to a writable location, "
+                "--disable_persistent_cache to silence, or "
+                "--clear_cache to wipe a corrupted DB.",
+                self.name, type(exc).__name__, exc,
+            )
+            self._sqlite_path = None
+            self._started = True
+            return
         # Preload the freshest entries from disk so the first batch of RPCs
         # after a restart get hot hits instead of falling through to disk.
         await asyncio.to_thread(self._warm_memory_from_disk)
@@ -276,47 +298,63 @@ class PersistentFIFOCache:
 
     def _open_db(self) -> None:
         assert self._sqlite_path is not None
-        self._sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-        # isolation_level=None puts us in autocommit mode; transactions are
-        # managed explicitly via BEGIN/COMMIT.
-        self._write_conn = sqlite3.connect(
-            str(self._sqlite_path),
-            check_same_thread=False,
-            isolation_level=None,
-        )
-        self._read_conn = sqlite3.connect(
-            str(self._sqlite_path),
-            check_same_thread=False,
-            isolation_level=None,
-        )
-        for conn in (self._write_conn, self._read_conn):
-            # PRAGMAs are per-connection; both conns need them.
-            conn.execute("PRAGMA journal_mode = WAL")
-            conn.execute("PRAGMA synchronous  = NORMAL")
-            conn.execute("PRAGMA temp_store   = MEMORY")
-            conn.execute(f"PRAGMA cache_size  = -{self._sqlite_cache_size_kb}")
-            conn.execute("PRAGMA mmap_size    = 67108864")  # 64 MB virtual
+        try:
+            self._sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+            # isolation_level=None puts us in autocommit mode; transactions
+            # are managed explicitly via BEGIN/COMMIT.
+            self._write_conn = sqlite3.connect(
+                str(self._sqlite_path),
+                check_same_thread=False,
+                isolation_level=None,
+            )
+            self._read_conn = sqlite3.connect(
+                str(self._sqlite_path),
+                check_same_thread=False,
+                isolation_level=None,
+            )
+            for conn in (self._write_conn, self._read_conn):
+                # PRAGMAs are per-connection; both conns need them.
+                conn.execute("PRAGMA journal_mode = WAL")
+                conn.execute("PRAGMA synchronous  = NORMAL")
+                conn.execute("PRAGMA temp_store   = MEMORY")
+                conn.execute(
+                    f"PRAGMA cache_size  = -{self._sqlite_cache_size_kb}",
+                )
+                conn.execute("PRAGMA mmap_size    = 67108864")  # 64 MB virtual
 
-        self._write_conn.executescript(
-            f"""
-            CREATE TABLE IF NOT EXISTS {self.name} (
-                key   TEXT    PRIMARY KEY,
-                value BLOB    NOT NULL,
-                seq   INTEGER NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS {self.name}_seq
-                ON {self.name} (seq);
-            CREATE TABLE IF NOT EXISTS cache_meta (
-                table_name TEXT PRIMARY KEY,
-                next_seq   INTEGER NOT NULL
-            );
-            """
-        )
-        row = self._write_conn.execute(
-            "SELECT next_seq FROM cache_meta WHERE table_name = ?",
-            (self.name,),
-        ).fetchone()
-        self._next_seq = row[0] if row else 0
+            self._write_conn.executescript(
+                f"""
+                CREATE TABLE IF NOT EXISTS {self.name} (
+                    key   TEXT    PRIMARY KEY,
+                    value BLOB    NOT NULL,
+                    seq   INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS {self.name}_seq
+                    ON {self.name} (seq);
+                CREATE TABLE IF NOT EXISTS cache_meta (
+                    table_name TEXT PRIMARY KEY,
+                    next_seq   INTEGER NOT NULL
+                );
+                """
+            )
+            row = self._write_conn.execute(
+                "SELECT next_seq FROM cache_meta WHERE table_name = ?",
+                (self.name,),
+            ).fetchone()
+            self._next_seq = row[0] if row else 0
+        except Exception:
+            # Roll back any partial state so ``start``'s soft-fail path
+            # doesn't see a half-open cache. Best-effort close — we're
+            # about to re-raise, the warning will log the real cause.
+            for conn_attr in ("_write_conn", "_read_conn"):
+                conn = getattr(self, conn_attr, None)
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    setattr(self, conn_attr, None)
+            raise
 
     def _close_conns(self) -> None:
         try:
