@@ -604,6 +604,17 @@ async def get_user_operation_logs_for_block_range(
 transactions_cache = PersistentFIFOCache(name="transactions")
 
 
+# Only the fields the two callers (``get_user_operation_by_hash`` in v6 and
+# v7v8v9) actually read. Trimming the rest (gas/gasPrice/v/r/s/accessList/
+# nonce/value/chainId/etc.) keeps disk + RAM footprint down without losing
+# anything we'd ever use.
+TRANSACTION_CACHED_FIELDS = (
+    "blockHash",
+    "blockNumber",
+    "input",
+)
+
+
 TRANSACTION_RECEIPT_CACHED_FIELDS = (
     "blockHash",
     "blockNumber",
@@ -675,6 +686,15 @@ async def get_transaction_by_hash(
                 ethereum_node_urls, transaction_hash, recursion_depth
             )
         else:
+            # Trim to the fields the caller actually reads before caching.
+            # Subsequent cache hits return this same shape; the in-flight
+            # caller below also gets the trimmed dict so cache-hit vs.
+            # cache-miss paths return identical objects.
+            transaction = {
+                field: transaction[field]
+                for field in TRANSACTION_CACHED_FIELDS
+                if field in transaction
+            }
             transactions_cache.set(transaction_hash, transaction)
         return transaction
     else:
