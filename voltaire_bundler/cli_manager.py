@@ -499,10 +499,10 @@ def initialize_argument_parser() -> ArgumentParser:
     parser.add_argument(
         "--disable_p2p",
         type=bool,
-        help="disable p2p",
+        help="disable p2p (on by default; pass VOLTAIRE_DISABLE_P2P=false to opt in)",
         nargs="?",
         const=True,
-        default=_get_env_or_default("VOLTAIRE_DISABLE_P2P", False, lambda v: v.lower() == "true"),
+        default=_get_env_or_default("VOLTAIRE_DISABLE_P2P", True, lambda v: v.lower() == "true"),
     )
 
     parser.add_argument(
