@@ -217,6 +217,32 @@ class PersistentFIFOCache:
                 self._memory.popitem(last=False)
         return v
 
+    async def get_many(self, keys: list[str]) -> dict[str, Any]:
+        """Bulk lookup. Returns a dict mapping each key that's present (in
+        either tier) to its value; keys absent from both tiers are absent
+        from the result. Memory misses for ALL keys go to disk in a single
+        ``SELECT … WHERE key IN (…)`` instead of one round trip per key —
+        the difference matters when a hot-path handler probes 4+ keys at
+        once (e.g. the seen-cache fan-out across entrypoint versions)."""
+        if not keys:
+            return {}
+        found: dict[str, Any] = {}
+        misses: list[str] = []
+        for k in keys:
+            v = self._memory.get(k)
+            if v is not None:
+                found[k] = v
+            else:
+                misses.append(k)
+        if misses and self._read_conn is not None:
+            disk_hits = await asyncio.to_thread(self._disk_get_many, misses)
+            for k, v in disk_hits.items():
+                found[k] = v
+                self._memory[k] = v
+                if len(self._memory) > self.memory_capacity:
+                    self._memory.popitem(last=False)
+        return found
+
     def set(self, key: str, value: Any) -> None:
         # Hot tier: insert (or overwrite in place — OrderedDict preserves
         # position on overwrite, keeping the FIFO order pinned to the
@@ -421,6 +447,26 @@ class PersistentFIFOCache:
         if row is None:
             return None
         return json.loads(row[0])
+
+    def _disk_get_many(self, keys: list[str]) -> dict[str, Any]:
+        assert self._read_conn is not None
+        # SQLite has a SQLITE_LIMIT_VARIABLE_NUMBER ceiling (default 999 on
+        # older builds, 32766 on newer ones). Real callers pass a handful
+        # of keys; this guard catches accidental misuse without imposing
+        # a chunking dance for the common case.
+        if len(keys) > 500:
+            raise ValueError(
+                f"get_many: {len(keys)} keys exceeds the per-query limit"
+            )
+        placeholders = ",".join("?" * len(keys))
+        with self._read_lock:
+            cur = self._read_conn.execute(
+                f"SELECT key, value FROM {self.name} "
+                f"WHERE key IN ({placeholders})",
+                keys,
+            )
+            rows = cur.fetchall()
+        return {key: json.loads(value) for key, value in rows}
 
     def _warm_memory_from_disk(self) -> None:
         """Preload the most-recent ``memory_capacity`` rows into the hot
