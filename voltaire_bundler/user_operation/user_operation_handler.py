@@ -9,7 +9,7 @@ from eth_abi import encode, decode
 from voltaire_bundler.bundle.exceptions import UserOpReceiptFoundException
 from voltaire_bundler.mempool.sender_mempool import VerifiedUserOperation
 from voltaire_bundler.custom_types import Address
-from voltaire_bundler.utils.cache import InMemoryFIFOCache
+from voltaire_bundler.utils.cache import PersistentFIFOCache
 from voltaire_bundler.utils.eth_client_utils import \
         get_block_info, send_rpc_request_to_eth_client
 from typing import Any
@@ -252,7 +252,7 @@ class UserOperationHandler(ABC):
     async def get_transaction_receipt(
         self, transaction_hash: str
     ) -> dict | None:
-        cached = transaction_receipts_cache.get(transaction_hash)
+        cached = await transaction_receipts_cache.get(transaction_hash)
         if cached is not None:
             return cached
 
@@ -423,7 +423,7 @@ async def get_deposit_info(
 # Composite-key cache: "{entrypoint_lowercase}:{userOpHash}" -> eth_getLogs result.
 # Flattens the previous per-entrypoint nested dict (which also had a broken
 # eviction path: ``logs_cache = {}`` rebound a local, never the outer dict).
-user_operation_logs_cache = InMemoryFIFOCache(name="user_operation_logs")
+user_operation_logs_cache = PersistentFIFOCache(name="user_operation_logs")
 
 
 def del_user_operation_logs_cache_entry(
@@ -443,7 +443,7 @@ async def get_user_operation_logs_for_block_range(
     to_block_hex: str,
 ) -> dict | None:
     cache_key = f"{entrypoint.lower()}:{user_operation_hash}"
-    cached = user_operation_logs_cache.get(cache_key)
+    cached = await user_operation_logs_cache.get(cache_key)
     if cached is not None:
         return cached
     USER_OPERATIOM_EVENT_DISCRIPTOR = (
@@ -471,7 +471,7 @@ async def get_user_operation_logs_for_block_range(
         return None
 
 
-transactions_cache = InMemoryFIFOCache(name="transactions")
+transactions_cache = PersistentFIFOCache(name="transactions")
 
 
 TRANSACTION_RECEIPT_CACHED_FIELDS = (
@@ -490,7 +490,7 @@ TRANSACTION_RECEIPT_CACHED_FIELDS = (
     "effectiveGasPrice",
 )
 
-transaction_receipts_cache = InMemoryFIFOCache(name="transaction_receipts")
+transaction_receipts_cache = PersistentFIFOCache(name="transaction_receipts")
 
 
 async def get_transaction_by_hash(
@@ -504,7 +504,7 @@ async def get_transaction_by_hash(
         logging.error("get_transaction_by_hash recursion too deep.")
         return None
 
-    cached = transactions_cache.get(transaction_hash)
+    cached = await transactions_cache.get(transaction_hash)
     if cached is not None:
         return cached
     params = [transaction_hash]

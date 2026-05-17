@@ -87,6 +87,11 @@ class InitData:
     min_stake: int
     min_unstake_delay: int
     bundle_gas_estimation_multiplier: float
+    # RPC-result caches are mirrored to SQLite files under ``cache_dir`` so
+    # they survive bundler restarts. Set ``disable_persistent_cache`` to opt
+    # into memory-only mode.
+    disable_persistent_cache: bool
+    cache_dir: str
 
 
 def address(ep: str):
@@ -484,6 +489,35 @@ def initialize_argument_parser() -> ArgumentParser:
         nargs="?",
         const=True,
         default=_get_env_or_default("VOLTAIRE_DISABLE_P2P", False, lambda v: v.lower() == "true"),
+    )
+
+    parser.add_argument(
+        "--disable_persistent_cache",
+        type=bool,
+        help=(
+            "Opt into memory-only RPC-result caches. By default the caches "
+            "(logs, transactions, receipts, seen) are mirrored to SQLite "
+            "files under --cache_dir so they survive a bundler restart."
+        ),
+        nargs="?",
+        const=True,
+        default=_get_env_or_default(
+            "VOLTAIRE_DISABLE_PERSISTENT_CACHE", False,
+            lambda v: v.lower() == "true",
+        ),
+    )
+
+    parser.add_argument(
+        "--cache_dir",
+        type=str,
+        help=(
+            "Directory holding persistent-cache SQLite files. Defaults to "
+            "~/.voltaire/cache/<chain_id>. Ignored when "
+            "--disable_persistent_cache is set."
+        ),
+        nargs="?",
+        const="",
+        default=_get_env_or_default("VOLTAIRE_CACHE_DIR", "", str),
     )
 
     parser.add_argument(
@@ -984,7 +1018,9 @@ async def get_init_data(args: Namespace) -> InitData:
         args.p2p_canonical_mempool_id_06,
         args.min_stake,
         args.min_unstake_delay,
-        args.bundle_gas_estimation_multiplier
+        args.bundle_gas_estimation_multiplier,
+        args.disable_persistent_cache,
+        args.cache_dir,
     )
 
     if args.verbose:

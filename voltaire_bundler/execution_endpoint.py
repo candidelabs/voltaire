@@ -27,7 +27,7 @@ from voltaire_bundler.user_operation.user_operation_handler_v7v8v9 import \
     UserOperationHandlerV7V8V9
 from voltaire_bundler.user_operation.user_operation_handler import \
     fell_user_operation_optional_parameters_for_estimateUserOperationGas
-from voltaire_bundler.utils.cache import InMemoryFIFOCache
+from voltaire_bundler.utils.cache import PersistentFIFOCache
 from voltaire_bundler.utils.eth_client_utils import get_block_info, send_rpc_request_to_eth_client
 
 from .bundle.bundle_manager import BundlerManager
@@ -41,10 +41,10 @@ user_operation_by_hash_cache: dict[str, dict] = {}
 user_operation_receipt_cache: dict[str, dict] = {}
 
 # Composite-key cache: "{entrypoint_lowercase}:{userOpHash}" -> validated_at_block_hex.
-# Flattening the previous per-entrypoint nested dict keeps the new InMemoryFIFOCache
-# interface uniform across all four caches and prepares for the on-disk tier
-# (one SQLite row per entry, composite primary key).
-user_operation_seen_cache = InMemoryFIFOCache(name="user_operation_seen")
+# Flattening the previous per-entrypoint nested dict keeps the cache interface
+# uniform across all four caches; the on-disk tier stores one row per entry
+# with the composite primary key.
+user_operation_seen_cache = PersistentFIFOCache(name="user_operation_seen")
 
 _SEEN_CACHE_ENTRYPOINTS = (
     LocalMempoolManagerV6.entrypoint_lowercase,
@@ -54,13 +54,14 @@ _SEEN_CACHE_ENTRYPOINTS = (
 )
 
 
-def search_user_operation_seen_cache(
+async def search_user_operation_seen_cache(
     user_operation_hash: str,
 ) -> tuple[str, str] | None:
     """Return ``(validated_at_block_hex, entrypoint_lowercase)`` if the hash
-    has been seen, else ``None``."""
+    has been seen, else ``None``. Async because ``get`` may fall through to
+    the on-disk tier."""
     for entrypoint_lowercase in _SEEN_CACHE_ENTRYPOINTS:
-        value = user_operation_seen_cache.get(
+        value = await user_operation_seen_cache.get(
             f"{entrypoint_lowercase}:{user_operation_hash}"
         )
         if value is not None:
@@ -559,7 +560,7 @@ class ExecutionEndpoint(Endpoint):
         if user_operation_hash in user_operation_by_hash_cache:
             return user_operation_by_hash_cache[user_operation_hash]
 
-        search_result = search_user_operation_seen_cache(user_operation_hash)
+        search_result = await search_user_operation_seen_cache(user_operation_hash)
         if search_result is not None:
             cached_block_hex, cached_entrypoint = search_result
         else:
@@ -689,7 +690,7 @@ class ExecutionEndpoint(Endpoint):
         if user_operation_hash in user_operation_receipt_cache:
             return user_operation_receipt_cache[user_operation_hash]
 
-        search_result = search_user_operation_seen_cache(user_operation_hash)
+        search_result = await search_user_operation_seen_cache(user_operation_hash)
         if search_result is not None:
             cached_block_hex, cached_entrypoint = search_result
         else:

@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 from functools import partial
+from pathlib import Path
 from signal import SIGINT, SIGTERM
 import platform
 if platform.system() != "Windows":
@@ -12,6 +13,7 @@ from voltaire_bundler.mempool.mempool_info import DEFAULT_MEMPOOL_INFO
 from voltaire_bundler.metrics.metrics import run_metrics_server
 from voltaire_bundler.p2p_boot import p2p_boot
 from voltaire_bundler.rpc.health import periodic_health_check_cron_job
+from voltaire_bundler.utils.cache import PersistentFIFOCache
 from voltaire_bundler.utils.SignalHaltError import immediate_exit
 
 from .cli_manager import parse_args
@@ -55,6 +57,19 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             )
             loop.add_signal_handler(signal_enum, exit_func)
         asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+
+    # Start the RPC-result caches. By default each cache opens a SQLite file
+    # under cache_dir and resumes from any prior state;
+    # --disable_persistent_cache opts into in-memory-only mode.
+    if init_data.disable_persistent_cache:
+        await PersistentFIFOCache.start_all(cache_dir=None)
+    else:
+        cache_dir = (
+            Path(init_data.cache_dir).expanduser()
+            if init_data.cache_dir
+            else Path.home() / ".voltaire" / "cache" / str(init_data.chain_id)
+        )
+        await PersistentFIFOCache.start_all(cache_dir=cache_dir)
 
     try:
         async with asyncio.TaskGroup() as task_group:
@@ -129,3 +144,8 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
                     logging.exception(str(excp))
     except asyncio.exceptions.CancelledError:
         pass
+    finally:
+        # Drain queued disk writes and close SQLite handles. Bounded by the
+        # write-queue size (~10k) × per-batch latency; typically well under a
+        # second.
+        await PersistentFIFOCache.aclose_all()
