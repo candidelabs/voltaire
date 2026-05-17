@@ -18,6 +18,26 @@ enabled so readers never wait on the writer.
 When ``start`` is called without a ``sqlite_path`` (or never called), the
 cache behaves as a memory-only FIFO: ``get`` is still async, but never
 falls through to disk.
+
+Eviction-order discrepancy on overwrites
+----------------------------------------
+The two tiers diverge on how they treat ``set(k, v)`` for a key that's
+already present:
+
+- The memory ``OrderedDict`` keeps the key in its **original** insertion
+  slot (strict FIFO — overwrites do not refresh recency).
+- The disk side uses ``INSERT OR REPLACE``, which deletes the existing
+  row and reinserts with a fresh ``seq``, so the entry moves to the
+  **FIFO-newest** position on disk.
+
+After a restart, ``warm_memory_from_disk`` loads ``memory_capacity``
+rows by ``seq DESC`` — i.e. the disk view wins, and a key that was
+"old" in the previous session's memory comes back as "newest" in
+memory. This is intentional today because all current callers store
+deterministic values (chain-immutable logs/receipts/txs, or
+``seen_cache`` block hex where either bundler's value is correct), so
+the eviction-priority flip is invisible. If you add a caller that
+overwrites with different semantics, audit this.
 """
 from __future__ import annotations
 
