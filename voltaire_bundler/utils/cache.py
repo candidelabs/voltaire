@@ -294,6 +294,21 @@ class PersistentFIFOCache:
 
     async def _writer_loop(self) -> None:
         assert self._write_queue is not None
+        # One-shot cleanup of any overage accumulated across previous
+        # sessions. ``_writes_since_evict`` only triggers in-session
+        # eviction after 1000 writes; a frequently-restarting bundler
+        # that never crosses that threshold would otherwise let the disk
+        # file drift past disk_capacity indefinitely. Doing this here (in
+        # the writer task) instead of in start() keeps startup latency
+        # untouched — the writer task gets created at the end of start()
+        # and the eviction runs in the background. Errors are logged and
+        # swallowed; nothing here is load-bearing.
+        try:
+            await asyncio.to_thread(self._evict_oldest)
+        except Exception:
+            logger.exception(
+                "cache %s: startup eviction failed", self.name,
+            )
         while True:
             first = await self._write_queue.get()
             batch: list[tuple[str, Any]] = [first]
