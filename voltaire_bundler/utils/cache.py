@@ -219,6 +219,14 @@ class PersistentFIFOCache:
     # ------------------------------------------------------------------
 
     async def get(self, key: str) -> Any | None:
+        # ``is not None`` is the hit/miss signal, so a cached ``None`` is
+        # indistinguishable from "not in cache" and triggers a refetch.
+        # That's the right behavior for this codebase: every key maps to
+        # chain-derived state that can change over time (a userop hash
+        # with no log today may have one after the next bundle), so
+        # there's no such thing as an authoritative cached "no result".
+        # If you wire up a caller whose miss IS final, this needs a
+        # sentinel-based signal instead.
         # Memory first — the hot path.
         v = self._memory.get(key)
         if v is not None:
