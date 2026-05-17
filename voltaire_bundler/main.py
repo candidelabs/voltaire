@@ -59,6 +59,13 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             loop.add_signal_handler(signal_enum, exit_func)
         asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
+    # Apply the size multipliers BEFORE start_all so warm-on-start observes
+    # the scaled memory cap.
+    PersistentFIFOCache.apply_capacity_multipliers(
+        memory_mult=init_data.cache_memory_size,
+        disk_mult=init_data.cache_disk_size,
+    )
+
     # Start the RPC-result caches. By default each cache opens a SQLite file
     # under cache_dir and resumes from any prior state;
     # --disable_persistent_cache opts into in-memory-only mode.
