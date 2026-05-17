@@ -257,27 +257,49 @@ class UserOperationHandler(ABC):
             return cached
 
         params = [transaction_hash]
-        res: Any = await send_rpc_request_to_eth_client(
-            self.ethereum_node_urls, "eth_getTransactionReceipt", params,
-            None, "result"
-        )
-        transaction = res["result"]
-        if (  # pending or missing receipt — don't cache, let the caller retry
-            transaction is None or
-            transaction.get("blockNumber") is None or
-            transaction.get("transactionHash") is None or
-            transaction.get("transactionIndex") is None or
-            "blockHash" not in transaction
-        ):
-            return None
+        # Same safety net as eth_getLogs: cap wall time and swallow every
+        # error mode (timeout, network error, non-standard response shape,
+        # RPC-level error after retries). A missed receipt is just a "not
+        # yet confirmed" signal to the caller; nothing here should bubble
+        # up and fail the RPC handler.
+        try:
+            res = await asyncio.wait_for(
+                send_rpc_request_to_eth_client(
+                    self.ethereum_node_urls, "eth_getTransactionReceipt",
+                    params, None, "result",
+                ),
+                timeout=ETH_RPC_LOOKUP_TIMEOUT_S,
+            )
+            transaction = res["result"]
+            if (  # pending or missing receipt — don't cache, let the caller retry
+                transaction is None or
+                transaction.get("blockNumber") is None or
+                transaction.get("transactionHash") is None or
+                transaction.get("transactionIndex") is None or
+                "blockHash" not in transaction
+            ):
+                return None
 
-        trimmed = {
-            field: transaction[field]
-            for field in TRANSACTION_RECEIPT_CACHED_FIELDS
-            if field in transaction
-        }
-        transaction_receipts_cache.set(transaction_hash, trimmed)
-        return trimmed
+            trimmed = {
+                field: transaction[field]
+                for field in TRANSACTION_RECEIPT_CACHED_FIELDS
+                if field in transaction
+            }
+            transaction_receipts_cache.set(transaction_hash, trimmed)
+            return trimmed
+        except asyncio.TimeoutError:
+            logging.error(
+                "eth_getTransactionReceipt(%s) timed out after %ss; "
+                "treating as miss",
+                transaction_hash, ETH_RPC_LOOKUP_TIMEOUT_S,
+            )
+            return None
+        except Exception:
+            logging.error(
+                "eth_getTransactionReceipt(%s) failed; treating as miss",
+                transaction_hash, exc_info=True,
+            )
+            return None
 
     async def get_user_operation_logs(
         self,
@@ -425,6 +447,21 @@ async def get_deposit_info(
 # eviction path: ``logs_cache = {}`` rebound a local, never the outer dict).
 user_operation_logs_cache = PersistentFIFOCache(name="user_operation_logs")
 
+# Wall-clock budget for a single RPC lookup against an Ethereum node
+# (eth_getLogs / eth_getTransactionReceipt / eth_getTransactionByHash).
+# The shared RPC helper retries up to 60× with 1 s sleeps and a 60 s
+# per-attempt aiohttp timeout, which can stretch a single lookup into
+# minutes on a slow or misbehaving node. Capping here means a hash lookup
+# degrades to "miss" quickly instead of stalling the RPC handler.
+ETH_RPC_LOOKUP_TIMEOUT_S = 2.0
+
+# When the caller asks for ``fromBlock="earliest"``, try a narrower recent
+# window first. The vast majority of getUserOperationByHash/Receipt calls
+# are clients polling a userop submitted seconds ago, which lives well
+# within this window — and many nodes either time out or return invalid
+# responses for a full-history eth_getLogs scan.
+EARLIEST_FALLBACK_RECENT_WINDOW = 5_000
+
 
 def del_user_operation_logs_cache_entry(
     user_operation_hash: str,
@@ -435,40 +472,133 @@ def del_user_operation_logs_cache_entry(
     )
 
 
-async def get_user_operation_logs_for_block_range(
+USER_OPERATION_EVENT_DESCRIPTOR = (
+    "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
+)
+
+
+async def _eth_getLogs_once(
     ethereum_node_eth_get_logs_urls: list[str],
     user_operation_hash: str,
     entrypoint: str,
     from_block_hex: str,
     to_block_hex: str,
-) -> dict | None:
-    cache_key = f"{entrypoint.lower()}:{user_operation_hash}"
-    cached = await user_operation_logs_cache.get(cache_key)
-    if cached is not None:
-        return cached
-    USER_OPERATIOM_EVENT_DISCRIPTOR = (
-        "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
-    )
-
+) -> list | None:
+    """Single eth_getLogs round trip with timeout + broad safety.
+    Returns the logs list on a non-empty hit, ``None`` on miss or any failure
+    (timeout, network error, non-standard response shape, RPC-level error
+    after retries). Nothing here bubbles up — the caller decides whether to
+    retry with a different range or fall through to "not found"."""
     params = [
         {
             "address": entrypoint,
             "topics": [
-                USER_OPERATIOM_EVENT_DISCRIPTOR,
+                USER_OPERATION_EVENT_DESCRIPTOR,
                 user_operation_hash,
             ],
             "fromBlock": from_block_hex,
             "toBlock": to_block_hex,
         }
     ]
-    res = await send_rpc_request_to_eth_client(
-        ethereum_node_eth_get_logs_urls, "eth_getLogs", params
-    )
-    if "result" in res and len(res["result"]) > 0:
-        user_operation_logs_cache.set(cache_key, res['result'])
-        return res['result']
-    else:
+    try:
+        res = await asyncio.wait_for(
+            send_rpc_request_to_eth_client(
+                ethereum_node_eth_get_logs_urls, "eth_getLogs", params,
+            ),
+            timeout=ETH_RPC_LOOKUP_TIMEOUT_S,
+        )
+        if (
+            isinstance(res, dict)
+            and isinstance(res.get("result"), list)
+            and len(res["result"]) > 0
+        ):
+            return res["result"]
         return None
+    except asyncio.TimeoutError:
+        logging.error(
+            "eth_getLogs (%s -> %s) timed out after %ss; treating as miss",
+            from_block_hex, to_block_hex, ETH_RPC_LOOKUP_TIMEOUT_S,
+        )
+        return None
+    except Exception:
+        logging.error(
+            "eth_getLogs (%s -> %s) failed; treating as miss",
+            from_block_hex, to_block_hex, exc_info=True,
+        )
+        return None
+
+
+async def _fetch_latest_block_number(
+    ethereum_node_urls: list[str],
+) -> int | None:
+    """Return the latest block number as int, or ``None`` on any failure.
+    Same 2 s budget + total exception safety as the eth_getLogs path; used
+    to size the recent-window fallback below."""
+    try:
+        block_info = await asyncio.wait_for(
+            get_block_info(ethereum_node_urls),
+            timeout=ETH_RPC_LOOKUP_TIMEOUT_S,
+        )
+        return int(block_info[0], 16)
+    except asyncio.TimeoutError:
+        logging.error(
+            "eth_getBlockByNumber(latest) timed out after %ss; "
+            "skipping recent-window fallback",
+            ETH_RPC_LOOKUP_TIMEOUT_S,
+        )
+        return None
+    except Exception:
+        logging.error(
+            "eth_getBlockByNumber(latest) failed; "
+            "skipping recent-window fallback",
+            exc_info=True,
+        )
+        return None
+
+
+async def get_user_operation_logs_for_block_range(
+    ethereum_node_eth_get_logs_urls: list[str],
+    user_operation_hash: str,
+    entrypoint: str,
+    from_block_hex: str,
+    to_block_hex: str,
+) -> list | None:
+    cache_key = f"{entrypoint.lower()}:{user_operation_hash}"
+    cached = await user_operation_logs_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    # If the caller asked for the whole chain, first probe the last
+    # EARLIEST_FALLBACK_RECENT_WINDOW blocks — that covers the typical
+    # "client polling a freshly submitted userop" pattern at a fraction
+    # of the wide-scan cost. Fall through to the full "earliest" scan
+    # only if the narrow window misses.
+    if from_block_hex == "earliest":
+        latest = await _fetch_latest_block_number(
+            ethereum_node_eth_get_logs_urls,
+        )
+        if latest is not None:
+            window_from = hex(
+                max(0, latest - EARLIEST_FALLBACK_RECENT_WINDOW)
+            )
+            result = await _eth_getLogs_once(
+                ethereum_node_eth_get_logs_urls,
+                user_operation_hash, entrypoint,
+                window_from, to_block_hex,
+            )
+            if result is not None:
+                user_operation_logs_cache.set(cache_key, result)
+                return result
+
+    result = await _eth_getLogs_once(
+        ethereum_node_eth_get_logs_urls,
+        user_operation_hash, entrypoint,
+        from_block_hex, to_block_hex,
+    )
+    if result is not None:
+        user_operation_logs_cache.set(cache_key, result)
+        return result
+    return None
 
 
 transactions_cache = PersistentFIFOCache(name="transactions")
@@ -508,9 +638,29 @@ async def get_transaction_by_hash(
     if cached is not None:
         return cached
     params = [transaction_hash]
-    res: Any = await send_rpc_request_to_eth_client(
-        ethereum_node_urls, "eth_getTransactionByHash", params
-    )
+    # Same safety net as eth_getLogs/eth_getTransactionReceipt: cap wall
+    # time and treat any failure as a miss. The pending-tx retry loop
+    # below still runs on its own 1 s cadence.
+    try:
+        res: Any = await asyncio.wait_for(
+            send_rpc_request_to_eth_client(
+                ethereum_node_urls, "eth_getTransactionByHash", params,
+            ),
+            timeout=ETH_RPC_LOOKUP_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError:
+        logging.error(
+            "eth_getTransactionByHash(%s) timed out after %ss; "
+            "treating as miss",
+            transaction_hash, ETH_RPC_LOOKUP_TIMEOUT_S,
+        )
+        return None
+    except Exception:
+        logging.error(
+            "eth_getTransactionByHash(%s) failed; treating as miss",
+            transaction_hash, exc_info=True,
+        )
+        return None
     if "result" in res:
         transaction = res['result']
         if (  # check if pending transaction result
