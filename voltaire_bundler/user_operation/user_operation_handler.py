@@ -3,6 +3,7 @@ import asyncio
 from functools import cache
 import logging
 from functools import reduce
+from math import e
 
 from eth_abi import encode, decode
 from voltaire_bundler.bundle.exceptions import UserOpReceiptFoundException
@@ -81,10 +82,12 @@ class UserOperationHandler(ABC):
         return calldata
 
     async def get_user_operation_receipt(
-        self, user_operation_hash: str, entrypoint: str
+        self, user_operation_hash: str,
+        entrypoint: str,
+        validated_at_block_hex: str | None
     ) -> tuple[ReceiptInfo, UserOperationReceiptInfo] | None:
         event_log_info = await self.get_user_operation_event_log_info(
-            user_operation_hash, entrypoint
+            user_operation_hash, entrypoint, validated_at_block_hex
         )
         if event_log_info is None:
             return None
@@ -151,10 +154,13 @@ class UserOperationHandler(ABC):
         return receiptInfo, userOperationReceiptInfo
 
     async def get_user_operation_receipt_rpc(
-        self, user_operation_hash: str, entrypoint: str
+        self,
+        user_operation_hash: str,
+        entrypoint: str,
+        validated_at_block_hex: str | None,
     ) -> dict | None:
         user_operation_receipt = await self.get_user_operation_receipt(
-            user_operation_hash, entrypoint
+            user_operation_hash, entrypoint, validated_at_block_hex
         )
 
         if user_operation_receipt is None:
@@ -195,11 +201,14 @@ class UserOperationHandler(ABC):
         raise UserOpReceiptFoundException(user_operation_receipt_rpc_json)
 
     async def get_user_operation_event_log_info(
-        self, user_operation_hash: str, entrypoint: str
+        self, user_operation_hash: str,
+        entrypoint: str,
+        validated_at_block_hex: str | None
     ) -> tuple | None:
         logs: Any = await self.get_user_operation_logs(
             user_operation_hash,
             entrypoint,
+            validated_at_block_hex,
             self.logs_incremental_range,
             self.logs_number_of_ranges,
         )
@@ -257,6 +266,7 @@ class UserOperationHandler(ABC):
         self,
         user_operation_hash: str,
         entrypoint: str,
+        validated_at_block_hex: str | None,
         logs_incremental_range: int,
         logs_number_of_ranges: int,
     ):
@@ -265,8 +275,19 @@ class UserOperationHandler(ABC):
                 self.ethereum_node_eth_get_logs_urls)
 
             latest_block_number = int(block_info[0], 16)
-            earliest_block_number = latest_block_number - (
-                logs_incremental_range * logs_number_of_ranges)
+            if validated_at_block_hex is None:
+                earliest_block_number = latest_block_number - (
+                    logs_incremental_range * logs_number_of_ranges)
+            else:
+                validated_at_block_number = int(validated_at_block_hex, 16)
+                if latest_block_number - validated_at_block_number > logs_incremental_range:
+                    earliest_block_number = latest_block_number - (
+                        logs_incremental_range * logs_number_of_ranges)
+                    if earliest_block_number < validated_at_block_number:
+                        earliest_block_number = validated_at_block_number
+                else:
+                    earliest_block_number = validated_at_block_number
+
             if earliest_block_number < 0:
                 earliest_block_number = 0
             for earliest_block in range(earliest_block_number,
@@ -286,11 +307,16 @@ class UserOperationHandler(ABC):
                     return res
             return None
         else:
+            if validated_at_block_hex is not None:
+                earliest_block_hex = validated_at_block_hex
+            else:
+                earliest_block_hex = "earliest"
+
             return await get_user_operation_logs_for_block_range(
                 self.ethereum_node_eth_get_logs_urls,
                 user_operation_hash,
                 entrypoint,
-                "earliest",
+                earliest_block_hex,
                 "latest"
             )
 

@@ -46,10 +46,12 @@ class UserOperationHandlerV6(UserOperationHandler):
         self.logs_number_of_ranges = logs_number_of_ranges
 
     async def get_user_operation_by_hash(
-        self, user_operation_hash: str, entrypoint: str
+        self, user_operation_hash: str,
+        entrypoint: str,
+        validated_at_block_hex: str | None
     ) -> tuple | None:
         event_log_info = await self.get_user_operation_event_log_info(
-            user_operation_hash, entrypoint
+            user_operation_hash, entrypoint, validated_at_block_hex
         )
         if event_log_info is None:
             return None
@@ -79,7 +81,7 @@ class UserOperationHandlerV6(UserOperationHandler):
             )
             del_user_operation_logs_cache_entry(user_operation_hash, entrypoint)
             event_log_info = await self.get_user_operation_event_log_info(
-                user_operation_hash, entrypoint
+                user_operation_hash, entrypoint, validated_at_block_hex
             )
             if event_log_info is None:
                 return None
@@ -140,9 +142,10 @@ class UserOperationHandlerV6(UserOperationHandler):
         user_operation_hash: str,
         entrypoint: str,
         senders_mempools,
+        validated_at_block_hex: str | None
     ) -> dict | None:
         user_operation_by_hash = await self.get_user_operation_by_hash(
-            user_operation_hash, entrypoint
+            user_operation_hash, entrypoint, validated_at_block_hex
         )
         if user_operation_by_hash is None:
             user_operation_by_hash_json = self.get_user_operation_by_hash_from_local_mempool(
