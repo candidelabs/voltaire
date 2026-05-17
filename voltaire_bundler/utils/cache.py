@@ -1,15 +1,16 @@
 """
-In-memory cache wrapper used by the bundler RPC layer.
+In-memory FIFO cache wrapper used by the bundler RPC layer.
 
-Phase 1 of the caching refactor: this class wraps the previous module-level
-``dict`` caches behind a small ``get/set/delete`` interface so subsequent
-phases can swap the storage layer (per-entry FIFO eviction, on-disk
-persistence) without changing call sites.
+Strict FIFO eviction: ``set`` of a new key past capacity drops the single
+oldest entry. ``set`` of an existing key updates the value in place and
+does NOT refresh insertion order — older entries don't get a second life
+just because they were re-written.
 
-Eviction matches the legacy behavior exactly: when the underlying dict
-grows past ``capacity`` entries on insert, the whole dict is replaced with
-an empty one. Per-entry FIFO eviction lands in phase 2.
+The class exposes a small ``get/set/delete`` interface so the storage
+layer can be swapped in later phases (on-disk SQLite tier) without
+touching call sites.
 """
+from collections import OrderedDict
 from typing import Any
 
 
@@ -17,17 +18,19 @@ class InMemoryFIFOCache:
     def __init__(self, name: str, capacity: int = 10_000) -> None:
         self.name = name
         self.capacity = capacity
-        self._data: dict[str, Any] = {}
+        self._data: OrderedDict[str, Any] = OrderedDict()
 
     def get(self, key: str) -> Any | None:
+        # Pure FIFO: reads do not promote — order is fixed at insertion time.
         return self._data.get(key)
 
     def set(self, key: str, value: Any) -> None:
-        # Preserve the legacy "drop everything when full" policy until phase 2
-        # swaps it for OrderedDict.popitem(last=False).
-        if len(self._data) > self.capacity:
-            self._data = {}
+        # OrderedDict preserves the existing position on overwrite, which is
+        # the strict-FIFO behavior we want. Only new keys grow the dict and
+        # can trigger eviction.
         self._data[key] = value
+        if len(self._data) > self.capacity:
+            self._data.popitem(last=False)
 
     def delete(self, key: str) -> None:
         self._data.pop(key, None)
