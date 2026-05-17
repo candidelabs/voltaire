@@ -9,6 +9,7 @@ from eth_abi import encode, decode
 from voltaire_bundler.bundle.exceptions import UserOpReceiptFoundException
 from voltaire_bundler.mempool.sender_mempool import VerifiedUserOperation
 from voltaire_bundler.custom_types import Address
+from voltaire_bundler.utils.cache import InMemoryFIFOCache
 from voltaire_bundler.utils.eth_client_utils import \
         get_block_info, send_rpc_request_to_eth_client
 from typing import Any
@@ -106,13 +107,7 @@ class UserOperationHandler(ABC):
         transaction = await self.get_transaction_receipt(
                 log_object.transactionHash)
 
-        if (  # pending log
-            transaction is None or
-            "blockNumber" not in transaction or transaction["blockNumber"] is None or
-            "transactionHash" not in transaction or transaction["transactionHash"] is None or
-            "transactionIndex" not in transaction or transaction["transactionIndex"] is None or
-            "blockHash" not in transaction
-        ):
+        if transaction is None:  # pending — caller will retry
             return None
 
         if "effectiveGasPrice" in transaction:
@@ -254,13 +249,35 @@ class UserOperationHandler(ABC):
             logs,
         )
 
-    async def get_transaction_receipt(self, transaction_hash: str) -> dict:
+    async def get_transaction_receipt(
+        self, transaction_hash: str
+    ) -> dict | None:
+        cached = transaction_receipts_cache.get(transaction_hash)
+        if cached is not None:
+            return cached
+
         params = [transaction_hash]
         res: Any = await send_rpc_request_to_eth_client(
             self.ethereum_node_urls, "eth_getTransactionReceipt", params,
             None, "result"
         )
-        return res["result"]
+        transaction = res["result"]
+        if (  # pending or missing receipt — don't cache, let the caller retry
+            transaction is None or
+            transaction.get("blockNumber") is None or
+            transaction.get("transactionHash") is None or
+            transaction.get("transactionIndex") is None or
+            "blockHash" not in transaction
+        ):
+            return None
+
+        trimmed = {
+            field: transaction[field]
+            for field in TRANSACTION_RECEIPT_CACHED_FIELDS
+            if field in transaction
+        }
+        transaction_receipts_cache.set(transaction_hash, trimmed)
+        return trimmed
 
     async def get_user_operation_logs(
         self,
@@ -403,22 +420,19 @@ async def get_deposit_info(
         else:
             raise ValueError("balanceOf eth_call failed")
 
-user_operation_logs_cache: dict[str, dict[str, dict]] = {
-    "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789": {},
-    "0x0000000071727de22e5e9d8baf0edac6f37da032": {},
-    "0x4337084d9e255ff0702461cf8895ce9e3b5ff108": {},
-    "0x433709009b8330fda32311df1c2afa402ed8d009": {},
-}
+# Composite-key cache: "{entrypoint_lowercase}:{userOpHash}" -> eth_getLogs result.
+# Flattens the previous per-entrypoint nested dict (which also had a broken
+# eviction path: ``logs_cache = {}`` rebound a local, never the outer dict).
+user_operation_logs_cache = InMemoryFIFOCache(name="user_operation_logs")
 
 
 def del_user_operation_logs_cache_entry(
     user_operation_hash: str,
     entrypoint: str,
 ) -> None:
-    global user_operation_logs_cache
-    logs_cache = user_operation_logs_cache[entrypoint.lower()]
-    if user_operation_hash in logs_cache:
-        del logs_cache[user_operation_hash]
+    user_operation_logs_cache.delete(
+        f"{entrypoint.lower()}:{user_operation_hash}"
+    )
 
 
 async def get_user_operation_logs_for_block_range(
@@ -428,10 +442,10 @@ async def get_user_operation_logs_for_block_range(
     from_block_hex: str,
     to_block_hex: str,
 ) -> dict | None:
-    global user_operation_logs_cache
-    logs_cache = user_operation_logs_cache[entrypoint.lower()]
-    if user_operation_hash in logs_cache:
-        return logs_cache[user_operation_hash]
+    cache_key = f"{entrypoint.lower()}:{user_operation_hash}"
+    cached = user_operation_logs_cache.get(cache_key)
+    if cached is not None:
+        return cached
     USER_OPERATIOM_EVENT_DISCRIPTOR = (
         "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
     )
@@ -451,16 +465,32 @@ async def get_user_operation_logs_for_block_range(
         ethereum_node_eth_get_logs_urls, "eth_getLogs", params
     )
     if "result" in res and len(res["result"]) > 0:
-        # clear cache if bigger than 10_000
-        if len(logs_cache) > 10_000:
-            logs_cache = {}
-        logs_cache[user_operation_hash] = res['result']
+        user_operation_logs_cache.set(cache_key, res['result'])
         return res['result']
     else:
         return None
 
 
-transactions_cache: dict[str, dict] = {}
+transactions_cache = InMemoryFIFOCache(name="transactions")
+
+
+TRANSACTION_RECEIPT_CACHED_FIELDS = (
+    "blockHash",
+    "blockNumber",
+    "transactionHash",
+    "transactionIndex",
+    "from",
+    "to",
+    "cumulativeGasUsed",
+    "gasUsed",
+    "contractAddress",
+    "logs",
+    "logsBloom",
+    "status",
+    "effectiveGasPrice",
+)
+
+transaction_receipts_cache = InMemoryFIFOCache(name="transaction_receipts")
 
 
 async def get_transaction_by_hash(
@@ -474,9 +504,9 @@ async def get_transaction_by_hash(
         logging.error("get_transaction_by_hash recursion too deep.")
         return None
 
-    global transactions_cache
-    if transaction_hash in transactions_cache:
-        return transactions_cache[transaction_hash]
+    cached = transactions_cache.get(transaction_hash)
+    if cached is not None:
+        return cached
     params = [transaction_hash]
     res: Any = await send_rpc_request_to_eth_client(
         ethereum_node_urls, "eth_getTransactionByHash", params
@@ -495,10 +525,7 @@ async def get_transaction_by_hash(
                 ethereum_node_urls, transaction_hash, recursion_depth
             )
         else:
-            # clear cache if bigger than 10_000
-            if len(transactions_cache) > 10_000:
-                transactions_cache = {}
-            transactions_cache[transaction_hash] = transaction
+            transactions_cache.set(transaction_hash, transaction)
         return transaction
     else:
         if "error" in res:
