@@ -321,6 +321,11 @@ class PersistentFIFOCache:
                     f"PRAGMA cache_size  = -{self._sqlite_cache_size_kb}",
                 )
                 conn.execute("PRAGMA mmap_size    = 67108864")  # 64 MB virtual
+                # Multi-bundler safety: when another process on the same
+                # chain shares this file and holds the WAL write lock, wait
+                # up to 5 s rather than failing the commit. Without this,
+                # any concurrent write contention silently drops the batch.
+                conn.execute("PRAGMA busy_timeout = 5000")
 
             self._write_conn.executescript(
                 f"""
@@ -372,7 +377,11 @@ class PersistentFIFOCache:
     def _commit_batch(self, batch: list[tuple[str, Any]]) -> None:
         assert self._write_conn is not None
         cur = self._write_conn.cursor()
-        cur.execute("BEGIN")
+        # IMMEDIATE takes the write lock upfront so concurrent bundlers
+        # serialize cleanly via busy_timeout, rather than getting partway
+        # through a deferred transaction and hitting SQLITE_BUSY on the
+        # first INSERT.
+        cur.execute("BEGIN IMMEDIATE")
         try:
             for key, value in batch:
                 if value is _TOMBSTONE:
