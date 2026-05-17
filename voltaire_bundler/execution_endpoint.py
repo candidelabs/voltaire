@@ -27,6 +27,7 @@ from voltaire_bundler.user_operation.user_operation_handler_v7v8v9 import \
     UserOperationHandlerV7V8V9
 from voltaire_bundler.user_operation.user_operation_handler import \
     fell_user_operation_optional_parameters_for_estimateUserOperationGas
+from voltaire_bundler.utils.cache import InMemoryFIFOCache
 from voltaire_bundler.utils.eth_client_utils import get_block_info, send_rpc_request_to_eth_client
 
 from .bundle.bundle_manager import BundlerManager
@@ -38,12 +39,19 @@ from .mempool.reputation_manager import ReputationManager
 
 user_operation_by_hash_cache: dict[str, dict] = {}
 user_operation_receipt_cache: dict[str, dict] = {}
-user_operation_seen_cache: dict[str, dict[str, str]] = {
-    LocalMempoolManagerV6.entrypoint_lowercase: {},
-    LocalMempoolManagerV7.entrypoint_lowercase: {},
-    LocalMempoolManagerV8.entrypoint_lowercase: {},
-    LocalMempoolManagerV9.entrypoint_lowercase: {},
-}
+
+# Composite-key cache: "{entrypoint_lowercase}:{userOpHash}" -> validated_at_block_hex.
+# Flattening the previous per-entrypoint nested dict keeps the new InMemoryFIFOCache
+# interface uniform across all four caches and prepares for the on-disk tier
+# (one SQLite row per entry, composite primary key).
+user_operation_seen_cache = InMemoryFIFOCache(name="user_operation_seen")
+
+_SEEN_CACHE_ENTRYPOINTS = (
+    LocalMempoolManagerV6.entrypoint_lowercase,
+    LocalMempoolManagerV7.entrypoint_lowercase,
+    LocalMempoolManagerV8.entrypoint_lowercase,
+    LocalMempoolManagerV9.entrypoint_lowercase,
+)
 
 
 def search_user_operation_seen_cache(
@@ -51,9 +59,12 @@ def search_user_operation_seen_cache(
 ) -> tuple[str, str] | None:
     """Return ``(validated_at_block_hex, entrypoint_lowercase)`` if the hash
     has been seen, else ``None``."""
-    for entrypoint_lowercase, hash_to_block in user_operation_seen_cache.items():
-        if user_operation_hash in hash_to_block:
-            return hash_to_block[user_operation_hash], entrypoint_lowercase
+    for entrypoint_lowercase in _SEEN_CACHE_ENTRYPOINTS:
+        value = user_operation_seen_cache.get(
+            f"{entrypoint_lowercase}:{user_operation_hash}"
+        )
+        if value is not None:
+            return value, entrypoint_lowercase
     return None
 
 
@@ -505,7 +516,10 @@ class ExecutionEndpoint(Endpoint):
             await local_mempool.add_user_operation(user_operation)
         )
         if user_operation.validated_at_block_hex is not None:
-            user_operation_seen_cache[input_entrypoint][user_operation_hash] = user_operation.validated_at_block_hex
+            user_operation_seen_cache.set(
+                f"{input_entrypoint}:{user_operation_hash}",
+                user_operation.validated_at_block_hex,
+            )
 
         if not self.disable_p2p:
             if (input_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase):
