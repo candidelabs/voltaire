@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import shutil
 import sys
 from functools import partial
 from pathlib import Path
@@ -69,6 +70,9 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             if init_data.cache_dir
             else Path.home() / ".voltaire" / "cache" / str(init_data.chain_id)
         )
+        if init_data.clear_cache and cache_dir.exists():
+            logging.info("clearing persistent cache at %s", cache_dir)
+            shutil.rmtree(cache_dir)
         await PersistentFIFOCache.start_all(cache_dir=cache_dir)
 
     try:
