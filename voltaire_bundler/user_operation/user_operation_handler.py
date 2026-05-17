@@ -452,6 +452,10 @@ user_operation_logs_cache = PersistentFIFOCache(name="user_operation_logs")
 # per-attempt aiohttp timeout, which can stretch a single lookup into
 # minutes on a slow or misbehaving node. Capping here means a hash lookup
 # degrades to "miss" quickly instead of stalling the RPC handler.
+#
+# Operators on a slow or remote RPC provider that legitimately needs more
+# than 2 s per call: bump this constant. It isn't surfaced as a CLI/env
+# knob yet; promote it if more than one deployment ends up patching it.
 ETH_RPC_LOOKUP_TIMEOUT_S = 2.0
 
 # When the caller asks for ``fromBlock="earliest"``, try a narrower recent
