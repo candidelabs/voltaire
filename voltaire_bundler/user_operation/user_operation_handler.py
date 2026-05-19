@@ -269,6 +269,23 @@ class UserOperationHandler(ABC):
                 ),
                 timeout=ETH_RPC_LOOKUP_TIMEOUT_S,
             )
+            # Same guard as get_transaction_by_hash: even with
+            # expected_key="result", the RPC layer can return a response
+            # whose error code short-circuits the retry (-32000, -32603,
+            # etc.) and leaves us with only "error". Surface that as a
+            # miss with a useful log line instead of a KeyError.
+            if "result" not in res:
+                if "error" in res:
+                    logging.error(
+                        "eth_getTransactionReceipt(%s) failed. error: %s",
+                        transaction_hash, str(res["error"]),
+                    )
+                else:
+                    logging.error(
+                        "eth_getTransactionReceipt(%s) failed. response: %s",
+                        transaction_hash, str(res),
+                    )
+                return None
             transaction = res["result"]
             if (  # pending or missing receipt — don't cache, let the caller retry
                 transaction is None or

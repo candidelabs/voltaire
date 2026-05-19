@@ -573,6 +573,16 @@ class ExecutionEndpoint(Endpoint):
         else:
             cached_block_hex, cached_entrypoint = None, None
 
+        # The seen-cache survives restarts, so a hit can point at v0.6
+        # even when this process started with --disable_v6. Drop the hint
+        # in that case so we still fan out to the enabled handlers instead
+        # of building an empty task set (which would crash asyncio.wait).
+        if (
+            cached_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase
+            and self.user_operation_handler_v6 is None
+        ):
+            cached_entrypoint = None
+
         user_operation_by_hash_json_ops = []
         if (
             self.local_mempool_manager_v6 is not None and
@@ -702,6 +712,15 @@ class ExecutionEndpoint(Endpoint):
             cached_block_hex, cached_entrypoint = search_result
         else:
             cached_block_hex, cached_entrypoint = None, None
+
+        # See _event_rpc_getUserOperationByHash: ignore a cached v0.6 hint
+        # when v6 is disabled in this process so we don't end up with an
+        # empty task set.
+        if (
+            cached_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase
+            and self.user_operation_handler_v6 is None
+        ):
+            cached_entrypoint = None
 
         user_operation_receipt_info_json_ops = []
         if (
