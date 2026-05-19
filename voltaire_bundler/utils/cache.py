@@ -132,6 +132,13 @@ class PersistentFIFOCache:
         self._sqlite_cache_size_kb = sqlite_cache_size_kb
         try:
             await asyncio.to_thread(self._open_db)
+            # Preload the freshest entries from disk so the first batch
+            # of RPCs after a restart get hot hits instead of falling
+            # through to disk. Keep this inside the same try/except as
+            # _open_db: a corrupt or partially-readable DB can fail at
+            # SELECT time, and we'd rather degrade to memory-only than
+            # abort start().
+            await asyncio.to_thread(self._warm_memory_from_disk)
         except (OSError, sqlite3.Error) as exc:
             # Most commonly: cache_dir isn't writable (container without a
             # writable HOME, hardened systemd unit, read-only filesystem),
@@ -145,12 +152,17 @@ class PersistentFIFOCache:
                 "--clear_cache to wipe a corrupted DB.",
                 self.name, type(exc).__name__, exc,
             )
+            # _open_db rolls back its own connections on failure, but a
+            # warmup-time error leaves them open — close them here so the
+            # memory-only path doesn't leak file handles.
+            if self._write_conn is not None or self._read_conn is not None:
+                try:
+                    await asyncio.to_thread(self._close_conns)
+                except Exception:
+                    pass
             self._sqlite_path = None
             self._started = True
             return
-        # Preload the freshest entries from disk so the first batch of RPCs
-        # after a restart get hot hits instead of falling through to disk.
-        await asyncio.to_thread(self._warm_memory_from_disk)
         self._write_queue = asyncio.Queue(maxsize=QUEUE_MAX)
         self._writer_task = asyncio.create_task(
             self._writer_loop(), name=f"cache-writer:{self.name}",

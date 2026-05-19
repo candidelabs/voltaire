@@ -586,6 +586,10 @@ class BundlerManager:
         user_operations_logs = await asyncio.gather(*logs_res_ops)
 
         user_operations_hashes_to_remove_from_monitoring = []
+        # Multiple userops in one bundle share the inclusion tx hash, so
+        # dedupe before scheduling warmups to avoid redundant RPC round
+        # trips for the same transaction.
+        seen_warmup_tx_hashes: set[str] = set()
         for user_operation, user_operation_log in zip(
             list(user_operations_to_monitor.values()), user_operations_logs
         ):
@@ -606,12 +610,14 @@ class BundlerManager:
                 # finds them hot instead of paying two more RPC round trips.
                 # The log entry's transactionHash is the only thing we need.
                 log_entry = user_operation_log[0]
-                if "transactionHash" in log_entry:
+                tx_hash = log_entry.get("transactionHash")
+                if tx_hash and tx_hash not in seen_warmup_tx_hashes:
+                    seen_warmup_tx_hashes.add(tx_hash)
                     asyncio.create_task(
                         _warm_inclusion_caches(
                             self.ethereum_node_urls,
                             local_mempool.user_operation_handler,
-                            log_entry["transactionHash"],
+                            tx_hash,
                         )
                     )
             elif user_operation.number_of_add_to_mempool_attempts > 20:

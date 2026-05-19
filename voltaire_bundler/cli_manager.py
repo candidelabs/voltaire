@@ -131,6 +131,15 @@ def positive_float(value):
     return fvalue
 
 
+def str_to_bool(value: str | bool) -> bool:
+    # argparse's built-in type=bool treats every non-empty string as True
+    # (so `--disable_p2p false` would silently disable nothing). Match the
+    # env-var lambda convention: only "true" (case-insensitive) is true.
+    if isinstance(value, bool):
+        return value
+    return str(value).lower() == "true"
+
+
 def rpc_path(value: str):
     if not value.startswith("/"):
         value = "/" + value
@@ -411,7 +420,7 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--metrics",
-        type=bool,
+        type=str_to_bool,
         help="enable metrics collection",
         nargs="?",
         const=True,
@@ -426,7 +435,7 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--disable_v6",
-        type=bool,
+        type=str_to_bool,
         help="disable support for entrypoint v0.06",
         nargs="?",
         const=True,
@@ -498,7 +507,7 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--disable_p2p",
-        type=bool,
+        type=str_to_bool,
         help="disable p2p (on by default; pass VOLTAIRE_DISABLE_P2P=false to opt in)",
         nargs="?",
         const=True,
@@ -507,7 +516,7 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--disable_persistent_cache",
-        type=bool,
+        type=str_to_bool,
         help=(
             "Opt into memory-only RPC-result caches. By default the caches "
             "(logs, transactions, receipts, seen) are mirrored to SQLite "
@@ -536,7 +545,7 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--clear_cache",
-        type=bool,
+        type=str_to_bool,
         help=(
             "Wipe --cache_dir before startup. One-shot flag; useful for "
             "discarding a stale or corrupted cache without manually "
@@ -559,7 +568,7 @@ def initialize_argument_parser() -> ArgumentParser:
         nargs="?",
         const=1.0,
         default=_get_env_or_default(
-            "VOLTAIRE_CACHE_MEMORY_SIZE", 1.0, float,
+            "VOLTAIRE_CACHE_MEMORY_SIZE", 1.0, positive_float,
         ),
     )
 
@@ -573,7 +582,7 @@ def initialize_argument_parser() -> ArgumentParser:
         nargs="?",
         const=1.0,
         default=_get_env_or_default(
-            "VOLTAIRE_CACHE_DISK_SIZE", 1.0, float,
+            "VOLTAIRE_CACHE_DISK_SIZE", 1.0, positive_float,
         ),
     )
 
@@ -661,7 +670,7 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--eip7702",
-        type=bool,
+        type=str_to_bool,
         help="enable eip7702 auth",
         nargs="?",
         const=True,
@@ -670,7 +679,7 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--disable_entrypoints_code_check",
-        type=bool,
+        type=str_to_bool,
         help="disable checking if the supported entrypoints are deployed.",
         nargs="?",
         const=True,
