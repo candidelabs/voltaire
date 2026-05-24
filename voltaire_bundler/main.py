@@ -82,6 +82,10 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             shutil.rmtree(cache_dir)
         await PersistentFIFOCache.start_all(cache_dir=cache_dir)
 
+    # Synchronous part is free; the follow-up disk-row totals run in a
+    # background task so the COUNT(*) work doesn't extend startup.
+    PersistentFIFOCache.log_startup_status()
+
     try:
         async with asyncio.TaskGroup() as task_group:
             execution_endpoint: ExecutionEndpoint = ExecutionEndpoint(
