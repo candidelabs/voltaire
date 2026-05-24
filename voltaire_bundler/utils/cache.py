@@ -101,6 +101,13 @@ class PersistentFIFOCache:
 
         self._started: bool = False
 
+        # Startup observability: how many rows _warm_memory_from_disk
+        # pulled into memory. Free to capture (just len(rows)) so it
+        # happens on the critical path. The matching on-disk row total
+        # is fetched lazily by log_startup_status so the extra COUNT(*)
+        # doesn't extend bundler startup.
+        self._memory_loaded_at_start: int = 0
+
         PersistentFIFOCache._instances.append(self)
 
     # ------------------------------------------------------------------
@@ -225,6 +232,82 @@ class PersistentFIFOCache:
                 await cache.aclose()
             except Exception:
                 logger.exception("cache %s: aclose failed", cache.name)
+
+    @classmethod
+    def log_startup_status(cls) -> None:
+        """Emit a one-shot summary of cache tier state after start_all.
+
+        Logged in two phases. The synchronous phase reports the
+        persistent/memory-only flag plus the count of caches that fell
+        back to memory-only (all free — no SQL). The async phase
+        follows up with per-cache (on-disk rows, rows warmed into
+        memory) figures once a COUNT(*) per cache lands; that work runs
+        in a worker thread so it never blocks the event loop and is
+        scheduled AFTER start_all so it doesn't extend bundler startup.
+        Call from an async context (``asyncio.create_task`` needs a
+        running loop)."""
+        if not cls._instances:
+            return
+        persistent = [c for c in cls._instances if c.persistent]
+        memory_only = [c for c in cls._instances if not c.persistent]
+
+        if not persistent:
+            logger.info(
+                "RPC caches: memory-only mode (%d caches; persistence "
+                "disabled or soft-failed to memory-only)",
+                len(memory_only),
+            )
+            return
+
+        total_loaded = sum(c._memory_loaded_at_start for c in persistent)
+        logger.info(
+            "RPC caches: persistent mode active (%d on-disk caches, "
+            "%d rows warmed into memory at startup); per-cache on-disk "
+            "row counts to follow",
+            len(persistent), total_loaded,
+        )
+        if memory_only:
+            logger.info(
+                "  %d caches in memory-only fallback: %s",
+                len(memory_only),
+                ", ".join(c.name for c in memory_only),
+            )
+
+        asyncio.create_task(
+            cls._log_disk_row_counts(persistent),
+            name="cache-disk-row-count-report",
+        )
+
+    @classmethod
+    async def _log_disk_row_counts(
+        cls, caches: list["PersistentFIFOCache"],
+    ) -> None:
+        """Run COUNT(*) on each persistent cache off the event loop and
+        emit the per-cache (on-disk, warmed) breakdown. Best-effort:
+        per-cache errors are swallowed so a single corrupt DB doesn't
+        suppress the rest."""
+        counts: dict[str, int] = {}
+        for c in caches:
+            try:
+                counts[c.name] = await asyncio.to_thread(c._count_disk_rows)
+            except Exception:
+                logger.exception(
+                    "cache %s: disk row count failed", c.name,
+                )
+        if not counts:
+            return
+        logger.info(
+            "RPC caches: %d total rows on disk", sum(counts.values()),
+        )
+        for c in caches:
+            if c.name not in counts:
+                continue
+            logger.info(
+                "  cache %s: %d on disk, %d warmed into memory "
+                "(memory_capacity=%d, disk_capacity=%d)",
+                c.name, counts[c.name], c._memory_loaded_at_start,
+                c.memory_capacity, c.disk_capacity,
+            )
 
     # ------------------------------------------------------------------
     # Public API
@@ -539,6 +622,17 @@ class PersistentFIFOCache:
         # rows came back newest-first; reverse so we insert oldest-first.
         for key, value in reversed(rows):
             self._memory[key] = json.loads(value)
+        self._memory_loaded_at_start = len(rows)
+
+    def _count_disk_rows(self) -> int:
+        """Total on-disk row count. Used by log_startup_status; runs a
+        full COUNT(*), so don't call on a hot path."""
+        assert self._read_conn is not None
+        with self._read_lock:
+            row = self._read_conn.execute(
+                f"SELECT COUNT(*) FROM {self.name}",
+            ).fetchone()
+        return row[0] if row else 0
 
     def _evict_oldest(self) -> None:
         assert self._write_conn is not None
