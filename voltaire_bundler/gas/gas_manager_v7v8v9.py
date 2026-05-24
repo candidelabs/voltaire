@@ -96,6 +96,10 @@ class GasManagerV7V8V9(GasManager):
         if input_verification_gas_limit == 0:
             # 10_000 buffer overhead
             result_verification_gas_limit = estimated_verification_gas_limit + 10_000
+            # increase verification gas estimation by 10% for Polygon
+            # due to Giugliano hard fork
+            if self.chain_id == 137 or self.chain_id == 80002 or self.chain_id == 1337:
+                result_verification_gas_limit = math.ceil(result_verification_gas_limit*1.1)
         else:
             result_verification_gas_limit = input_verification_gas_limit
 
