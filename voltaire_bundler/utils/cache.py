@@ -170,6 +170,12 @@ class PersistentFIFOCache:
             self._sqlite_path = None
             self._started = True
             return
+        if self._sqlite_path is None:
+            # _warm_memory_from_disk hit a fatal JSON decode error and
+            # called _disable_disk_tier; no point spinning up a writer
+            # that has nothing to write to.
+            self._started = True
+            return
         self._write_queue = asyncio.Queue(maxsize=QUEUE_MAX)
         self._writer_task = asyncio.create_task(
             self._writer_loop(), name=f"cache-writer:{self.name}",
@@ -392,7 +398,10 @@ class PersistentFIFOCache:
     # ------------------------------------------------------------------
 
     def _enqueue_disk_write(self, key: str, value: Any) -> None:
-        if self._write_queue is None:
+        # Either branch means there's no disk tier to write to: queue
+        # never built (memory-only start) or disk tier soft-failed and
+        # cleared the path mid-flight.
+        if self._write_queue is None or self._sqlite_path is None:
             return
         try:
             self._write_queue.put_nowait((key, value))
@@ -539,7 +548,11 @@ class PersistentFIFOCache:
             self._read_conn = None
 
     def _commit_batch(self, batch: list[tuple[str, Any]]) -> None:
-        assert self._write_conn is not None
+        # Disk tier may have been disabled mid-flight (e.g. by a fatal
+        # JSON decode error in _disk_get). Drop the batch silently — the
+        # data is still in memory; persistence is the only thing lost.
+        if self._write_conn is None:
+            return
         cur = self._write_conn.cursor()
         # IMMEDIATE takes the write lock upfront so concurrent bundlers
         # serialize cleanly via busy_timeout, rather than getting partway
@@ -586,7 +599,8 @@ class PersistentFIFOCache:
             raise
 
     def _disk_get(self, key: str) -> Any | None:
-        assert self._read_conn is not None
+        if self._read_conn is None:
+            return None
         with self._read_lock:
             cur = self._read_conn.execute(
                 f"SELECT value FROM {self.name} WHERE key = ?", (key,),
@@ -594,10 +608,20 @@ class PersistentFIFOCache:
             row = cur.fetchone()
         if row is None:
             return None
-        return json.loads(row[0])
+        try:
+            return json.loads(row[0])
+        except json.JSONDecodeError as exc:
+            logger.warning(
+                "cache %s: malformed JSON for key %s (%s); "
+                "disabling disk tier and treating this lookup as a miss",
+                self.name, key, exc,
+            )
+            self._disable_disk_tier()
+            return None
 
     def _disk_get_many(self, keys: list[str]) -> dict[str, Any]:
-        assert self._read_conn is not None
+        if self._read_conn is None:
+            return {}
         # SQLite has a SQLITE_LIMIT_VARIABLE_NUMBER ceiling (default 999 on
         # older builds, 32766 on newer ones). Real callers pass a handful
         # of keys; this guard catches accidental misuse without imposing
@@ -614,14 +638,29 @@ class PersistentFIFOCache:
                 keys,
             )
             rows = cur.fetchall()
-        return {key: json.loads(value) for key, value in rows}
+        out: dict[str, Any] = {}
+        for key, value in rows:
+            try:
+                out[key] = json.loads(value)
+            except json.JSONDecodeError as exc:
+                logger.warning(
+                    "cache %s: malformed JSON for key %s (%s); "
+                    "disabling disk tier and skipping the bad row",
+                    self.name, key, exc,
+                )
+                self._disable_disk_tier()
+                # Return whatever we already decoded — the caller treats
+                # absent keys as misses, which is the correct degradation.
+                return out
+        return out
 
     def _warm_memory_from_disk(self) -> None:
         """Preload the most-recent ``memory_capacity`` rows into the hot
         tier so the first reads after a restart don't need disk fallback.
         Inserts in ascending seq order so the OrderedDict's FIFO order
         mirrors on-disk insertion order (oldest first, newest last)."""
-        assert self._read_conn is not None
+        if self._read_conn is None:
+            return
         with self._read_lock:
             cur = self._read_conn.execute(
                 f"SELECT key, value FROM {self.name} "
@@ -630,9 +669,41 @@ class PersistentFIFOCache:
             )
             rows = cur.fetchall()
         # rows came back newest-first; reverse so we insert oldest-first.
+        loaded = 0
         for key, value in reversed(rows):
-            self._memory[key] = json.loads(value)
-        self._memory_loaded_at_start = len(rows)
+            try:
+                self._memory[key] = json.loads(value)
+            except json.JSONDecodeError as exc:
+                logger.warning(
+                    "cache %s: malformed JSON for key %s during warmup "
+                    "(%s); disabling disk tier and continuing memory-only",
+                    self.name, key, exc,
+                )
+                self._disable_disk_tier()
+                break
+            loaded += 1
+        self._memory_loaded_at_start = loaded
+
+    def _disable_disk_tier(self) -> None:
+        """Soft-fail the disk tier after an unrecoverable error (e.g.
+        malformed JSON in a row, which signals a corrupt DB file). Closes
+        both SQLite connections and clears ``_sqlite_path`` so subsequent
+        reads stay memory-only. Idempotent — safe to call from any
+        worker thread, and from the writer task path.
+
+        The writer task lingers but its commits no-op once
+        ``_write_conn`` is None; new ``set``/``delete`` calls also no-op
+        (``_enqueue_disk_write`` checks ``_sqlite_path``)."""
+        if self._sqlite_path is None:
+            return
+        self._sqlite_path = None
+        try:
+            self._close_conns()
+        except Exception:
+            logger.exception(
+                "cache %s: closing connections after disk-tier disable failed",
+                self.name,
+            )
 
     def _count_disk_rows(self) -> int:
         """Total on-disk row count. Used by log_startup_status; runs a
@@ -645,7 +716,8 @@ class PersistentFIFOCache:
         return row[0] if row else 0
 
     def _evict_oldest(self) -> None:
-        assert self._write_conn is not None
+        if self._write_conn is None:
+            return
         cur = self._write_conn.cursor()
         cur.execute(f"SELECT COUNT(*) FROM {self.name}")
         count = cur.fetchone()[0]
