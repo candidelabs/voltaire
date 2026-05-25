@@ -345,8 +345,12 @@ class UserOperationHandler(ABC):
 
             if earliest_block_number < 0:
                 earliest_block_number = 0
+            # range stop is exclusive; bumping by 1 makes the final iteration
+            # include latest_block_number, which is otherwise dropped when
+            # validated_at_block_hex == latest (a common poll-just-after-
+            # inclusion case where the head block would yield no eth_getLogs).
             for earliest_block in range(earliest_block_number,
-                                        latest_block_number,
+                                        latest_block_number + 1,
                                         logs_incremental_range):
                 latest_block = earliest_block + logs_incremental_range
                 if latest_block <= earliest_block:
