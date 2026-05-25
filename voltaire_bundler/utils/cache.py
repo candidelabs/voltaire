@@ -506,11 +506,11 @@ class PersistentFIFOCache:
                 );
                 """
             )
-            row = self._write_conn.execute(
-                "SELECT next_seq FROM cache_meta WHERE table_name = ?",
-                (self.name,),
-            ).fetchone()
-            self._next_seq = row[0] if row else 0
+            # next_seq is read inside _commit_batch under BEGIN IMMEDIATE so
+            # concurrent bundlers sharing this SQLite file allocate disjoint
+            # sequence ranges. Caching it here at startup was racy: two
+            # processes would each load the same value and both advance an
+            # in-memory copy, producing overlapping seq writes.
         except Exception:
             # Roll back any partial state so ``start``'s soft-fail path
             # doesn't see a half-open cache. Best-effort close — we're
@@ -547,6 +547,15 @@ class PersistentFIFOCache:
         # first INSERT.
         cur.execute("BEGIN IMMEDIATE")
         try:
+            # Read the authoritative next_seq inside the write lock so a
+            # second bundler that committed since our last batch doesn't
+            # cause us to reuse its seq values. The in-memory _next_seq
+            # is only a hint; this is the source of truth.
+            row = cur.execute(
+                "SELECT next_seq FROM cache_meta WHERE table_name = ?",
+                (self.name,),
+            ).fetchone()
+            next_seq = row[0] if row else 0
             for key, value in batch:
                 if value is _TOMBSTONE:
                     cur.execute(
@@ -561,16 +570,17 @@ class PersistentFIFOCache:
                         (
                             key,
                             json.dumps(value).encode("utf-8"),
-                            self._next_seq,
+                            next_seq,
                         ),
                     )
-                    self._next_seq += 1
+                    next_seq += 1
             cur.execute(
                 "INSERT OR REPLACE INTO cache_meta (table_name, next_seq) "
                 "VALUES (?, ?)",
-                (self.name, self._next_seq),
+                (self.name, next_seq),
             )
             cur.execute("COMMIT")
+            self._next_seq = next_seq
         except Exception:
             cur.execute("ROLLBACK")
             raise
