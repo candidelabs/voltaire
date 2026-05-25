@@ -27,8 +27,6 @@ class GasManagerV7V8V9(GasManager):
     chain_id: str
     bundler_address: Address
     is_legacy_mode: bool
-    max_fee_per_gas_percentage_multiplier: int
-    max_priority_fee_per_gas_percentage_multiplier: int
     estimate_gas_with_override_enabled: bool
     max_verification_gas: int
     max_call_data_gas: int
@@ -42,8 +40,6 @@ class GasManagerV7V8V9(GasManager):
         chain_id,
         bundler_address,
         is_legacy_mode,
-        max_fee_per_gas_percentage_multiplier: int,
-        max_priority_fee_per_gas_percentage_multiplier: int,
         max_verification_gas,
         max_call_data_gas,
     ):
@@ -51,12 +47,6 @@ class GasManagerV7V8V9(GasManager):
         self.chain_id = chain_id
         self.bundler_address = bundler_address
         self.is_legacy_mode = is_legacy_mode
-        self.max_fee_per_gas_percentage_multiplier = (
-            max_fee_per_gas_percentage_multiplier
-        )
-        self.max_priority_fee_per_gas_percentage_multiplier = (
-            max_priority_fee_per_gas_percentage_multiplier
-        )
         self.estimate_gas_with_override_enabled = True
         self.max_verification_gas = max_verification_gas
         self.max_call_data_gas = max_call_data_gas

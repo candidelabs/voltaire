@@ -21,8 +21,6 @@ class GasManager(ABC, Generic[UserOperationType]):
     chain_id: str
     bundler_address: Address
     is_legacy_mode: bool
-    max_fee_per_gas_percentage_multiplier: int
-    max_priority_fee_per_gas_percentage_multiplier: int
     estimate_gas_with_override_enabled: bool
     max_verification_gas: int
     max_call_data_gas: int
@@ -31,7 +29,7 @@ class GasManager(ABC, Generic[UserOperationType]):
     async def verify_gas_fees_and_get_price(
         self, user_operation: UserOperationType,
         enforce_gas_price_tolerance: int
-    ) -> str:
+    ):
         max_fee_per_gas = user_operation.max_fee_per_gas
         max_priority_fee_per_gas = user_operation.max_priority_fee_per_gas
 
@@ -56,10 +54,6 @@ class GasManager(ABC, Generic[UserOperationType]):
 
         block_max_fee_per_gas_hex = tasks[0]["result"]
         block_max_fee_per_gas = int(block_max_fee_per_gas_hex, 16)
-        block_max_fee_per_gas = math.ceil(
-            block_max_fee_per_gas * (
-                self.max_fee_per_gas_percentage_multiplier / 100)
-        )
         block_max_fee_per_gas_with_tolerance = math.ceil(
             block_max_fee_per_gas * (1 - (enforce_gas_price_tolerance / 100))
         )
@@ -85,11 +79,6 @@ class GasManager(ABC, Generic[UserOperationType]):
                     )
             else:
                 block_max_priority_fee_per_gas = int(tasks[1]["result"], 16)
-                block_max_priority_fee_per_gas = math.ceil(
-                    block_max_priority_fee_per_gas
-                    * (self.max_priority_fee_per_gas_percentage_multiplier
-                       / 100)
-                )
 
                 # max priority fee per gas can't be higher than max fee per gas
                 if block_max_priority_fee_per_gas > block_max_fee_per_gas:
@@ -118,8 +107,6 @@ class GasManager(ABC, Generic[UserOperationType]):
                         "maxFeePerGas and (maxPriorityFeePerGas + estimated basefee) " +
                         f"should be equal or higher than : {block_max_fee_per_gas_with_tolerance_hex}",
                     )
-
-        return block_max_fee_per_gas_hex
 
     async def verify_preverification_gas_and_verification_gas_limit(
         self,
