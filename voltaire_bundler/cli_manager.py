@@ -274,6 +274,7 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--verbose",
+        type=str_to_bool,
         help="show debug log",
         nargs="?",
         const=True,
@@ -282,6 +283,7 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--debug",
+        type=str_to_bool,
         help="expose _debug rpc namespace for testing",
         nargs="?",
         const=True,
@@ -303,6 +305,7 @@ def initialize_argument_parser() -> ArgumentParser:
 
     group2.add_argument(
         "--unsafe",
+        type=str_to_bool,
         help=(
             "UNSAFE mode: no storage or opcode checks - "
             "when debug_traceCall is not available"
@@ -325,10 +328,11 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--legacy_mode",
+        type=str_to_bool,
         help="for networks that doesn't support EIP-1559",
         nargs="?",
         const=True,
-        default=_get_env_or_default("VOLTAIRE_LEGACY_MODE", False, str),
+        default=_get_env_or_default("VOLTAIRE_LEGACY_MODE", False, lambda v: v.lower() == "true"),
     )
 
     group3 = parser.add_mutually_exclusive_group()
@@ -491,6 +495,7 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--p2p_upnp_enabled",
+        type=str_to_bool,
         help="Attempt to construct external port mappings with UPnP.",
         nargs="?",
         const=True,
@@ -499,6 +504,7 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--p2p_metrics_enabled",
+        type=str_to_bool,
         help="Whether metrics are enabled.",
         nargs="?",
         const=True,
