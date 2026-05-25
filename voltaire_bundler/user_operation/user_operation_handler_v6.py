@@ -21,8 +21,6 @@ class UserOperationHandlerV6(UserOperationHandler):
         bundler_address,
         is_legacy_mode,
         ethereum_node_eth_get_logs_urls,
-        max_fee_per_gas_percentage_multiplier: int,
-        max_priority_fee_per_gas_percentage_multiplier: int,
         max_verification_gas: int,
         max_call_data_gas: int,
         logs_incremental_range: int,
@@ -37,8 +35,6 @@ class UserOperationHandlerV6(UserOperationHandler):
             chain_id,
             bundler_address,
             is_legacy_mode,
-            max_fee_per_gas_percentage_multiplier,
-            max_priority_fee_per_gas_percentage_multiplier,
             max_verification_gas,
             max_call_data_gas,
         )
