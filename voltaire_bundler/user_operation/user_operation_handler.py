@@ -552,6 +552,63 @@ async def _eth_getLogs_once(
         return None
 
 
+async def _cached_logs_block_still_canonical(
+    ethereum_node_urls: list[str],
+    cached_logs: list,
+) -> bool:
+    """Confirm the cached log set's block is still on the canonical chain.
+
+    The userop-logs cache is keyed by ``entrypoint:userOpHash``. After a
+    reorg the same userop hash can land in a different block, but a hit
+    in the cache would otherwise return the orphaned block's logs forever
+    (the cache key never changes). One ``eth_getBlockByNumber`` per cache
+    hit is cheap relative to the eth_getLogs scan it shields, and
+    eth_getBlockByNumber always returns the canonical block at that
+    height — so a hash mismatch is a definitive reorg signal.
+
+    Returns False on reorg, on the block disappearing, on a malformed
+    cached payload, and on any RPC failure (so the caller drops the
+    entry and re-fetches rather than serving stale data)."""
+    if not cached_logs:
+        return False
+    first = cached_logs[0]
+    if not isinstance(first, dict):
+        return False
+    block_hash = first.get("blockHash")
+    block_number = first.get("blockNumber")
+    if not isinstance(block_hash, str) or not isinstance(block_number, str):
+        return False
+    try:
+        res = await asyncio.wait_for(
+            send_rpc_request_to_eth_client(
+                ethereum_node_urls,
+                "eth_getBlockByNumber",
+                [block_number, False],
+            ),
+            timeout=ETH_RPC_LOOKUP_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError:
+        logging.warning(
+            "eth_getBlockByNumber(%s) timed out during reorg revalidation; "
+            "treating cached userop-logs entry as stale",
+            block_number,
+        )
+        return False
+    except Exception:
+        logging.warning(
+            "eth_getBlockByNumber(%s) failed during reorg revalidation; "
+            "treating cached userop-logs entry as stale",
+            block_number, exc_info=True,
+        )
+        return False
+    if not isinstance(res, dict):
+        return False
+    result = res.get("result")
+    if not isinstance(result, dict):
+        return False
+    return result.get("hash") == block_hash
+
+
 async def _fetch_latest_block_number(
     ethereum_node_urls: list[str],
 ) -> int | None:
@@ -590,7 +647,14 @@ async def get_user_operation_logs_for_block_range(
     cache_key = f"{entrypoint.lower()}:{user_operation_hash}"
     cached = await user_operation_logs_cache.get(cache_key)
     if cached is not None:
-        return cached
+        if await _cached_logs_block_still_canonical(
+            ethereum_node_eth_get_logs_urls, cached,
+        ):
+            return cached
+        # Cached block was reorged out (or revalidation failed). Drop the
+        # entry so we don't keep serving stale data, then fall through to
+        # the fresh eth_getLogs path below.
+        user_operation_logs_cache.delete(cache_key)
 
     # If the caller asked for the whole chain, first probe the last
     # EARLIEST_FALLBACK_RECENT_WINDOW blocks — that covers the typical
