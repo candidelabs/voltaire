@@ -87,10 +87,10 @@ class InitData:
     min_stake: int
     min_unstake_delay: int
     bundle_gas_estimation_multiplier: float
-    # RPC-result caches are mirrored to SQLite files under ``cache_dir`` so
-    # they survive bundler restarts. Set ``disable_persistent_cache`` to opt
-    # into memory-only mode.
-    disable_persistent_cache: bool
+    # RPC-result caches are memory-only by default. Set
+    # ``enable_persistent_cache`` to mirror them to SQLite files under
+    # ``cache_dir`` so they survive bundler restarts.
+    enable_persistent_cache: bool
     cache_dir: str
     # When True, the cache_dir is wiped at startup. One-shot flag for
     # discarding a corrupted or stale cache.
@@ -521,17 +521,17 @@ def initialize_argument_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
-        "--disable_persistent_cache",
+        "--enable_persistent_cache",
         type=str_to_bool,
         help=(
-            "Opt into memory-only RPC-result caches. By default the caches "
-            "(logs, transactions, receipts, seen) are mirrored to SQLite "
-            "files under --cache_dir so they survive a bundler restart."
+            "Mirror the RPC-result caches (logs, transactions, receipts, "
+            "seen) to SQLite files under --cache_dir so they survive a "
+            "bundler restart. Off by default; caches run memory-only."
         ),
         nargs="?",
         const=True,
         default=_get_env_or_default(
-            "VOLTAIRE_DISABLE_PERSISTENT_CACHE", False,
+            "VOLTAIRE_ENABLE_PERSISTENT_CACHE", False,
             lambda v: v.lower() == "true",
         ),
     )
@@ -541,8 +541,8 @@ def initialize_argument_parser() -> ArgumentParser:
         type=str,
         help=(
             "Directory holding persistent-cache SQLite files. Defaults to "
-            "~/.voltaire/cache/<chain_id>. Ignored when "
-            "--disable_persistent_cache is set."
+            "~/.voltaire/cache/<chain_id>. Ignored unless "
+            "--enable_persistent_cache is set."
         ),
         nargs="?",
         const="",
@@ -555,7 +555,7 @@ def initialize_argument_parser() -> ArgumentParser:
         help=(
             "Wipe --cache_dir before startup. One-shot flag; useful for "
             "discarding a stale or corrupted cache without manually "
-            "deleting files. Ignored when --disable_persistent_cache is set."
+            "deleting files. Ignored unless --enable_persistent_cache is set."
         ),
         nargs="?",
         const=True,
@@ -1091,7 +1091,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.min_stake,
         args.min_unstake_delay,
         args.bundle_gas_estimation_multiplier,
-        args.disable_persistent_cache,
+        args.enable_persistent_cache,
         args.cache_dir,
         args.clear_cache,
         args.cache_memory_size,
