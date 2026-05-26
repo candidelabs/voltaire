@@ -343,8 +343,16 @@ class UserOperationHandler(ABC):
                 else:
                     earliest_block_number = validated_at_block_number
 
-            if earliest_block_number < 0:
-                earliest_block_number = 0
+            # Clamp into [0, latest_block_number]. Upper-clamp guards
+            # against the validation RPC being ahead of the logs RPC
+            # (e.g. multi-node setup where the logs endpoint is
+            # mid-sync) — without it, validated > latest would produce
+            # an empty range() below and we'd return None without
+            # making a single eth_getLogs call, even though the logs
+            # node may catch up in the next millisecond.
+            earliest_block_number = max(
+                0, min(earliest_block_number, latest_block_number),
+            )
             # range stop is exclusive; bumping by 1 makes the final iteration
             # include latest_block_number, which is otherwise dropped when
             # validated_at_block_hex == latest (a common poll-just-after-
