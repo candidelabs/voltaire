@@ -542,10 +542,18 @@ class PersistentFIFOCache:
                 self._write_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
                 self._write_conn.close()
         finally:
-            if self._read_conn is not None:
-                self._read_conn.close()
-            self._write_conn = None
-            self._read_conn = None
+            # Hold _read_lock across the read-conn close+null so we don't
+            # race a reader that already passed the None-check and is
+            # about to (or currently is) executing a SELECT inside the
+            # same lock. Without this, _disable_disk_tier on the
+            # malformed-JSON path could close the connection while a
+            # sibling _disk_get/_disk_get_many holds the lock, surfacing
+            # as sqlite3.ProgrammingError("closed database").
+            with self._read_lock:
+                if self._read_conn is not None:
+                    self._read_conn.close()
+                self._write_conn = None
+                self._read_conn = None
 
     def _commit_batch(self, batch: list[tuple[str, Any]]) -> None:
         # Disk tier may have been disabled mid-flight (e.g. by a fatal
@@ -599,9 +607,13 @@ class PersistentFIFOCache:
             raise
 
     def _disk_get(self, key: str) -> Any | None:
-        if self._read_conn is None:
-            return None
+        # Check _read_conn INSIDE the lock — _close_conns sets it to None
+        # under the same lock, so a check outside would allow a stale
+        # "not None" observation to ride a now-closed connection into
+        # the SELECT below.
         with self._read_lock:
+            if self._read_conn is None:
+                return None
             cur = self._read_conn.execute(
                 f"SELECT value FROM {self.name} WHERE key = ?", (key,),
             )
@@ -620,8 +632,6 @@ class PersistentFIFOCache:
             return None
 
     def _disk_get_many(self, keys: list[str]) -> dict[str, Any]:
-        if self._read_conn is None:
-            return {}
         # SQLite has a SQLITE_LIMIT_VARIABLE_NUMBER ceiling (default 999 on
         # older builds, 32766 on newer ones). Real callers pass a handful
         # of keys; this guard catches accidental misuse without imposing
@@ -631,7 +641,11 @@ class PersistentFIFOCache:
                 f"get_many: {len(keys)} keys exceeds the per-query limit"
             )
         placeholders = ",".join("?" * len(keys))
+        # Check _read_conn INSIDE the lock for the same reason as
+        # _disk_get — _close_conns nulls it under the same lock.
         with self._read_lock:
+            if self._read_conn is None:
+                return {}
             cur = self._read_conn.execute(
                 f"SELECT key, value FROM {self.name} "
                 f"WHERE key IN ({placeholders})",
