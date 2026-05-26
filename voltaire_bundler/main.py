@@ -66,12 +66,10 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
         disk_mult=init_data.cache_disk_size,
     )
 
-    # Start the RPC-result caches. By default each cache opens a SQLite file
-    # under cache_dir and resumes from any prior state;
-    # --disable_persistent_cache opts into in-memory-only mode.
-    if init_data.disable_persistent_cache:
-        await PersistentFIFOCache.start_all(cache_dir=None)
-    else:
+    # Start the RPC-result caches. By default the caches run memory-only;
+    # --enable_persistent_cache opts into mirroring each cache to a SQLite
+    # file under cache_dir so state survives a restart.
+    if init_data.enable_persistent_cache:
         cache_dir = (
             Path(init_data.cache_dir).expanduser()
             if init_data.cache_dir
@@ -81,6 +79,8 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             logging.info("clearing persistent cache at %s", cache_dir)
             shutil.rmtree(cache_dir)
         await PersistentFIFOCache.start_all(cache_dir=cache_dir)
+    else:
+        await PersistentFIFOCache.start_all(cache_dir=None)
 
     # Synchronous part is free; the follow-up disk-row totals run in a
     # background task so the COUNT(*) work doesn't extend startup.

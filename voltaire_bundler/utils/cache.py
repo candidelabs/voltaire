@@ -154,8 +154,8 @@ class PersistentFIFOCache:
             # down for a non-load-bearing optimization.
             logger.warning(
                 "cache %s: disk tier disabled (%s: %s); running memory-only. "
-                "Set --cache_dir to a writable location, "
-                "--disable_persistent_cache to silence, or "
+                "Set --cache_dir to a writable location, drop "
+                "--enable_persistent_cache to silence, or "
                 "--clear_cache to wipe a corrupted DB.",
                 self.name, type(exc).__name__, exc,
             )
