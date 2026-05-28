@@ -91,8 +91,7 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             execution_endpoint: ExecutionEndpoint = ExecutionEndpoint(
                 init_data.ethereum_node_urls,
                 init_data.bundle_node_urls,
-                init_data.bundler_pk,
-                init_data.bundler_address,
+                init_data.bundler_secrets_per_ep,
                 init_data.chain_id,
                 init_data.is_unsafe,
                 init_data.is_debug,
@@ -128,11 +127,19 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             if init_data.ethereum_node_urls != init_data.ethereum_node_eth_get_logs_urls:
                 node_urls_to_check += init_data.ethereum_node_eth_get_logs_urls
 
+            # When --disable_v6 is set the v6 EOA is parsed but never used,
+            # so don't burn an eth_getBalance call on it.
+            labels_to_check = ("v7", "v8", "v9") if init_data.disable_v6 \
+                else ("v6", "v7", "v8", "v9")
+            bundler_addresses_to_check = sorted({
+                init_data.bundler_secrets_per_ep[label][0]
+                for label in labels_to_check
+            })
             task_group.create_task(
                 run_rpc_http_server(
                     node_urls_to_check=node_urls_to_check,
                     target_chain_id_hex=hex(init_data.chain_id),
-                    bundler=init_data.bundler_address,
+                    bundlers=bundler_addresses_to_check,
                     min_balance=init_data.min_bundler_balance,
                     host=init_data.rpc_url,
                     rpc_cors_domain=init_data.rpc_cors_domain,
@@ -151,7 +158,7 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
                         periodic_health_check_cron_job(
                             node_urls_to_check=node_urls_to_check,
                             target_chain_id_hex=hex(init_data.chain_id),
-                            bundler=init_data.bundler_address,
+                            bundlers=bundler_addresses_to_check,
                             min_balance=init_data.min_bundler_balance,
                             interval=init_data.health_check_interval
                         )

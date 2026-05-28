@@ -61,8 +61,10 @@ async def _warm_inclusion_caches(
 class BundlerManager:
     ethereum_node_urls: list[str]
     bundle_node_urls: list[str]
-    bundler_private_key: str
-    bundler_address: Address
+    # (address, private_key) per entrypoint label ("v6", "v7", "v8", "v9").
+    # Operators may set one EOA for all four (the default) or a distinct EOA
+    # per entrypoint via comma-separated --bundler_secret.
+    bundler_secrets_per_ep: dict[str, tuple[Address, str]]
     local_mempool_manager_v6: LocalMempoolManagerV6 | None
     local_mempool_manager_v7: LocalMempoolManagerV7
     local_mempool_manager_v8: LocalMempoolManagerV8
@@ -96,8 +98,7 @@ class BundlerManager:
         local_mempool_manager_v9: LocalMempoolManagerV9,
         ethereum_node_urls: list[str],
         bundle_node_urls: list[str],
-        bundler_private_key: str,
-        bundler_address: Address,
+        bundler_secrets_per_ep: dict[str, tuple[Address, str]],
         chain_id: int,
         is_legacy_mode: bool,
         conditional_rpc: ConditionalRpc | None,
@@ -112,8 +113,7 @@ class BundlerManager:
         self.local_mempool_manager_v9 = local_mempool_manager_v9
         self.ethereum_node_urls = ethereum_node_urls
         self.bundle_node_urls = bundle_node_urls
-        self.bundler_private_key = bundler_private_key
-        self.bundler_address = bundler_address
+        self.bundler_secrets_per_ep = bundler_secrets_per_ep
         self.chain_id = chain_id
         self.is_legacy_mode = is_legacy_mode
         self.conditional_rpc = conditional_rpc
@@ -280,6 +280,23 @@ class BundlerManager:
             self.user_operations_to_monitor_v6 |= copy.deepcopy(
                 user_operations_to_bundle_v6)
 
+    def _secret_for_mempool(
+        self,
+        mempool_manager: (
+            LocalMempoolManagerV9
+            | LocalMempoolManagerV8
+            | LocalMempoolManagerV7
+            | LocalMempoolManagerV6
+        ),
+    ) -> tuple[Address, str]:
+        if isinstance(mempool_manager, LocalMempoolManagerV9):
+            return self.bundler_secrets_per_ep["v9"]
+        if isinstance(mempool_manager, LocalMempoolManagerV8):
+            return self.bundler_secrets_per_ep["v8"]
+        if isinstance(mempool_manager, LocalMempoolManagerV7):
+            return self.bundler_secrets_per_ep["v7"]
+        return self.bundler_secrets_per_ep["v6"]
+
     async def send_bundle(
         self,
         user_operations: list[UserOperationV7V8V9] | list[UserOperationV6],
@@ -290,13 +307,15 @@ class BundlerManager:
         num_of_user_operations = len(user_operations)
         if num_of_user_operations == 0:
             return
+        bundler_address, bundler_private_key = self._secret_for_mempool(
+            mempool_manager)
         logging.info(
             f"Attempting to send bundle with {num_of_user_operations} user operations."
         )
 
         call_data_and_call_gas_limit_op = self.create_bundle_calldata_and_estimate_gas(
             user_operations,
-            self.bundler_address,
+            bundler_address,
             entrypoint,
             highest_verified_at_block
         )
@@ -308,7 +327,7 @@ class BundlerManager:
         nonce_op = send_rpc_request_to_eth_client(
             self.ethereum_node_urls,
             "eth_getTransactionCount",
-            [self.bundler_address, "latest"], None, "result"
+            [bundler_address, "latest"], None, "result"
         )
 
         tasks_arr = [
@@ -393,7 +412,7 @@ class BundlerManager:
         if len(auth_list) == 0:
             txnDict = {
                 "chainId": self.chain_id,
-                "from": self.bundler_address,
+                "from": bundler_address,
                 "to": entrypoint,
                 "nonce": nonce,
                 "gas": gas_estimation_hex,
@@ -414,7 +433,7 @@ class BundlerManager:
                     }
                 )
             sign_store_txn = Account.sign_transaction(
-                txnDict, private_key=self.bundler_private_key
+                txnDict, private_key=bundler_private_key
             )
             raw_transaction = "0x" + sign_store_txn.raw_transaction.hex()
         else:
@@ -428,7 +447,7 @@ class BundlerManager:
                 value_hex="0x",
                 data=call_data,
                 authorization_list=auth_list,
-                eoa_private_key=self.bundler_private_key
+                eoa_private_key=bundler_private_key
             )
 
         if self.conditional_rpc is not None and merged_storage_map is not None:
@@ -452,7 +471,7 @@ class BundlerManager:
                     raw_transaction,
                     {"fast": True}
                 ],
-                (self.bundler_address, self.bundler_private_key)
+                (bundler_address, bundler_private_key)
             )
         else:
             result = await send_rpc_request_to_eth_client(
@@ -731,13 +750,13 @@ class BundlerManager:
                 if user_operation.eip7702_auth is not None:
                     auth_list.append(user_operation.eip7702_auth)
             call_data = encode_handleops_calldata_v7v8v9(
-                user_operations_list, self.bundler_address
+                user_operations_list, bundler
             )
         else:
             for user_operation in user_operations:
                 user_operations_list.append(user_operation.to_list())
             call_data = encode_handleops_calldata_v6(
-                user_operations_list, self.bundler_address
+                user_operations_list, bundler
             )
 
         bundle_calldata_init_gas = calculate_bundle_calldata_init_gas(call_data)

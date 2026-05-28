@@ -9,7 +9,7 @@ from voltaire_bundler.utils.eth_client_utils import \
 async def periodic_health_check_cron_job(
     node_urls_to_check: list[str],
     target_chain_id_hex: str,
-    bundler: Address,
+    bundlers: list[Address],
     min_balance: int,
     interval: int
 ):
@@ -17,7 +17,7 @@ async def periodic_health_check_cron_job(
         await periodic_health_check(
             node_urls_to_check,
             target_chain_id_hex,
-            bundler,
+            bundlers,
             min_balance,
         )
         await asyncio.sleep(interval)
@@ -26,19 +26,35 @@ async def periodic_health_check_cron_job(
 async def periodic_health_check(
     node_urls_to_check: list[str],
     target_chain_id_hex: str,
-    bundler: Address,
+    bundlers: list[Address],
     min_balance: int,
 ):
     nodes_success, _ = await check_nodes_health(
         node_urls_to_check, target_chain_id_hex)
     if nodes_success:
-        await check_bundler_balance(
-            node_urls_to_check[0], bundler, min_balance)
+        await check_bundlers_balance(
+            node_urls_to_check[0], bundlers, min_balance)
 
 
-async def check_bundler_balance(
+async def check_bundlers_balance(
+    ethereum_node_url: str, bundlers: list[Address], min_balance: int
+) -> tuple[bool, dict[str, dict[str, str]]]:
+    """Check that every distinct bundler EOA holds at least ``min_balance``.
+    Returns aggregate success plus a per-address result map so the /health
+    endpoint can surface which EOA is short."""
+    per_bundler: dict[str, dict[str, str]] = {}
+    all_ok = True
+    for bundler in bundlers:
+        ok, result = await _check_single_bundler_balance(
+            ethereum_node_url, bundler, min_balance)
+        per_bundler[bundler] = result
+        all_ok = all_ok and ok
+    return all_ok, per_bundler
+
+
+async def _check_single_bundler_balance(
     ethereum_node_url: str, bundler: Address, min_balance: int
-) -> tuple[bool, dict]:
+) -> tuple[bool, dict[str, str]]:
     try:
         bundler_balance_res = await send_rpc_request_to_eth_client_no_retry(
             ethereum_node_url,
