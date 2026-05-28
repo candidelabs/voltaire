@@ -29,7 +29,8 @@ class LocalMempoolManagerV9(LocalMempoolManager):
         reputation_whitelist: list[str],
         reputation_blacklist: list[str],
         min_stake: int,
-        min_unstake_delay: int
+        min_unstake_delay: int,
+        enable_banning: bool,
     ):
         self.validation_manager = ValidationManagerV7V8V9(
             user_operation_handler,
@@ -44,7 +45,7 @@ class LocalMempoolManagerV9(LocalMempoolManager):
         )
         self.user_operation_handler = user_operation_handler
         self.reputation_manager = ReputationManager(
-            reputation_whitelist, reputation_blacklist)
+            reputation_whitelist, reputation_blacklist, enable_banning)
         self.ethereum_node_urls = ethereum_node_urls
         self.bundler_address = bundler_address
         self.chain_id = chain_id
