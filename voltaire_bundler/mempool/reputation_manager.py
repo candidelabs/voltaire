@@ -31,7 +31,8 @@ class ReputationManager:
     def __init__(
             self,
             reputation_whitelist: list[str],
-            reputation_blacklist: list[str]
+            reputation_blacklist: list[str],
+            enable_banning: bool = False,
     ) -> None:
         self.entities_reputation = {}
         if reputation_whitelist is not None:
@@ -44,6 +45,7 @@ class ReputationManager:
                 lambda entity: entity.lower(), reputation_blacklist))
         else:
             self.blacklist = []
+        self.enable_banning = enable_banning
         asyncio.ensure_future(self.execute_reputation_cron_job())
 
     async def execute_reputation_cron_job(self) -> None:
@@ -85,6 +87,16 @@ class ReputationManager:
         if self.is_whitelisted(entity_lowercase):
             logging.warning(
                 f"{entity} won't be banned because it is whitelisted.")
+        elif not self.enable_banning:
+            # Banning is disabled by config: log that this entity *would* have
+            # been banned, then drop any accumulated reputation so the entity
+            # starts fresh and the throttle/ban thresholds don't trip again
+            # immediately on the next interaction.
+            logging.warning(
+                f"{entity} should have been banned, but banning is disabled; "
+                "resetting its reputation score."
+            )
+            self.entities_reputation.pop(entity_lowercase, None)
         else:
             self.entities_reputation[entity_lowercase] = ReputationEntry(10000, 0)
 

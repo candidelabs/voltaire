@@ -117,7 +117,8 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
                 init_data.is_eip7702,
                 init_data.min_stake,
                 init_data.min_unstake_delay,
-                init_data.bundle_gas_estimation_multiplier
+                init_data.bundle_gas_estimation_multiplier,
+                init_data.enable_banning,
             )
             task_group.create_task(execution_endpoint.start_execution_endpoint())
 

@@ -99,6 +99,10 @@ class InitData:
     # built-in defaults; bump up on hosts with more RAM/disk headroom.
     cache_memory_size: float
     cache_disk_size: float
+    # When False (the default), reputation-driven bans are not enforced:
+    # the bundler logs that an entity *would* have been banned and resets
+    # its accumulated reputation score instead.
+    enable_banning: bool
 
 
 def address(ep: str):
@@ -675,6 +679,23 @@ def initialize_argument_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
+        "--enable_banning",
+        type=str_to_bool,
+        help=(
+            "Enforce reputation-driven bans of entities that fail validation "
+            "or exceed the inclusion-rate threshold. Off by default; when "
+            "off the bundler logs that an entity would have been banned and "
+            "resets its reputation score instead of marking it BANNED."
+        ),
+        nargs="?",
+        const=True,
+        default=_get_env_or_default(
+            "VOLTAIRE_ENABLE_BANNING", False,
+            lambda v: v.lower() == "true",
+        ),
+    )
+
+    parser.add_argument(
         "--eip7702",
         type=str_to_bool,
         help="enable eip7702 auth",
@@ -1096,6 +1117,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.clear_cache,
         args.cache_memory_size,
         args.cache_disk_size,
+        args.enable_banning,
     )
 
     if args.verbose:

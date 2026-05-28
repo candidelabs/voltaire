@@ -123,6 +123,7 @@ class ExecutionEndpoint(Endpoint):
         min_stake: int,
         min_unstake_delay: int,
         bundle_gas_estimation_multiplier: float,
+        enable_banning: bool,
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_urls = ethereum_node_urls
@@ -153,7 +154,8 @@ class ExecutionEndpoint(Endpoint):
             reputation_whitelist,
             reputation_blacklist,
             min_stake,
-            min_unstake_delay
+            min_unstake_delay,
+            enable_banning,
         )
 
         self.local_mempool_manager_v8 = LocalMempoolManagerV8(
@@ -169,7 +171,8 @@ class ExecutionEndpoint(Endpoint):
             reputation_whitelist,
             reputation_blacklist,
             min_stake,
-            min_unstake_delay
+            min_unstake_delay,
+            enable_banning,
         )
 
         self.local_mempool_manager_v7 = LocalMempoolManagerV7(
@@ -185,7 +188,8 @@ class ExecutionEndpoint(Endpoint):
             reputation_whitelist,
             reputation_blacklist,
             min_stake,
-            min_unstake_delay
+            min_unstake_delay,
+            enable_banning,
         )
 
         if disable_v6:
@@ -217,7 +221,8 @@ class ExecutionEndpoint(Endpoint):
                 reputation_whitelist,
                 reputation_blacklist,
                 min_stake,
-                min_unstake_delay
+                min_unstake_delay,
+                enable_banning,
             )
 
         self.bundle_manager = BundlerManager(
