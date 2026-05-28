@@ -674,7 +674,7 @@ def initialize_argument_parser() -> ArgumentParser:
         nargs="?",
         const=5_000,
         default=_get_env_or_default(
-            "VOLTAIRE_LOGS_FALLBACK_RECENT_WINDOW", 5_000, int),
+            "VOLTAIRE_LOGS_FALLBACK_RECENT_WINDOW", 5_000, unsigned_int),
     )
 
     parser.add_argument(
