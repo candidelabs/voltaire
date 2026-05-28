@@ -821,6 +821,13 @@ async def init_bundler_address_and_secret(
         }
     else:
         raw_secrets = [s.strip() for s in args.bundler_secret.split(",")]
+        if any(s == "" for s in raw_secrets):
+            logging.critical(
+                "--bundler_secret contains an empty entry; provide either one "
+                "secret or four non-empty comma-separated secrets (one per "
+                "entrypoint in v0.6,v0.7,v0.8,v0.9 order)."
+            )
+            sys.exit(1)
         if len(raw_secrets) == 1:
             pk = raw_secrets[0]
             addr = public_address_from_private_key(pk)
