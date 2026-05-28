@@ -44,8 +44,10 @@ class InitData:
     rpc_port: int
     ethereum_node_urls: list[str]
     bundle_node_urls: list[str]
-    bundler_pk: str
-    bundler_address: Address
+    # (address, private_key) tuples keyed by entrypoint label
+    # ("v6", "v7", "v8", "v9"). When the operator passes a single
+    # --bundler_secret all four entries share the same EOA.
+    bundler_secrets_per_ep: dict[str, tuple[Address, str]]
     chain_id: int
     is_debug: bool
     is_unsafe: bool
@@ -184,7 +186,12 @@ def initialize_argument_parser() -> ArgumentParser:
     group.add_argument(
         "--bundler_secret",
         type=str,
-        help="Bundler private key",
+        help=(
+            "Bundler private key. Pass a single secret to use one EOA for all "
+            "entrypoints, or four comma-separated secrets (in v0.6,v0.7,v0.8,v0.9 "
+            "order) to use a distinct EOA per entrypoint. When --disable_v6 is "
+            "set the v0.6 slot is still required but its EOA is unused."
+        ),
         nargs="?",
         default=_get_env_or_default("VOLTAIRE_BUNDLER_SECRET", None, str),
     )
@@ -776,49 +783,77 @@ def init_logging(args: Namespace):
     logging.getLogger("Voltaire")
 
 
-async def init_bundler_address_and_secret(args: Namespace, ethereum_node_url: str):
-    bundler_address = ""
-    bundler_pk = ""
+ENTRYPOINT_LABELS = ("v6", "v7", "v8", "v9")
 
+
+async def init_bundler_address_and_secret(
+    args: Namespace, ethereum_node_url: str
+) -> dict[str, tuple[Address, str]]:
     if args.keystore_file_path is not None:
+        # Keystore is single-EOA only: the same EOA is reused for every
+        # entrypoint.
         bundler_address, bundler_pk = import_bundler_account(
             args.keystore_file_password, args.keystore_file_path
         )
+        per_ep_secrets = {
+            label: (bundler_address, bundler_pk) for label in ENTRYPOINT_LABELS
+        }
     else:
-        bundler_pk = args.bundler_secret
-        bundler_address = public_address_from_private_key(bundler_pk)
-
-    try:
-        bundler_code_res = await send_rpc_request_to_eth_client_no_retry(
-            ethereum_node_url,
-            "eth_getCode",
-            [bundler_address, "latest"],
-        )
-        if "result" not in bundler_code_res:
+        raw_secrets = [s.strip() for s in args.bundler_secret.split(",")]
+        if len(raw_secrets) == 1:
+            pk = raw_secrets[0]
+            addr = public_address_from_private_key(pk)
+            per_ep_secrets = {label: (addr, pk) for label in ENTRYPOINT_LABELS}
+        elif len(raw_secrets) == 4:
+            per_ep_secrets = {}
+            for label, pk in zip(ENTRYPOINT_LABELS, raw_secrets):
+                addr = public_address_from_private_key(pk)
+                per_ep_secrets[label] = (addr, pk)
+        else:
             logging.critical(
-                f"eth_getCode failed for bundler address {bundler_address}"
+                "--bundler_secret must be either one secret or four "
+                "comma-separated secrets (one per entrypoint in "
+                "v0.6,v0.7,v0.8,v0.9 order); got "
+                f"{len(raw_secrets)}."
             )
             sys.exit(1)
-        else:
-            bundler_code = bundler_code_res["result"]
-            if (len(bundler_code) > 2):
+
+    # Verify each unique EOA address is actually an EOA (no contract code,
+    # no EIP-7702 delegation). De-duplicate first so the single-secret case
+    # only spends one RPC round-trip.
+    unique_addresses = {addr for addr, _ in per_ep_secrets.values()}
+    for bundler_address in unique_addresses:
+        try:
+            bundler_code_res = await send_rpc_request_to_eth_client_no_retry(
+                ethereum_node_url,
+                "eth_getCode",
+                [bundler_address, "latest"],
+            )
+            if "result" not in bundler_code_res:
                 logging.critical(
-                    f"Invalid Eth bundler beneficiary address: {bundler_address}"
-                    " as it should be an eoa without an eip7702 delegation."
+                    f"eth_getCode failed for bundler address {bundler_address}"
                 )
                 sys.exit(1)
-    except (aiohttp.ClientConnectionError, TimeoutError) as e:
-        logging.critical(
-            f"Connection error for Eth node {ethereum_node_url} for eth_getCode: {e}"
-        )
-        sys.exit(1)
-    except Exception:
-        logging.critical(
-            f"Error when connecting to Eth node {ethereum_node_url} for eth_getCode"
-        )
-        sys.exit(1)
+            else:
+                bundler_code = bundler_code_res["result"]
+                if (len(bundler_code) > 2):
+                    logging.critical(
+                        f"Invalid Eth bundler beneficiary address: {bundler_address}"
+                        " as it should be an eoa without an eip7702 delegation."
+                    )
+                    sys.exit(1)
+        except (aiohttp.ClientConnectionError, TimeoutError) as e:
+            logging.critical(
+                f"Connection error for Eth node {ethereum_node_url} for eth_getCode: {e}"
+            )
+            sys.exit(1)
+        except Exception:
+            logging.critical(
+                f"Error when connecting to Eth node {ethereum_node_url} for eth_getCode"
+            )
+            sys.exit(1)
 
-    return bundler_address, bundler_pk
+    return per_ep_secrets
 
 
 def check_if_valid_rpc_url_and_port(rpc_url, rpc_port) -> None:
@@ -938,7 +973,7 @@ async def get_init_data(args: Namespace) -> InitData:
         )
         sys.exit(1)
 
-    bundler_address, bundler_pk = await init_bundler_address_and_secret(
+    bundler_secrets_per_ep = await init_bundler_address_and_secret(
         args, ethereum_node_urls_rearranged[0])
 
     if args.bundle_node_url is None:
@@ -1048,8 +1083,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.rpc_port,
         ethereum_node_urls,
         bundle_node_urls,
-        bundler_pk,
-        bundler_address,
+        bundler_secrets_per_ep,
         args.chain_id,
         args.debug,
         args.unsafe,
