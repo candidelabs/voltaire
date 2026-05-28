@@ -28,6 +28,7 @@ class UserOperationHandler(ABC):
     gas_manager: GasManager
     logs_incremental_range: int
     logs_number_of_ranges: int
+    logs_fallback_recent_window: int
 
     async def _find_handle_ops_calldata(
         self,
@@ -368,7 +369,8 @@ class UserOperationHandler(ABC):
                     user_operation_hash,
                     entrypoint,
                     hex(earliest_block),
-                    hex(latest_block)
+                    hex(latest_block),
+                    self.logs_fallback_recent_window,
                 )
                 if res is not None:
                     return res
@@ -384,7 +386,8 @@ class UserOperationHandler(ABC):
                 user_operation_hash,
                 entrypoint,
                 earliest_block_hex,
-                "latest"
+                "latest",
+                self.logs_fallback_recent_window,
             )
 
     def get_user_operation_by_hash_from_local_mempool(
@@ -492,6 +495,10 @@ ETH_RPC_LOOKUP_TIMEOUT_S = 2.0
 # are clients polling a userop submitted seconds ago, which lives well
 # within this window — and many nodes either time out or return invalid
 # responses for a full-history eth_getLogs scan.
+#
+# Default size of that probe window when the caller doesn't pass an
+# explicit value. The CLI surfaces this as --logs_fallback_recent_window;
+# handler-driven calls override it with the operator-configured value.
 EARLIEST_FALLBACK_RECENT_WINDOW = 5_000
 
 
@@ -651,6 +658,7 @@ async def get_user_operation_logs_for_block_range(
     entrypoint: str,
     from_block_hex: str,
     to_block_hex: str,
+    earliest_fallback_recent_window: int = EARLIEST_FALLBACK_RECENT_WINDOW,
 ) -> list | None:
     cache_key = f"{entrypoint.lower()}:{user_operation_hash}"
     cached = await user_operation_logs_cache.get(cache_key)
@@ -665,17 +673,17 @@ async def get_user_operation_logs_for_block_range(
         user_operation_logs_cache.delete(cache_key)
 
     # If the caller asked for the whole chain, first probe the last
-    # EARLIEST_FALLBACK_RECENT_WINDOW blocks — that covers the typical
-    # "client polling a freshly submitted userop" pattern at a fraction
-    # of the wide-scan cost. Fall through to the full "earliest" scan
-    # only if the narrow window misses.
+    # ``earliest_fallback_recent_window`` blocks — that covers the
+    # typical "client polling a freshly submitted userop" pattern at a
+    # fraction of the wide-scan cost. Fall through to the full "earliest"
+    # scan only if the narrow window misses.
     if from_block_hex == "earliest":
         latest = await _fetch_latest_block_number(
             ethereum_node_eth_get_logs_urls,
         )
         if latest is not None:
             window_from = hex(
-                max(0, latest - EARLIEST_FALLBACK_RECENT_WINDOW)
+                max(0, latest - earliest_fallback_recent_window)
             )
             result = await _eth_getLogs_once(
                 ethereum_node_eth_get_logs_urls,

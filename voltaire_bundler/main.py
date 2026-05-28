@@ -118,6 +118,7 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
                 init_data.min_unstake_delay,
                 init_data.bundle_gas_estimation_multiplier,
                 init_data.enable_banning,
+                init_data.logs_fallback_recent_window,
             )
             task_group.create_task(execution_endpoint.start_execution_endpoint())
 
