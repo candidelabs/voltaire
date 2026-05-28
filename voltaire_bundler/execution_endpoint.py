@@ -123,6 +123,7 @@ class ExecutionEndpoint(Endpoint):
         min_unstake_delay: int,
         bundle_gas_estimation_multiplier: float,
         enable_banning: bool,
+        logs_fallback_recent_window: int,
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_urls = ethereum_node_urls
@@ -147,6 +148,7 @@ class ExecutionEndpoint(Endpoint):
             max_call_data_gas,
             logs_incremental_range,
             logs_number_of_ranges,
+            logs_fallback_recent_window,
         )
 
         self.local_mempool_manager_v9 = LocalMempoolManagerV9(
@@ -214,6 +216,7 @@ class ExecutionEndpoint(Endpoint):
                 max_call_data_gas,
                 logs_incremental_range,
                 logs_number_of_ranges,
+                logs_fallback_recent_window,
             )
 
             self.local_mempool_manager_v6 = LocalMempoolManagerV6(

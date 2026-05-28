@@ -105,6 +105,10 @@ class InitData:
     # the bundler logs that an entity *would* have been banned and resets
     # its accumulated reputation score instead.
     enable_banning: bool
+    # Block window for the cheap recent-blocks probe that runs before a
+    # full ``fromBlock="earliest"`` eth_getLogs scan in
+    # eth_getUserOperationByHash/Receipt.
+    logs_fallback_recent_window: int
 
 
 def address(ep: str):
@@ -658,6 +662,22 @@ def initialize_argument_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
+        "--logs_fallback_recent_window",
+        type=unsigned_int,
+        help=(
+            "Block window for the cheap recent-blocks probe that runs "
+            "before a full fromBlock=\"earliest\" eth_getLogs scan in "
+            "eth_getUserOperationByHash/Receipt. The vast majority of "
+            "polling clients hit a userop submitted seconds ago, which "
+            "lives within this window. Defaults to 5000."
+        ),
+        nargs="?",
+        const=5_000,
+        default=_get_env_or_default(
+            "VOLTAIRE_LOGS_FALLBACK_RECENT_WINDOW", 5_000, int),
+    )
+
+    parser.add_argument(
         "--health_check_interval",
         type=int,
         help=(
@@ -1159,6 +1179,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.cache_memory_size,
         args.cache_disk_size,
         args.enable_banning,
+        args.logs_fallback_recent_window,
     )
 
     if args.verbose:

@@ -25,6 +25,7 @@ class UserOperationHandlerV6(UserOperationHandler):
         max_call_data_gas: int,
         logs_incremental_range: int,
         logs_number_of_ranges: int,
+        logs_fallback_recent_window: int,
     ):
         self.ethereum_node_urls = ethereum_node_urls
         self.bundler_address = bundler_address
@@ -40,6 +41,7 @@ class UserOperationHandlerV6(UserOperationHandler):
         )
         self.logs_incremental_range = logs_incremental_range
         self.logs_number_of_ranges = logs_number_of_ranges
+        self.logs_fallback_recent_window = logs_fallback_recent_window
 
     async def get_user_operation_by_hash(
         self, user_operation_hash: str,
