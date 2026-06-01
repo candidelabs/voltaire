@@ -212,7 +212,7 @@ class UserOperationHandler(ABC):
         log = logs[0]
 
         log_object = Log(
-            removed=log["removed"],
+            removed=log.get("removed", False),
             logIndex=log["logIndex"],
             transactionIndex=log["transactionIndex"],
             transactionHash=log["transactionHash"],
