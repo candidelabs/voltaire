@@ -5,28 +5,51 @@
 #   - anvil (Foundry): https://book.getfoundry.sh/getting-started/installation
 #   - poetry: pip install poetry
 #   - Python 3.13+
+#   - docker (only when --with-postgres is passed)
 #
 # This script starts a local anvil node, deploys the required contracts,
-# and launches the Voltaire bundler.
+# and launches the Voltaire bundler. Optionally also starts a local
+# Postgres container and wires the bundler's persistent cache to it.
 #
 # Usage:
-#   ./scripts/local-dev-setup.sh
+#   ./scripts/local-dev-setup.sh                 # SQLite (memory-only by default)
+#   ./scripts/local-dev-setup.sh --with-postgres # Postgres-backed persistent cache
 #
 # Environment variables (all optional):
 #   ANVIL_PORT       - Anvil JSON-RPC port (default: 8545)
 #   BUNDLER_PORT     - Bundler RPC port (default: 3000)
 #   CHAIN_ID         - Chain ID (default: 1337)
 #   BUNDLER_SECRET   - Bundler signer private key
+#   POSTGRES_PORT    - Postgres host port (default: 5432; only used with --with-postgres)
 #
 # The bundler RPC will be available at: http://127.0.0.1:3000/rpc
 # The anvil node will be available at:  http://127.0.0.1:8545
+# Postgres (when enabled) at:           postgresql://voltaire:voltaire@127.0.0.1:5432/voltaire
 
 set -euo pipefail
+
+WITH_POSTGRES=0
+for arg in "$@"; do
+    case "$arg" in
+        --with-postgres) WITH_POSTGRES=1 ;;
+        -h|--help)
+            sed -n '1,30p' "$0"
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $arg" >&2
+            exit 1
+            ;;
+    esac
+done
 
 ANVIL_PORT="${ANVIL_PORT:-8545}"
 BUNDLER_PORT="${BUNDLER_PORT:-3000}"
 CHAIN_ID="${CHAIN_ID:-1337}"
 BUNDLER_SECRET="${BUNDLER_SECRET:-0x897368deaa9f3797c02570ef7d3fa4df179b0fc7ad8d8fc2547d04701604eb72}"
+POSTGRES_PORT="${POSTGRES_PORT:-5432}"
+POSTGRES_CONTAINER="voltaire-local-postgres"
+POSTGRES_DSN="postgresql://voltaire:voltaire@127.0.0.1:${POSTGRES_PORT}/voltaire"
 BUNDLER_ADDRESS=$(cast wallet address --private-key "$BUNDLER_SECRET" 2>/dev/null)
 DETERMINISTIC_FACTORY="0x4e59b44847b379578588920ca78fbf26c0b4956c"
 FACTORY_DEPLOYER="0x3fab184622dc19b6109349b94811493bf2a45362"
@@ -47,6 +70,12 @@ cleanup() {
     echo "Shutting down..."
     kill "$ANVIL_PID" 2>/dev/null || true
     kill "$BUNDLER_PID" 2>/dev/null || true
+    if [ "$WITH_POSTGRES" = "1" ]; then
+        # Leave the container's data intact so a re-run picks up the
+        # warm cache. Operators who want a clean slate can
+        # `docker rm -fv $POSTGRES_CONTAINER` themselves.
+        docker stop "$POSTGRES_CONTAINER" >/dev/null 2>&1 || true
+    fi
     exit 0
 }
 trap cleanup SIGINT SIGTERM
@@ -72,6 +101,38 @@ match = re.search(r'var $var_name\s*=\s*\"(0x[0-9a-fA-F]+)\"', section)
 print(match.group(1))
 "
 }
+
+# ─── Start Postgres (optional) ────────────────────────────────
+if [ "$WITH_POSTGRES" = "1" ]; then
+    echo "=== Starting Postgres (port=$POSTGRES_PORT) ==="
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "ERROR: --with-postgres requires docker"
+        exit 1
+    fi
+    # Reuse the container across runs so the persistent cache
+    # actually persists between bundler restarts. Only `docker run`
+    # if the container doesn't already exist.
+    if ! docker inspect "$POSTGRES_CONTAINER" >/dev/null 2>&1; then
+        docker run -d \
+            --name "$POSTGRES_CONTAINER" \
+            -e POSTGRES_USER=voltaire \
+            -e POSTGRES_PASSWORD=voltaire \
+            -e POSTGRES_DB=voltaire \
+            -p "$POSTGRES_PORT:5432" \
+            postgres:16-alpine >/dev/null
+    else
+        docker start "$POSTGRES_CONTAINER" >/dev/null
+    fi
+    # Wait for Postgres to accept connections — the bundler will
+    # otherwise see an open() failure and fall back to memory-only.
+    for _ in $(seq 1 30); do
+        if docker exec "$POSTGRES_CONTAINER" pg_isready -U voltaire >/dev/null 2>&1; then
+            break
+        fi
+        sleep 1
+    done
+    echo "Postgres ready at $POSTGRES_DSN"
+fi
 
 # ─── Start anvil ──────────────────────────────────────────────
 echo "=== Starting anvil (chain_id=$CHAIN_ID, port=$ANVIL_PORT) ==="
@@ -170,6 +231,13 @@ echo ""
 # UserOps will be accepted into the mempool but never included on-chain.
 echo "=== Starting Voltaire bundler ==="
 cd "$PROJECT_DIR"
+
+EXTRA_FLAGS=()
+if [ "$WITH_POSTGRES" = "1" ]; then
+    EXTRA_FLAGS+=(--enable_persistent_cache --cache_backend postgres)
+    export VOLTAIRE_CACHE_POSTGRES_URL="$POSTGRES_DSN"
+fi
+
 poetry run python3 -m voltaire_bundler \
     --bundler_secret "$BUNDLER_SECRET" \
     --chain_id "$CHAIN_ID" \
@@ -178,7 +246,8 @@ poetry run python3 -m voltaire_bundler \
     --verbose --unsafe \
     --bundle_interval 2 \
     --disable_p2p \
-    --eip7702 &
+    --eip7702 \
+    "${EXTRA_FLAGS[@]}" &
 BUNDLER_PID=$!
 sleep 3
 

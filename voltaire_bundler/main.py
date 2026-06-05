@@ -14,7 +14,11 @@ from voltaire_bundler.mempool.mempool_info import DEFAULT_MEMPOOL_INFO
 from voltaire_bundler.metrics.metrics import run_metrics_server
 from voltaire_bundler.p2p_boot import p2p_boot
 from voltaire_bundler.rpc.health import periodic_health_check_cron_job
-from voltaire_bundler.utils.cache import PersistentFIFOCache
+from voltaire_bundler.utils.cache import (
+    PersistentFIFOCache,
+    PostgresConfig,
+    SQLiteConfig,
+)
 from voltaire_bundler.utils.SignalHaltError import immediate_exit
 
 from .cli_manager import parse_args
@@ -66,21 +70,28 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
         disk_mult=init_data.cache_disk_size,
     )
 
-    # Start the RPC-result caches. By default the caches run memory-only;
-    # --enable_persistent_cache opts into mirroring each cache to a SQLite
-    # file under cache_dir so state survives a restart.
+    # Start the RPC-result caches. By default the caches run
+    # memory-only; --enable_persistent_cache opts into mirroring each
+    # cache to a SQLite file (default) or Postgres database so state
+    # survives a restart.
     if init_data.enable_persistent_cache:
-        cache_dir = (
-            Path(init_data.cache_dir).expanduser()
-            if init_data.cache_dir
-            else Path.home() / ".voltaire" / "cache" / str(init_data.chain_id)
-        )
-        if init_data.clear_cache and cache_dir.exists():
-            logging.info("clearing persistent cache at %s", cache_dir)
-            shutil.rmtree(cache_dir)
-        await PersistentFIFOCache.start_all(cache_dir=cache_dir)
+        backend_config: PostgresConfig | SQLiteConfig
+        if init_data.cache_backend == "postgres":
+            backend_config = PostgresConfig(url=init_data.cache_postgres_url)
+        else:
+            cache_dir = (
+                Path(init_data.cache_dir).expanduser()
+                if init_data.cache_dir
+                else Path.home() / ".voltaire" / "cache" /
+                    str(init_data.chain_id)
+            )
+            if init_data.clear_cache and cache_dir.exists():
+                logging.info("clearing persistent cache at %s", cache_dir)
+                shutil.rmtree(cache_dir)
+            backend_config = SQLiteConfig(cache_dir=cache_dir)
+        await PersistentFIFOCache.start_all(backend_config)
     else:
-        await PersistentFIFOCache.start_all(cache_dir=None)
+        await PersistentFIFOCache.start_all(None)
 
     # Synchronous part is free; the follow-up disk-row totals run in a
     # background task so the COUNT(*) work doesn't extend startup.
