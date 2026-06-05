@@ -89,24 +89,11 @@ class InitData:
     min_stake: int
     min_unstake_delay: int
     bundle_gas_estimation_multiplier: float
-    # RPC-result caches are memory-only by default. Set
-    # ``enable_persistent_cache`` to mirror them to a SQLite file
-    # (default) or Postgres database (when ``cache_backend == "postgres"``)
-    # so they survive bundler restarts.
-    enable_persistent_cache: bool
-    # "sqlite" (default) or "postgres". Postgres requires
-    # VOLTAIRE_CACHE_POSTGRES_URL to be set; sqlite uses cache_dir.
-    cache_backend: str
-    cache_dir: str
-    # libpq DSN for the Postgres backend, sourced ONLY from the env
-    # var so credentials never appear on argv. Empty string when not
-    # set; validated when cache_backend == "postgres".
+    # libpq DSN for the Postgres cache backend, sourced ONLY from the
+    # VOLTAIRE_CACHE_POSTGRES_URL env var so credentials never appear
+    # on argv. Empty string ⇒ persistent cache disabled, caches run
+    # memory-only.
     cache_postgres_url: str
-    # When True, the cache_dir is wiped at startup (SQLite backend
-    # only — Postgres operators clear via DROP/TRUNCATE on the
-    # database side). One-shot flag for discarding a corrupted or
-    # stale cache.
-    clear_cache: bool
     # Per-deployment scale knobs for the cache caps. 1.0 keeps the
     # built-in defaults; bump up on hosts with more RAM/disk headroom.
     cache_memory_size: float
@@ -546,70 +533,6 @@ def initialize_argument_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
-        "--enable_persistent_cache",
-        type=str_to_bool,
-        help=(
-            "Mirror the RPC-result caches (logs, transactions, receipts, "
-            "seen) to a persistent backend so they survive a bundler "
-            "restart. Off by default; caches run memory-only."
-        ),
-        nargs="?",
-        const=True,
-        default=_get_env_or_default(
-            "VOLTAIRE_ENABLE_PERSISTENT_CACHE", False,
-            lambda v: v.lower() == "true",
-        ),
-    )
-
-    parser.add_argument(
-        "--cache_backend",
-        type=str,
-        choices=["sqlite", "postgres"],
-        help=(
-            "Backend for the persistent cache when --enable_persistent_cache "
-            "is set. 'sqlite' (default) writes one file per cache under "
-            "--cache_dir. 'postgres' shares one connection pool across all "
-            "caches; the DSN must be supplied via VOLTAIRE_CACHE_POSTGRES_URL "
-            "(no CLI flag, so credentials never appear on argv)."
-        ),
-        nargs="?",
-        const="sqlite",
-        default=_get_env_or_default(
-            "VOLTAIRE_CACHE_BACKEND", "sqlite", str,
-        ),
-    )
-
-    parser.add_argument(
-        "--cache_dir",
-        type=str,
-        help=(
-            "Directory holding persistent-cache SQLite files. Defaults to "
-            "~/.voltaire/cache/<chain_id>. Ignored unless "
-            "--enable_persistent_cache is set with --cache_backend sqlite."
-        ),
-        nargs="?",
-        const="",
-        default=_get_env_or_default("VOLTAIRE_CACHE_DIR", "", str),
-    )
-
-    parser.add_argument(
-        "--clear_cache",
-        type=str_to_bool,
-        help=(
-            "Wipe --cache_dir before startup (sqlite backend only). "
-            "One-shot flag; useful for discarding a stale or corrupted "
-            "cache without manually deleting files. For the postgres "
-            "backend, drop/truncate the tables on the DB side instead. "
-            "Ignored unless --enable_persistent_cache is set."
-        ),
-        nargs="?",
-        const=True,
-        default=_get_env_or_default(
-            "VOLTAIRE_CLEAR_CACHE", False, lambda v: v.lower() == "true",
-        ),
-    )
-
-    parser.add_argument(
         "--cache_memory_size",
         type=positive_float,
         help=(
@@ -841,24 +764,6 @@ async def parse_args(cmd_args: [str]) -> InitData:
         argument_parser.error("You can only specify either --ethereum_node_debug_trace_call_url or --unsafe but not both at the same time")
     if args.legacy_mode and args.eip7702:
         argument_parser.error("You can only specify either --is_legacy_mode or --eip7702 but not both at the same time")
-    # Validate cache backend selection up front so the operator gets a
-    # clean argparse error instead of a runtime warning + silent
-    # memory-only fallback on a typo.
-    if args.cache_backend not in ("sqlite", "postgres"):
-        argument_parser.error(
-            f"--cache_backend must be 'sqlite' or 'postgres', "
-            f"got {args.cache_backend!r}"
-        )
-    if (
-        args.enable_persistent_cache
-        and args.cache_backend == "postgres"
-        and not os.getenv("VOLTAIRE_CACHE_POSTGRES_URL")
-    ):
-        argument_parser.error(
-            "--cache_backend postgres requires the "
-            "VOLTAIRE_CACHE_POSTGRES_URL env var (the DSN is kept out "
-            "of argv so credentials don't leak into process listings)."
-        )
     init_data = await get_init_data(args)
     return init_data
 
@@ -1221,11 +1126,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.min_stake,
         args.min_unstake_delay,
         args.bundle_gas_estimation_multiplier,
-        args.enable_persistent_cache,
-        args.cache_backend,
-        args.cache_dir,
         os.getenv("VOLTAIRE_CACHE_POSTGRES_URL", ""),
-        args.clear_cache,
         args.cache_memory_size,
         args.cache_disk_size,
         args.enable_banning,
