@@ -1,31 +1,31 @@
 """
-FIFO cache with an optional on-disk cold tier (SQLite or Postgres).
+FIFO cache with an optional on-disk cold tier (Postgres).
 
 Hot tier: ``OrderedDict`` capped at ``memory_capacity``. Strict FIFO —
 overwrites of existing keys do NOT refresh insertion order.
 
 Cold tier (enabled when ``start(backend=...)`` is called with a
 non-None backend): a per-cache key-value store backed by
-SQLiteBackend or PostgresBackend (see ``cache_backends.py``). Writes
-are non-blocking on the RPC path — ``set`` enqueues onto a bounded
-``asyncio.Queue`` whose consumer is a background writer task that
-batches up to ``BATCH_MAX`` writes per backend commit.
+PostgresBackend (see ``cache_backends.py``). Writes are non-blocking
+on the RPC path — ``set`` enqueues onto a bounded ``asyncio.Queue``
+whose consumer is a background writer task that batches up to
+``BATCH_MAX`` writes per backend commit.
 
 Reads consult memory first; on miss, an async backend read runs.
 
 When ``start`` is called without a backend (or never called), the
-cache behaves as a memory-only FIFO: ``get`` is still async, but never
-falls through to disk.
+cache behaves as a memory-only FIFO: ``get`` is still async, but
+never falls through to disk.
 
 Eviction-order discrepancy on overwrites
 ----------------------------------------
-The two tiers diverge on how they treat ``set(k, v)`` for a key that's
-already present:
+The two tiers diverge on how they treat ``set(k, v)`` for a key
+that's already present:
 
-- The memory ``OrderedDict`` keeps the key in its **original** insertion
-  slot (strict FIFO — overwrites do not refresh recency).
-- The disk side bumps the seq on overwrite (SQLite's INSERT OR REPLACE,
-  Postgres' ON CONFLICT … nextval), so the entry moves to the
+- The memory ``OrderedDict`` keeps the key in its **original**
+  insertion slot (strict FIFO — overwrites do not refresh recency).
+- The disk side bumps the seq on overwrite (Postgres'
+  ``ON CONFLICT … nextval``), so the entry moves to the
   **FIFO-newest** position on disk.
 
 After a restart, ``_warm_memory_from_disk`` loads ``memory_capacity``
@@ -33,8 +33,8 @@ rows by ``seq DESC`` — i.e. the disk view wins, and a key that was
 "old" in the previous session's memory comes back as "newest" in
 memory. This is intentional today because all current callers store
 deterministic values (chain-immutable logs/receipts/txs, or
-``seen_cache`` block hex where either bundler's value is correct), so
-the eviction-priority flip is invisible. If you add a caller that
+``seen_cache`` block hex where either bundler's value is correct),
+so the eviction-priority flip is invisible. If you add a caller that
 overwrites with different semantics, audit this.
 """
 from __future__ import annotations
@@ -46,14 +46,12 @@ from collections import OrderedDict
 from typing import Any
 
 from voltaire_bundler.utils.cache_backends import (
-    BackendConfig,
     CacheBackend,
     CacheBackendError,
+    PostgresBackend,
     PostgresConfig,
-    SQLiteConfig,
     close_postgres_pool,
     init_postgres_pool,
-    make_backend,
 )
 
 logger = logging.getLogger(__name__)
@@ -119,10 +117,9 @@ class PersistentFIFOCache:
         mode. Idempotent — repeat calls are a no-op.
 
         If the disk tier is requested but the backend can't open
-        (unwritable directory, full disk, broken Postgres connection,
-        corrupt DB, etc.), the cache soft-fails to memory-only with a
-        warning. The bundler still runs; the next restart re-attempts
-        the disk tier."""
+        (Postgres unreachable, auth failure, etc.), the cache
+        soft-fails to memory-only with a warning. The bundler still
+        runs; the next restart re-attempts the disk tier."""
         if self._started:
             return
         if backend is None:
@@ -140,9 +137,9 @@ class PersistentFIFOCache:
             await self._warm_memory_from_disk()
         except CacheBackendError as exc:
             logger.warning(
-                "cache %s: disk tier disabled (%s); running memory-only. "
-                "Adjust --cache_dir, drop --enable_persistent_cache to "
-                "silence, or --clear_cache to wipe a corrupted DB.",
+                "cache %s: disk tier disabled (%s); running "
+                "memory-only. Check VOLTAIRE_CACHE_POSTGRES_URL or "
+                "unset it to silence this warning.",
                 self.name, exc,
             )
             try:
@@ -205,31 +202,34 @@ class PersistentFIFOCache:
 
     @classmethod
     async def start_all(
-        cls, config: BackendConfig | None = None,
+        cls, config: PostgresConfig | None = None,
     ) -> None:
         """Start every registered cache instance.
 
         ``config=None`` means memory-only mode for every cache;
-        otherwise each cache gets its own backend constructed from the
-        shared config (SQLiteConfig opens one file per cache;
-        PostgresConfig shares one connection pool)."""
+        otherwise each cache gets a PostgresBackend that talks to a
+        shared connection pool."""
         if config is None:
             for cache in cls._instances:
                 await cache.start(backend=None)
             return
-        if isinstance(config, PostgresConfig):
-            try:
-                await init_postgres_pool(config)
-            except CacheBackendError as exc:
-                logger.warning(
-                    "cache: postgres pool open failed (%s); "
-                    "running all caches memory-only", exc,
-                )
-                for cache in cls._instances:
-                    await cache.start(backend=None)
-                return
+        try:
+            await init_postgres_pool(config)
+        except CacheBackendError as exc:
+            logger.warning(
+                "cache: postgres pool open failed (%s); "
+                "running all caches memory-only", exc,
+            )
+            for cache in cls._instances:
+                await cache.start(backend=None)
+            return
         for cache in cls._instances:
-            await cache.start(backend=make_backend(config, cache.name))
+            await cache.start(
+                backend=PostgresBackend(
+                    table=cache.name,
+                    table_prefix=config.table_prefix,
+                ),
+            )
 
     @classmethod
     async def aclose_all(cls) -> None:
@@ -540,10 +540,7 @@ class PersistentFIFOCache:
     ) -> None:
         if self._backend is None:
             return
-        # Encode in the cache layer; backends store opaque bytes. JSON
-        # encoding stays on the writer task's coroutine — fast and
-        # avoids passing Python objects across the to_thread boundary
-        # for the SQLite path.
+        # Encode in the cache layer; the backend stores opaque bytes.
         encoded: list[tuple[str, bytes | None]] = []
         for key, value in batch:
             if value is _TOMBSTONE:
@@ -593,9 +590,9 @@ class PersistentFIFOCache:
 
     async def _disable_disk_tier(self) -> None:
         """Soft-fail the disk tier after an unrecoverable error
-        (malformed payload signalling DB corruption, lost Postgres
-        connection, etc.). Closes the backend and clears the
-        reference so subsequent reads stay memory-only. Idempotent.
+        (malformed payload, lost Postgres connection, etc.). Closes
+        the backend and clears the reference so subsequent reads
+        stay memory-only. Idempotent.
 
         The writer task lingers but its commits no-op once the
         backend is None; new ``set``/``delete`` calls also no-op
@@ -616,8 +613,6 @@ class PersistentFIFOCache:
 # Re-export the backend types so callers only need to import from
 # cache.py for typical usage. Used by main.py / cli_manager.py.
 __all__ = [
-    "BackendConfig",
     "PersistentFIFOCache",
     "PostgresConfig",
-    "SQLiteConfig",
 ]

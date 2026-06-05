@@ -1,13 +1,10 @@
 """
-Cross-backend smoke + behavior tests for the cache cold tier.
+Behavior tests for the Postgres cache backend.
 
-Every test is parametrized over (sqlite, postgres). The Postgres
-parametrization is dropped at collection time when
-``VOLTAIRE_TEST_POSTGRES_URL`` is unset so CI without Postgres infra
-runs the SQLite half cleanly.
-
-Each test scopes its tables under a random suffix so concurrent runs
-on a shared Postgres instance don't collide.
+Skipped at collection time when ``VOLTAIRE_TEST_POSTGRES_URL`` is
+unset so CI without Postgres infra still passes cleanly. Each test
+scopes its tables under a random suffix so concurrent runs on a
+shared Postgres instance don't collide.
 """
 
 from __future__ import annotations
@@ -15,16 +12,13 @@ from __future__ import annotations
 import asyncio
 import os
 import secrets
-from pathlib import Path
 
 import pytest
 import pytest_asyncio
 
 from voltaire_bundler.utils.cache_backends import (
-    CacheBackend,
     PostgresBackend,
     PostgresConfig,
-    SQLiteBackend,
     close_postgres_pool,
     init_postgres_pool,
 )
@@ -32,7 +26,10 @@ from voltaire_bundler.utils.cache_backends import (
 
 POSTGRES_URL = os.getenv("VOLTAIRE_TEST_POSTGRES_URL", "")
 
-BACKENDS = ["sqlite"] + (["postgres"] if POSTGRES_URL else [])
+pytestmark = pytest.mark.skipif(
+    not POSTGRES_URL,
+    reason="VOLTAIRE_TEST_POSTGRES_URL not set",
+)
 
 
 # Short prefix so the random-suffixed table name still fits within
@@ -40,46 +37,29 @@ BACKENDS = ["sqlite"] + (["postgres"] if POSTGRES_URL else [])
 TEST_PREFIX = "t_"
 
 
-# Session-scoped pool init. Runs once per test session when Postgres
-# tests are enabled; tears down at the end. autouse so individual
-# tests don't have to ask for it.
 @pytest_asyncio.fixture(scope="session", autouse=True)
-async def _maybe_init_postgres_pool() -> "object":
-    if not POSTGRES_URL:
-        yield None
-        return
+async def _postgres_pool() -> "object":
+    """Session-scoped pool init. Opens once per test session, tears
+    down at the end. autouse so individual tests don't have to ask
+    for it."""
     await init_postgres_pool(PostgresConfig(url=POSTGRES_URL))
     yield None
     await close_postgres_pool()
 
 
-async def _make_backend(
-    kind: str, tmp_path: Path,
-) -> CacheBackend:
+async def _make_backend() -> PostgresBackend:
     suffix = secrets.token_hex(4)
-    backend: CacheBackend
-    if kind == "sqlite":
-        backend = SQLiteBackend(
-            path=tmp_path / f"{TEST_PREFIX}{suffix}.sqlite",
-            table=f"{TEST_PREFIX}{suffix}",
-        )
-    elif kind == "postgres":
-        backend = PostgresBackend(
-            table=f"{TEST_PREFIX}{suffix}",
-            table_prefix="",
-        )
-    else:
-        raise ValueError(kind)
+    backend = PostgresBackend(
+        table=f"{TEST_PREFIX}{suffix}",
+        table_prefix="",
+    )
     await backend.open()
     return backend
 
 
-@pytest.mark.parametrize("backend_kind", BACKENDS)
 @pytest.mark.asyncio
-async def test_set_get_roundtrip(
-    backend_kind: str, tmp_path: Path,
-) -> None:
-    backend = await _make_backend(backend_kind, tmp_path)
+async def test_set_get_roundtrip() -> None:
+    backend = await _make_backend()
     try:
         await backend.commit_batch(
             [("k1", b"v1"), ("k2", b"v2")],
@@ -94,12 +74,9 @@ async def test_set_get_roundtrip(
         await backend.close()
 
 
-@pytest.mark.parametrize("backend_kind", BACKENDS)
 @pytest.mark.asyncio
-async def test_delete_via_none_payload(
-    backend_kind: str, tmp_path: Path,
-) -> None:
-    backend = await _make_backend(backend_kind, tmp_path)
+async def test_delete_via_none_payload() -> None:
+    backend = await _make_backend()
     try:
         await backend.commit_batch([("k", b"v")])
         assert await backend.get("k") == b"v"
@@ -109,16 +86,13 @@ async def test_delete_via_none_payload(
         await backend.close()
 
 
-@pytest.mark.parametrize("backend_kind", BACKENDS)
 @pytest.mark.asyncio
-async def test_overwrite_bumps_seq(
-    backend_kind: str, tmp_path: Path,
-) -> None:
+async def test_overwrite_bumps_seq() -> None:
     """Overwriting a key should move it to the FIFO-newest slot — the
     documented eviction-flip behavior. Verify by inserting a then b,
     overwriting a, then evicting down to 1 row. b had the lowest seq,
     so b is evicted; a survives with its new seq."""
-    backend = await _make_backend(backend_kind, tmp_path)
+    backend = await _make_backend()
     try:
         await backend.commit_batch([("a", b"1")])
         await backend.commit_batch([("b", b"2")])
@@ -130,14 +104,11 @@ async def test_overwrite_bumps_seq(
         await backend.close()
 
 
-@pytest.mark.parametrize("backend_kind", BACKENDS)
 @pytest.mark.asyncio
-async def test_load_recent_returns_oldest_first(
-    backend_kind: str, tmp_path: Path,
-) -> None:
+async def test_load_recent_returns_oldest_first() -> None:
     """The cache's warmup relies on oldest-first ordering so the
     OrderedDict preserves disk FIFO order."""
-    backend = await _make_backend(backend_kind, tmp_path)
+    backend = await _make_backend()
     try:
         for k, v in [("a", b"1"), ("b", b"2"), ("c", b"3")]:
             await backend.commit_batch([(k, v)])
@@ -147,12 +118,9 @@ async def test_load_recent_returns_oldest_first(
         await backend.close()
 
 
-@pytest.mark.parametrize("backend_kind", BACKENDS)
 @pytest.mark.asyncio
-async def test_evict_excess_trims_oldest(
-    backend_kind: str, tmp_path: Path,
-) -> None:
-    backend = await _make_backend(backend_kind, tmp_path)
+async def test_evict_excess_trims_oldest() -> None:
+    backend = await _make_backend()
     try:
         for i in range(10):
             await backend.commit_batch([(f"k{i}", str(i).encode())])
@@ -164,12 +132,9 @@ async def test_evict_excess_trims_oldest(
         await backend.close()
 
 
-@pytest.mark.parametrize("backend_kind", BACKENDS)
 @pytest.mark.asyncio
-async def test_count_rows(
-    backend_kind: str, tmp_path: Path,
-) -> None:
-    backend = await _make_backend(backend_kind, tmp_path)
+async def test_count_rows() -> None:
+    backend = await _make_backend()
     try:
         assert await backend.count_rows() == 0
         await backend.commit_batch([("k", b"v")])

@@ -232,9 +232,9 @@ echo ""
 echo "=== Starting Voltaire bundler ==="
 cd "$PROJECT_DIR"
 
-EXTRA_FLAGS=()
+# Setting VOLTAIRE_CACHE_POSTGRES_URL is enough to enable persistent
+# cache; no CLI flag needed. Leaving it unset keeps caches memory-only.
 if [ "$WITH_POSTGRES" = "1" ]; then
-    EXTRA_FLAGS+=(--enable_persistent_cache --cache_backend postgres)
     export VOLTAIRE_CACHE_POSTGRES_URL="$POSTGRES_DSN"
 fi
 
@@ -246,8 +246,7 @@ poetry run python3 -m voltaire_bundler \
     --verbose --unsafe \
     --bundle_interval 2 \
     --disable_p2p \
-    --eip7702 \
-    "${EXTRA_FLAGS[@]}" &
+    --eip7702 &
 BUNDLER_PID=$!
 sleep 3
 

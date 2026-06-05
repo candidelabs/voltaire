@@ -1,10 +1,8 @@
 import asyncio
 import logging
 import os
-import shutil
 import sys
 from functools import partial
-from pathlib import Path
 from signal import SIGINT, SIGTERM
 import platform
 if platform.system() != "Windows":
@@ -17,7 +15,6 @@ from voltaire_bundler.rpc.health import periodic_health_check_cron_job
 from voltaire_bundler.utils.cache import (
     PersistentFIFOCache,
     PostgresConfig,
-    SQLiteConfig,
 )
 from voltaire_bundler.utils.SignalHaltError import immediate_exit
 
@@ -70,26 +67,14 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
         disk_mult=init_data.cache_disk_size,
     )
 
-    # Start the RPC-result caches. By default the caches run
-    # memory-only; --enable_persistent_cache opts into mirroring each
-    # cache to a SQLite file (default) or Postgres database so state
-    # survives a restart.
-    if init_data.enable_persistent_cache:
-        backend_config: PostgresConfig | SQLiteConfig
-        if init_data.cache_backend == "postgres":
-            backend_config = PostgresConfig(url=init_data.cache_postgres_url)
-        else:
-            cache_dir = (
-                Path(init_data.cache_dir).expanduser()
-                if init_data.cache_dir
-                else Path.home() / ".voltaire" / "cache" /
-                    str(init_data.chain_id)
-            )
-            if init_data.clear_cache and cache_dir.exists():
-                logging.info("clearing persistent cache at %s", cache_dir)
-                shutil.rmtree(cache_dir)
-            backend_config = SQLiteConfig(cache_dir=cache_dir)
-        await PersistentFIFOCache.start_all(backend_config)
+    # Start the RPC-result caches. Caches run memory-only unless
+    # VOLTAIRE_CACHE_POSTGRES_URL is set, in which case each cache
+    # mirrors to a Postgres table via a shared connection pool so
+    # state survives a restart.
+    if init_data.cache_postgres_url:
+        await PersistentFIFOCache.start_all(
+            PostgresConfig(url=init_data.cache_postgres_url),
+        )
     else:
         await PersistentFIFOCache.start_all(None)
 
