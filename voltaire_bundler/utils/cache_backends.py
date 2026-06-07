@@ -56,10 +56,14 @@ class PostgresConfig:
     ``url`` is a standard libpq DSN (``postgresql://user:pass@host:port/db``).
     A single connection pool is shared across every cache.
 
-    ``table_prefix`` is prepended to each cache name to form the table
-    name. The prefix keeps the bundler's tables visually separated
-    from anything else sharing the database. Set to an empty string
-    for a dedicated database."""
+    ``table_prefix`` is prepended to each cache name to form the
+    table name. ``main.py`` builds this from the bundler's chain_id
+    (``voltaire_cache_chain_{chain_id}_``) so a single Postgres can
+    serve bundlers on multiple chains with clear per-chain table
+    ownership for ops (decommissioning, autovacuum tuning, disk
+    attribution). Override at construction time if you need
+    different scoping (e.g. multi-tenant), or set to an empty string
+    for a dedicated single-purpose database."""
     url: str
     min_pool_size: int = 1
     max_pool_size: int = 10

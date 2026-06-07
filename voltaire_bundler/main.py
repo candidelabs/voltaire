@@ -78,8 +78,21 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
     # mirrors to a Postgres table via a shared connection pool so
     # state survives a restart.
     if init_data.cache_postgres_url:
+        # Scope tables by chain_id when a single Postgres serves
+        # bundlers on multiple chains. Not strictly required for
+        # correctness — userop hashes include chain_id per EIP-4337
+        # and bundle tx hashes are chain-distinct via EIP-155, so
+        # keys can't collide across chains. The prefix exists for
+        # operational clarity: per-chain ownership of tables, easy
+        # decommissioning (DROP TABLE voltaire_cache_chain_137_*),
+        # and per-chain autovacuum / disk attribution.
         await PersistentFIFOCache.start_all(
-            PostgresConfig(url=init_data.cache_postgres_url),
+            PostgresConfig(
+                url=init_data.cache_postgres_url,
+                table_prefix=(
+                    f"voltaire_cache_chain_{init_data.chain_id}_"
+                ),
+            ),
         )
     else:
         logging.warning(
