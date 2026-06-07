@@ -105,6 +105,18 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
     # background task so the COUNT(*) work doesn't extend startup.
     PersistentFIFOCache.log_startup_status()
 
+    # Log the bundler EOA per entrypoint so operators can sanity-check
+    # which signer is on the hook for each version's bundles.
+    # ``--disable_v6`` parses v6 but never uses it; flag that here so
+    # nobody mistakes the v6 line for an active signer.
+    logging.info("Bundler addresses per entrypoint:")
+    for label in ("v6", "v7", "v8", "v9"):
+        addr, _ = init_data.bundler_secrets_per_ep[label]
+        suffix = " (unused — --disable_v6)" if (
+            label == "v6" and init_data.disable_v6
+        ) else ""
+        logging.info("  %s: %s%s", label, addr, suffix)
+
     try:
         async with asyncio.TaskGroup() as task_group:
             execution_endpoint: ExecutionEndpoint = ExecutionEndpoint(
