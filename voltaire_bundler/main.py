@@ -188,15 +188,23 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
     except asyncio.exceptions.CancelledError:
         pass
     finally:
-        # Drain queued disk writes and close SQLite handles cleanly. This only
-        # actually runs on a programmatic TaskGroup exit — the SIGTERM/SIGINT
-        # path goes through ``immediate_exit`` which stops the loop and raises
-        # SystemExit, so this ``await`` never resumes on a real shutdown.
+        # Drain queued cache writes and close the Postgres pool
+        # cleanly. This only actually runs on a programmatic
+        # TaskGroup exit — the SIGTERM/SIGINT path goes through
+        # ``immediate_exit`` which stops the loop and raises
+        # SystemExit, so this ``await`` never resumes on a real
+        # shutdown.
         #
-        # That's deliberate. The cached values are derived from chain state, so
-        # losing the asyncio.Queue's tail (typically <1 ms of writes, at most a
-        # few hundred ms under burst) just means a small cache-warm window on
-        # the next start. A synchronous drain on SIGTERM would add up to a few
-        # seconds of "RPC server frozen + new connections rejected" before exit
-        # for marginal durability gain, so we accept the loss instead.
+        # That's a deliberate trade. The on-disk cache is functionally
+        # a durable index of userop history (cache.py docstring spells
+        # out why), so the asyncio.Queue's tail at SIGTERM time IS
+        # data loss for userops written in the last few milliseconds
+        # — and per the non-archival-node reality, that history isn't
+        # reproducible from chain state. We accept the loss because a
+        # synchronous drain on SIGTERM would freeze RPC for seconds
+        # under load (rejecting new connections while waiting on
+        # Postgres acks), and operators almost always restart sooner
+        # rather than later. If you ever hit this in a way that
+        # matters, the right move is to drain at the LB layer before
+        # the bundler gets the signal — not to block the signal path.
         await PersistentFIFOCache.aclose_all()

@@ -104,6 +104,49 @@ async def test_delete_via_none_payload() -> None:
 
 
 @pytest.mark.asyncio
+async def test_commit_batch_dedup_last_op_wins() -> None:
+    """``commit_batch`` dedupes by key before issuing the executemany
+    calls, so a single batch containing multiple ops for the same key
+    must end in the state of the LAST op. This is the load-bearing
+    contract that makes the dedupe + two-executemany rewrite
+    semantically equivalent to the old N-sequential-statements
+    implementation."""
+    backend = await _make_backend()
+    try:
+        # Three permutations of multi-op batches, each in its own
+        # call so a previous batch can't influence the next.
+
+        # set → delete → set: final value is the LAST set
+        await backend.commit_batch(
+            [("k", b"v1"), ("k", None), ("k", b"v2")],
+        )
+        assert await backend.get("k") == b"v2"
+
+        # set → set → delete: row should end up deleted
+        await backend.commit_batch(
+            [("k", b"v3"), ("k", b"v4"), ("k", None)],
+        )
+        assert await backend.get("k") is None
+
+        # Mixed keys, mixed ops: a ends set, b ends deleted
+        await backend.commit_batch([("b", b"seed")])
+        await backend.commit_batch(
+            [
+                ("a", b"x"),
+                ("a", None),
+                ("a", b"y"),
+                ("b", None),
+                ("b", b"z"),
+                ("b", None),
+            ],
+        )
+        assert await backend.get("a") == b"y"
+        assert await backend.get("b") is None
+    finally:
+        await backend.close()
+
+
+@pytest.mark.asyncio
 async def test_overwrite_refreshes_inserted_at() -> None:
     """Overwriting a key resets its inserted_at to now() so a
     frequently-touched key doesn't age out from its original

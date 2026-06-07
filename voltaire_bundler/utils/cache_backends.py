@@ -229,6 +229,17 @@ class PostgresBackend(CacheBackend):
                     f'ON "{self._table}" (inserted_at)'
                 )
         except Exception as exc:
+            # Asymmetric error handling vs runtime methods (get,
+            # commit_batch, etc.): there we wrap EVERY exception in
+            # CacheBackendError so the cache layer can soft-fail to
+            # memory-only. Here we only wrap PostgresError and let
+            # everything else propagate bare. The reason: at runtime
+            # any failure is plausibly a transient connectivity blip
+            # and soft-failing is the right move; at open() time a
+            # non-PostgresError is almost certainly a programming bug
+            # (bad SQL identifier, missing import, broken pool init)
+            # and we'd rather crash at startup than silently degrade
+            # for the entire process lifetime.
             if asyncpg is not None and isinstance(
                 exc, asyncpg.PostgresError,
             ):
