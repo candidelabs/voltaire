@@ -273,34 +273,45 @@ class PostgresBackend(CacheBackend):
     ) -> None:
         if not batch or self._closed:
             return
+        # Dedupe by key — last op wins, matching the previous
+        # sequential-execution semantic ("set then delete then set"
+        # for the same key ends in the set state). After this each
+        # key appears in at most one of sets/deletes, so the order
+        # we run the two ``executemany`` calls is irrelevant.
+        last_op: dict[str, bytes | None] = {}
+        for key, value in batch:
+            last_op[key] = value
+        sets = [(k, v) for k, v in last_op.items() if v is not None]
+        deletes = [(k,) for k, v in last_op.items() if v is None]
+
         pool = _get_postgres_pool()
-        # Run the whole batch in a single transaction. Sequential
-        # execution preserves insertion order so "set then delete then
-        # set" for the same key ends in the set state.
         try:
             async with pool.acquire() as conn:
                 async with conn.transaction():
-                    for key, value in batch:
-                        if value is None:
-                            await conn.execute(
-                                f'DELETE FROM "{self._table}" '
-                                f'WHERE key = $1',
-                                key,
-                            )
-                        else:
-                            # ON CONFLICT refreshes inserted_at so an
-                            # overwritten row resets the TTL clock —
-                            # otherwise a frequently-touched key could
-                            # still age out from its original
-                            # insertion timestamp.
-                            await conn.execute(
-                                f'INSERT INTO "{self._table}" '
-                                f'(key, value) VALUES ($1, $2) '
-                                f'ON CONFLICT (key) DO UPDATE SET '
-                                f'value = EXCLUDED.value, '
-                                f'inserted_at = now()',
-                                key, value,
-                            )
+                    if deletes:
+                        # asyncpg sends executemany as one extended
+                        # protocol round-trip — N parameter sets
+                        # against a single prepared statement, no
+                        # per-row network latency.
+                        await conn.executemany(
+                            f'DELETE FROM "{self._table}" '
+                            f'WHERE key = $1',
+                            deletes,
+                        )
+                    if sets:
+                        # ON CONFLICT refreshes inserted_at so an
+                        # overwritten row resets the TTL clock —
+                        # otherwise a frequently-touched key could
+                        # still age out from its original insertion
+                        # timestamp.
+                        await conn.executemany(
+                            f'INSERT INTO "{self._table}" '
+                            f'(key, value) VALUES ($1, $2) '
+                            f'ON CONFLICT (key) DO UPDATE SET '
+                            f'value = EXCLUDED.value, '
+                            f'inserted_at = now()',
+                            sets,
+                        )
         except Exception as exc:
             raise self._wrap(exc, "commit_batch") from exc
 
