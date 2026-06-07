@@ -1,8 +1,29 @@
 """
 FIFO cache with an optional on-disk cold tier (Postgres).
 
-Hot tier: ``OrderedDict`` capped at ``memory_capacity``. Strict FIFO —
-overwrites of existing keys do NOT refresh insertion order.
+IMPORTANT — this is a "cache" only by API shape. The on-disk tier
+is functionally a **durable index** of userop → bundle-tx → receipt
+mappings whose data cannot be reconstructed from the connected
+Ethereum node when that node is non-archival (the common case;
+typical full nodes drop state beyond ~128 blocks / ~25 minutes on
+mainnet). Once a bundle transaction's block falls out of the node's
+retention window, ``eth_getTransactionByHash`` /
+``eth_getTransactionReceipt`` for that tx return null forever, and
+this on-disk tier becomes the only way to serve
+``eth_getUserOperationByHash`` / ``eth_getUserOperationReceipt`` for
+those userops.
+
+Concretely: losing the Postgres tier = silent, permanent data loss
+for any userop included while Postgres was unreachable, plus all
+history older than the node's retention window. Every data-loss
+path in this module therefore logs at ERROR so operators page on it
+instead of finding out from a confused wallet user. We still
+soft-fail to memory-only on backend errors (the bundler keeps
+running and serving recent userops) rather than aborting startup,
+but operators are expected to alert on those ERROR lines.
+
+Hot tier: ``OrderedDict`` capped at ``memory_capacity``. Strict
+FIFO — overwrites of existing keys do NOT refresh insertion order.
 
 Cold tier (enabled when ``start(backend=...)`` is called with a
 non-None backend): a per-cache key-value store backed by
@@ -140,10 +161,13 @@ class PersistentFIFOCache:
             # memory-only than abort start().
             await self._warm_memory_from_disk()
         except CacheBackendError as exc:
-            logger.warning(
-                "cache %s: disk tier disabled (%s); running "
-                "memory-only. Check VOLTAIRE_CACHE_POSTGRES_URL or "
-                "unset it to silence this warning.",
+            logger.error(
+                "CACHE DATA LOSS — cache %s: disk tier disabled at "
+                "startup (%s); running memory-only. Userop history "
+                "written from now on will be lost on restart and is "
+                "not reproducible from a non-archival node. Restore "
+                "Postgres reachability and restart, or fix "
+                "VOLTAIRE_CACHE_POSTGRES_URL.",
                 self.name, exc,
             )
             try:
@@ -229,9 +253,12 @@ class PersistentFIFOCache:
         try:
             await init_postgres_pool(config)
         except CacheBackendError as exc:
-            logger.warning(
-                "cache: postgres pool open failed (%s); "
-                "running all caches memory-only", exc,
+            logger.error(
+                "CACHE DATA LOSS — postgres pool open failed (%s); "
+                "running ALL caches memory-only. Userop history "
+                "written from now on will be lost on restart and is "
+                "not reproducible from a non-archival node. Restore "
+                "Postgres reachability and restart.", exc,
             )
             for cache in cls._instances:
                 await cache.start(backend=None)
@@ -365,9 +392,13 @@ class PersistentFIFOCache:
         try:
             v = json.loads(raw)
         except json.JSONDecodeError as exc:
-            logger.warning(
-                "cache %s: malformed payload for key %s (%s); "
-                "disabling disk tier and treating this lookup as a miss",
+            logger.error(
+                "CACHE DATA LOSS — cache %s: malformed payload for "
+                "key %s (%s); disabling disk tier and treating this "
+                "lookup as a miss. The bundler will run memory-only "
+                "from now on; userop history is not reproducible "
+                "from a non-archival node. Investigate the DB; "
+                "restart after fixing.",
                 self.name, key, exc,
             )
             await self._disable_disk_tier()
@@ -401,9 +432,13 @@ class PersistentFIFOCache:
                 try:
                     v = json.loads(raw)
                 except json.JSONDecodeError as exc:
-                    logger.warning(
-                        "cache %s: malformed payload for key %s (%s); "
-                        "disabling disk tier and skipping the bad row",
+                    logger.error(
+                        "CACHE DATA LOSS — cache %s: malformed "
+                        "payload for key %s (%s); disabling disk "
+                        "tier and skipping the bad row. The bundler "
+                        "will run memory-only from now on; userop "
+                        "history is not reproducible from a "
+                        "non-archival node.",
                         self.name, k, exc,
                     )
                     await self._disable_disk_tier()
@@ -448,10 +483,12 @@ class PersistentFIFOCache:
         try:
             return await self._backend.get(key)
         except CacheBackendError as exc:
-            logger.warning(
-                "cache %s: backend get failed (%s); "
-                "disabling disk tier",
-                self.name, exc,
+            logger.error(
+                "CACHE DATA LOSS — cache %s: backend get failed "
+                "(%s); disabling disk tier. New writes from now on "
+                "are not durable; userop history is not reproducible "
+                "from a non-archival node. Restore Postgres and "
+                "restart.", self.name, exc,
             )
             await self._disable_disk_tier()
             return None
@@ -463,10 +500,12 @@ class PersistentFIFOCache:
         try:
             return await self._backend.get_many(keys)
         except CacheBackendError as exc:
-            logger.warning(
-                "cache %s: backend get_many failed (%s); "
-                "disabling disk tier",
-                self.name, exc,
+            logger.error(
+                "CACHE DATA LOSS — cache %s: backend get_many "
+                "failed (%s); disabling disk tier. New writes from "
+                "now on are not durable; userop history is not "
+                "reproducible from a non-archival node. Restore "
+                "Postgres and restart.", self.name, exc,
             )
             await self._disable_disk_tier()
             return {}
@@ -498,8 +537,12 @@ class PersistentFIFOCache:
             self._write_queue.put_nowait((key, value))
         except asyncio.QueueFull:
             pass
-        logger.warning(
-            "cache %s: write queue full, dropped oldest", self.name,
+        logger.error(
+            "CACHE DATA LOSS — cache %s: write queue full, dropped "
+            "oldest pending write. The dropped userop history is "
+            "not reproducible from a non-archival node. Increase "
+            "QUEUE_MAX or investigate Postgres write latency.",
+            self.name,
         )
 
     async def _writer_loop(self) -> None:
@@ -578,12 +621,18 @@ class PersistentFIFOCache:
         except CacheBackendError as exc:
             # Unlike read-path errors, we don't auto-disable on write
             # errors — transient backend hiccups (e.g. brief Postgres
-            # disconnect) shouldn't permanently demote the cache. Log
-            # loudly; the loop will retry on the next batch.
-            logger.warning(
-                "cache %s: backend commit failed (%s); "
-                "batch lost, disk tier remains active",
-                self.name, exc,
+            # disconnect) shouldn't permanently demote the cache. The
+            # loop will retry on the next batch. The batch we just
+            # dropped, however, IS lost — userop history written
+            # during the outage window is not reproducible from a
+            # non-archival node.
+            logger.error(
+                "CACHE DATA LOSS — cache %s: backend commit failed "
+                "(%s); batch of %d writes lost. Userop history in "
+                "the failed batch is not reproducible from a "
+                "non-archival node. Disk tier remains active for "
+                "subsequent batches.",
+                self.name, exc, len(batch),
             )
 
     # ------------------------------------------------------------------
@@ -604,10 +653,14 @@ class PersistentFIFOCache:
             try:
                 self._memory[key] = json.loads(raw)
             except json.JSONDecodeError as exc:
-                logger.warning(
-                    "cache %s: malformed payload for key %s during "
-                    "warmup (%s); disabling disk tier and continuing "
-                    "memory-only", self.name, key, exc,
+                logger.error(
+                    "CACHE DATA LOSS — cache %s: malformed payload "
+                    "for key %s during warmup (%s); disabling disk "
+                    "tier and continuing memory-only. The bundler "
+                    "will run memory-only from now on; userop "
+                    "history is not reproducible from a "
+                    "non-archival node. Investigate the DB.",
+                    self.name, key, exc,
                 )
                 await self._disable_disk_tier()
                 break
