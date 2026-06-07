@@ -284,8 +284,8 @@ class PersistentFIFOCache:
         total_loaded = sum(c._memory_loaded_at_start for c in persistent)
         logger.info(
             "RPC caches: persistent mode active (%d on-disk caches, "
-            "%d rows warmed into memory at startup); per-cache on-disk "
-            "row counts to follow",
+            "%d rows warmed into memory at startup); per-cache "
+            "approximate on-disk row counts to follow",
             len(persistent), total_loaded,
         )
         if memory_only:
@@ -304,10 +304,13 @@ class PersistentFIFOCache:
     async def _log_disk_row_counts(
         cls, caches: list["PersistentFIFOCache"],
     ) -> None:
-        """COUNT(*) each persistent cache off the critical path and
-        emit the per-cache (on-disk, warmed) breakdown. Best-effort:
-        per-cache errors are swallowed so a single corrupt DB doesn't
-        suppress the rest."""
+        """Fetch an approximate row count for each persistent cache
+        off the critical path and emit the per-cache (on-disk,
+        warmed) breakdown. Backends use a cheap planner statistic
+        (e.g. pg_class.reltuples) so this stays constant-time even
+        on multi-million-row tables. Best-effort: per-cache errors
+        are swallowed so a single corrupt DB doesn't suppress the
+        rest."""
         counts: dict[str, int] = {}
         for c in caches:
             if c._backend is None:

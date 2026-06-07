@@ -157,12 +157,28 @@ async def test_evict_expired_removes_old_rows() -> None:
 
 
 @pytest.mark.asyncio
-async def test_count_rows() -> None:
+async def test_count_rows_uses_planner_stats() -> None:
+    """count_rows reads pg_class.reltuples — the planner statistic
+    refreshed by VACUUM/ANALYZE — so it's constant-time but stale
+    until the first ANALYZE on a new table. Force ANALYZE inside the
+    test so the assertion is deterministic; in production autovacuum
+    handles this in the background."""
     backend = await _make_backend()
     try:
         assert await backend.count_rows() == 0
-        await backend.commit_batch([("k", b"v")])
-        assert await backend.count_rows() == 1
+        # Insert a batch big enough that the post-ANALYZE estimate
+        # rounds to something stable.
+        await backend.commit_batch(
+            [(f"k{i}", str(i).encode()) for i in range(100)],
+        )
+        pool = _get_postgres_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(f'ANALYZE "{backend._table}"')
+        # reltuples is an estimate; 100 inserts in one batch lands
+        # exactly at 100 in practice, but allow a small fuzz factor
+        # in case PG ever rounds differently.
+        approx = await backend.count_rows()
+        assert 90 <= approx <= 110, f"expected ~100 rows, got {approx}"
     finally:
         await backend.close()
 

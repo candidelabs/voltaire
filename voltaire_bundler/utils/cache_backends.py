@@ -104,7 +104,11 @@ class CacheBackend(abc.ABC):
         rather than to total table size."""
 
     @abc.abstractmethod
-    async def count_rows(self) -> int: ...
+    async def count_rows(self) -> int:
+        """Approximate row count. Backends are free to use a cheap
+        planner statistic rather than an exact COUNT — the value
+        feeds the startup log line, where order-of-magnitude
+        accuracy beats a multi-minute scan."""
 
 
 # ----------------------------------------------------------------------
@@ -334,16 +338,30 @@ class PostgresBackend(CacheBackend):
             raise self._wrap(exc, "evict_expired") from exc
 
     async def count_rows(self) -> int:
+        """Approximate row count from ``pg_class.reltuples``. The
+        value is the planner's row estimate, updated by VACUUM /
+        ANALYZE — accurate enough for the startup log line and
+        constant-time regardless of table size (unlike COUNT(*),
+        which would scan the full table). Freshly-created tables
+        report ``-1`` until the first ANALYZE; clamp to 0 so the log
+        doesn't surface a negative number."""
         if self._closed:
             return 0
         pool = _get_postgres_pool()
         try:
             async with pool.acquire() as conn:
-                return await conn.fetchval(
-                    f'SELECT COUNT(*) FROM "{self._table}"'
-                ) or 0
+                # to_regclass resolves the quoted identifier through
+                # the search_path, returning NULL if the table is
+                # missing (in which case fetchval returns None and we
+                # fall back to 0).
+                result = await conn.fetchval(
+                    'SELECT GREATEST(0, reltuples::bigint)::bigint '
+                    'FROM pg_class WHERE oid = to_regclass($1)',
+                    f'"{self._table}"',
+                )
         except Exception as exc:
             raise self._wrap(exc, "count_rows") from exc
+        return result or 0
 
     def _wrap(self, exc: Exception, op: str) -> Exception:
         if asyncpg is not None and isinstance(
