@@ -82,6 +82,10 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             PostgresConfig(url=init_data.cache_postgres_url),
         )
     else:
+        logging.warning(
+            "VOLTAIRE_CACHE_POSTGRES_URL is not set — running with "
+            "MEMORY-ONLY caches."
+        )
         await PersistentFIFOCache.start_all(None)
 
     # Synchronous part is free; the follow-up disk-row totals run in a
