@@ -19,6 +19,7 @@ import pytest_asyncio
 from voltaire_bundler.utils.cache_backends import (
     PostgresBackend,
     PostgresConfig,
+    _get_postgres_pool,
     close_postgres_pool,
     init_postgres_pool,
 )
@@ -57,6 +58,22 @@ async def _make_backend() -> PostgresBackend:
     return backend
 
 
+async def _backdate(
+    backend: PostgresBackend, keys: list[str], *, days: int,
+) -> None:
+    """Force ``inserted_at`` for the given keys to be ``days`` days
+    in the past. Used to drive the TTL eviction tests without having
+    to wait real time."""
+    pool = _get_postgres_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f'UPDATE "{backend._table}" SET '
+            f'inserted_at = now() - make_interval(days => $1) '
+            f'WHERE key = ANY($2::text[])',
+            days, keys,
+        )
+
+
 @pytest.mark.asyncio
 async def test_set_get_roundtrip() -> None:
     backend = await _make_backend()
@@ -87,17 +104,21 @@ async def test_delete_via_none_payload() -> None:
 
 
 @pytest.mark.asyncio
-async def test_overwrite_bumps_seq() -> None:
-    """Overwriting a key should move it to the FIFO-newest slot — the
-    documented eviction-flip behavior. Verify by inserting a then b,
-    overwriting a, then evicting down to 1 row. b had the lowest seq,
-    so b is evicted; a survives with its new seq."""
+async def test_overwrite_refreshes_inserted_at() -> None:
+    """Overwriting a key resets its inserted_at to now() so a
+    frequently-touched key doesn't age out from its original
+    insertion timestamp. Backdate both rows, overwrite one, evict
+    with a short TTL, assert the overwritten row survives."""
     backend = await _make_backend()
     try:
         await backend.commit_batch([("a", b"1")])
         await backend.commit_batch([("b", b"2")])
+        # Force both rows to look 10 days old.
+        await _backdate(backend, ["a", "b"], days=10)
+        # Overwrite a — refreshes its inserted_at to now().
         await backend.commit_batch([("a", b"3")])
-        await backend.evict_excess(max_rows=1)
+        # TTL of 1 day: b (10 days old) is expired; a (just now) survives.
+        await backend.evict_expired(ttl_seconds=86_400)
         assert await backend.get("a") == b"3"
         assert await backend.get("b") is None
     finally:
@@ -119,14 +140,17 @@ async def test_load_recent_returns_oldest_first() -> None:
 
 
 @pytest.mark.asyncio
-async def test_evict_excess_trims_oldest() -> None:
+async def test_evict_expired_removes_old_rows() -> None:
+    """Backdate a subset of rows past the TTL horizon and verify the
+    DELETE picks them up while the fresh rows survive."""
     backend = await _make_backend()
     try:
         for i in range(10):
             await backend.commit_batch([(f"k{i}", str(i).encode())])
-        await backend.evict_excess(max_rows=3)
+        # k0..k6 look 10 days old; k7..k9 are fresh.
+        await _backdate(backend, [f"k{i}" for i in range(7)], days=10)
+        await backend.evict_expired(ttl_seconds=86_400)
         survivors = await backend.get_many([f"k{i}" for i in range(10)])
-        assert len(survivors) == 3
         assert set(survivors.keys()) == {"k7", "k8", "k9"}
     finally:
         await backend.close()

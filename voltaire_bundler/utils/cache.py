@@ -24,14 +24,14 @@ that's already present:
 
 - The memory ``OrderedDict`` keeps the key in its **original**
   insertion slot (strict FIFO — overwrites do not refresh recency).
-- The disk side bumps the seq on overwrite (Postgres'
-  ``ON CONFLICT … nextval``), so the entry moves to the
-  **FIFO-newest** position on disk.
+- The disk side refreshes ``inserted_at`` on overwrite (Postgres'
+  ``ON CONFLICT … inserted_at = now()``), so the entry moves to
+  the **FIFO-newest** position on disk.
 
 After a restart, ``_warm_memory_from_disk`` loads ``memory_capacity``
-rows by ``seq DESC`` — i.e. the disk view wins, and a key that was
-"old" in the previous session's memory comes back as "newest" in
-memory. This is intentional today because all current callers store
+rows by ``inserted_at DESC`` — i.e. the disk view wins, and a key
+that was "old" in the previous session's memory comes back as
+"newest" in memory. This is intentional today because all current callers store
 deterministic values (chain-immutable logs/receipts/txs, or
 ``seen_cache`` block hex where either bundler's value is correct),
 so the eviction-priority flip is invisible. If you add a caller that
@@ -78,11 +78,15 @@ class PersistentFIFOCache:
         self,
         name: str,
         memory_capacity: int = 10_000,
-        disk_capacity: int = 500_000,
+        disk_ttl_seconds: int | None = None,
     ) -> None:
         self.name = name
         self.memory_capacity = memory_capacity
-        self.disk_capacity = disk_capacity
+        # ``None`` means unlimited — the writer task skips eviction.
+        # Set an integer to evict rows whose ``inserted_at`` is older
+        # than this many seconds. Overwrites refresh ``inserted_at``,
+        # so frequently-touched keys don't age out.
+        self.disk_ttl_seconds = disk_ttl_seconds
 
         self._memory: OrderedDict[str, Any] = OrderedDict()
 
@@ -183,22 +187,31 @@ class PersistentFIFOCache:
         self._started = False
 
     @classmethod
-    def apply_capacity_multipliers(
-        cls, memory_mult: float, disk_mult: float,
+    def apply_capacity_settings(
+        cls,
+        memory_mult: float,
+        disk_ttl_seconds: int | None,
     ) -> None:
-        """Scale every registered cache's capacities by the given
-        multipliers. Must be called BEFORE ``start_all`` so warm-on-start
-        observes the new memory cap and disk eviction uses the new disk
-        cap."""
-        if memory_mult <= 0 or disk_mult <= 0:
-            raise ValueError("cache size multipliers must be positive")
+        """Scale every registered cache's in-memory capacity by
+        ``memory_mult`` and set every cache's TTL on disk to
+        ``disk_ttl_seconds`` (``None`` = no eviction; cache grows
+        until something else trims it). Must be called BEFORE
+        ``start_all`` so warm-on-start observes the new memory cap
+        and the writer task uses the new TTL."""
+        if memory_mult <= 0:
+            raise ValueError("memory multiplier must be positive")
+        if (
+            disk_ttl_seconds is not None
+            and disk_ttl_seconds <= 0
+        ):
+            raise ValueError(
+                "disk_ttl_seconds must be positive or None"
+            )
         for cache in cls._instances:
             cache.memory_capacity = max(
                 1, int(cache.memory_capacity * memory_mult),
             )
-            cache.disk_capacity = max(
-                1, int(cache.disk_capacity * disk_mult),
-            )
+            cache.disk_ttl_seconds = disk_ttl_seconds
 
     @classmethod
     async def start_all(
@@ -313,11 +326,15 @@ class PersistentFIFOCache:
         for c in caches:
             if c.name not in counts:
                 continue
+            ttl_desc = (
+                "no TTL" if c.disk_ttl_seconds is None
+                else f"{c.disk_ttl_seconds}s TTL"
+            )
             logger.info(
                 "  cache %s: %d on disk, %d warmed into memory "
-                "(memory_capacity=%d, disk_capacity=%d)",
+                "(memory_capacity=%d, %s)",
                 c.name, counts[c.name], c._memory_loaded_at_start,
-                c.memory_capacity, c.disk_capacity,
+                c.memory_capacity, ttl_desc,
             )
 
     # ------------------------------------------------------------------
@@ -484,24 +501,27 @@ class PersistentFIFOCache:
 
     async def _writer_loop(self) -> None:
         assert self._write_queue is not None
-        # One-shot cleanup of any overage accumulated across previous
-        # sessions. _writes_since_evict only triggers in-session
-        # eviction after EVICT_EVERY_N_WRITES; a frequently-restarting
-        # bundler that never crosses that threshold would otherwise
-        # let the disk file drift past disk_capacity indefinitely.
-        # Doing this in the writer task instead of in start() keeps
-        # startup latency untouched.
-        try:
-            if self._backend is not None:
-                await self._backend.evict_excess(self.disk_capacity)
-        except CacheBackendError as exc:
-            logger.warning(
-                "cache %s: startup eviction failed (%s)", self.name, exc,
-            )
-        except Exception:
-            logger.exception(
-                "cache %s: startup eviction failed", self.name,
-            )
+        # One-shot cleanup of expired rows accumulated across previous
+        # sessions. The in-session trigger only fires every
+        # EVICT_EVERY_N_WRITES writes; a frequently-restarting bundler
+        # that never crosses that threshold would otherwise let stale
+        # rows linger past their TTL indefinitely. Skipped when
+        # disk_ttl_seconds is None (no eviction configured).
+        if self.disk_ttl_seconds is not None:
+            try:
+                if self._backend is not None:
+                    await self._backend.evict_expired(
+                        self.disk_ttl_seconds,
+                    )
+            except CacheBackendError as exc:
+                logger.warning(
+                    "cache %s: startup eviction failed (%s)",
+                    self.name, exc,
+                )
+            except Exception:
+                logger.exception(
+                    "cache %s: startup eviction failed", self.name,
+                )
         while True:
             first = await self._write_queue.get()
             batch: list[tuple[str, Any]] = [first]
@@ -515,11 +535,14 @@ class PersistentFIFOCache:
             try:
                 await self._commit_batch(batch)
                 self._writes_since_evict += len(batch)
-                if self._writes_since_evict >= EVICT_EVERY_N_WRITES:
+                if (
+                    self.disk_ttl_seconds is not None
+                    and self._writes_since_evict >= EVICT_EVERY_N_WRITES
+                ):
                     if self._backend is not None:
                         try:
-                            await self._backend.evict_excess(
-                                self.disk_capacity,
+                            await self._backend.evict_expired(
+                                self.disk_ttl_seconds,
                             )
                         except CacheBackendError as exc:
                             logger.warning(

@@ -97,7 +97,11 @@ class InitData:
     # Per-deployment scale knobs for the cache caps. 1.0 keeps the
     # built-in defaults; bump up on hosts with more RAM/disk headroom.
     cache_memory_size: float
-    cache_disk_size: float
+    # Per-cache TTL (in days) on the Postgres cold tier. ``None``
+    # (default, env var unset) means no eviction — caches grow until
+    # something else trims them. Set an integer to evict rows whose
+    # ``inserted_at`` is older than this many days.
+    postgres_cache_ttl_days: int | None
     # When False (the default), reputation-driven bans are not enforced:
     # the bundler logs that an entity *would* have been banned and resets
     # its accumulated reputation score instead.
@@ -547,16 +551,21 @@ def initialize_argument_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
-        "--cache_disk_size",
-        type=positive_float,
+        "--postgres_cache_ttl_days",
+        type=unsigned_int,
         help=(
-            "Multiplier applied to every cache's on-disk capacity. "
-            "1.0 keeps the 500_000-row default."
+            "Per-cache TTL (in days) on the Postgres cold tier. "
+            "Unset (the default) means no eviction — the writer task "
+            "skips eviction entirely. Set an integer to evict rows "
+            "whose inserted_at is older than this many days; the "
+            "DELETE uses an indexed range scan (no COUNT(*), no full "
+            "table scan)."
         ),
         nargs="?",
-        const=1.0,
         default=_get_env_or_default(
-            "VOLTAIRE_CACHE_DISK_SIZE", 1.0, positive_float,
+            "VOLTAIRE_POSTGRES_CACHE_TTL_DAYS",
+            None,
+            unsigned_int,
         ),
     )
 
@@ -1128,7 +1137,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.bundle_gas_estimation_multiplier,
         os.getenv("VOLTAIRE_CACHE_POSTGRES_URL", ""),
         args.cache_memory_size,
-        args.cache_disk_size,
+        args.postgres_cache_ttl_days,
         args.enable_banning,
         args.logs_fallback_recent_window,
     )

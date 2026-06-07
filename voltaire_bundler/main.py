@@ -60,11 +60,17 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             loop.add_signal_handler(signal_enum, exit_func)
         asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
-    # Apply the size multipliers BEFORE start_all so warm-on-start observes
-    # the scaled memory cap.
-    PersistentFIFOCache.apply_capacity_multipliers(
+    # Apply capacity settings BEFORE start_all so warm-on-start
+    # observes the scaled memory cap and the writer task picks up the
+    # configured TTL. CLI takes the TTL in days for operator
+    # convenience; the cache layer stores it as seconds.
+    PersistentFIFOCache.apply_capacity_settings(
         memory_mult=init_data.cache_memory_size,
-        disk_mult=init_data.cache_disk_size,
+        disk_ttl_seconds=(
+            init_data.postgres_cache_ttl_days * 86_400
+            if init_data.postgres_cache_ttl_days is not None
+            else None
+        ),
     )
 
     # Start the RPC-result caches. Caches run memory-only unless
