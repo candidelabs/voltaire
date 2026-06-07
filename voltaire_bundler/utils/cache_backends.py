@@ -97,9 +97,11 @@ class CacheBackend(abc.ABC):
         can preserve disk FIFO order when warming the OrderedDict."""
 
     @abc.abstractmethod
-    async def evict_excess(self, max_rows: int) -> None:
-        """Trim the cold tier to at most ``max_rows`` rows by deleting
-        the lowest-seq rows first."""
+    async def evict_expired(self, ttl_seconds: int) -> None:
+        """Delete every row whose ``inserted_at`` is older than
+        ``ttl_seconds``. A single indexed range delete — no COUNT,
+        no full scan, cost proportional to the number of evicted rows
+        rather than to total table size."""
 
     @abc.abstractmethod
     async def count_rows(self) -> int: ...
@@ -170,10 +172,14 @@ def _get_postgres_pool() -> "asyncpg.Pool":
 
 
 class PostgresBackend(CacheBackend):
-    """One table per cache, all sharing a single asyncpg pool. Uses a
-    per-table SEQUENCE for FIFO ordering — concurrent inserts from
-    multiple bundler processes get distinct seq values naturally, no
-    SELECT FOR UPDATE dance needed."""
+    """One table per cache, all sharing a single asyncpg pool. FIFO
+    ordering is derived from ``inserted_at`` (microsecond-resolution
+    wall clock); we used to carry a separate ``seq`` column for
+    strictly-monotonic ordering, but the warmup-load order is the
+    only consumer of it and ``inserted_at DESC`` gives the same
+    answer in practice. Dropping seq saves one column + one index
+    per write and unblocks HOT updates when only ``value`` /
+    ``inserted_at`` change."""
 
     def __init__(self, *, table: str, table_prefix: str = "") -> None:
         full_table = f"{table_prefix}{table}"
@@ -182,30 +188,37 @@ class PostgresBackend(CacheBackend):
                 f"table name must be a SQL identifier: {full_table!r}"
             )
         self._table = full_table
-        self._seq = f"{full_table}_seq"
         self._closed = False
 
     async def open(self) -> None:
         pool = _get_postgres_pool()
         try:
             async with pool.acquire() as conn:
-                # CREATE SEQUENCE before the table so the DEFAULT can
-                # reference it. Both are IF NOT EXISTS so reruns on an
-                # existing DB are no-ops.
-                await conn.execute(
-                    f'CREATE SEQUENCE IF NOT EXISTS "{self._seq}"'
-                )
+                # ``inserted_at`` drives both TTL eviction and warmup
+                # ordering. All statements idempotent so reruns are
+                # no-ops; the ALTER handles upgrading tables created
+                # before the column existed.
+                #
+                # Tables migrated from the seq era will still have a
+                # ``seq`` column lingering — harmless, unused by any
+                # current query. Operators wanting to reclaim the
+                # space can ``ALTER TABLE … DROP COLUMN seq`` manually.
                 await conn.execute(
                     f'CREATE TABLE IF NOT EXISTS "{self._table}" ('
-                    f'    key   TEXT   PRIMARY KEY,'
-                    f'    value BYTEA  NOT NULL,'
-                    f'    seq   BIGINT NOT NULL '
-                    f'          DEFAULT nextval(\'"{self._seq}"\')'
+                    f'    key         TEXT        PRIMARY KEY,'
+                    f'    value       BYTEA       NOT NULL,'
+                    f'    inserted_at TIMESTAMPTZ NOT NULL DEFAULT now()'
                     f')'
                 )
                 await conn.execute(
-                    f'CREATE INDEX IF NOT EXISTS "{self._table}_seq_idx" '
-                    f'ON "{self._table}" (seq)'
+                    f'ALTER TABLE "{self._table}" '
+                    f'ADD COLUMN IF NOT EXISTS '
+                    f'inserted_at TIMESTAMPTZ NOT NULL DEFAULT now()'
+                )
+                await conn.execute(
+                    f'CREATE INDEX IF NOT EXISTS '
+                    f'"{self._table}_inserted_at_idx" '
+                    f'ON "{self._table}" (inserted_at)'
                 )
         except Exception as exc:
             if asyncpg is not None and isinstance(
@@ -271,16 +284,17 @@ class PostgresBackend(CacheBackend):
                                 key,
                             )
                         else:
-                            # ON CONFLICT … nextval bumps seq on
-                            # overwrite so the row moves to FIFO-newest
-                            # position.
+                            # ON CONFLICT refreshes inserted_at so an
+                            # overwritten row resets the TTL clock —
+                            # otherwise a frequently-touched key could
+                            # still age out from its original
+                            # insertion timestamp.
                             await conn.execute(
                                 f'INSERT INTO "{self._table}" '
-                                f'(key, value, seq) VALUES '
-                                f'($1, $2, nextval(\'"{self._seq}"\')) '
+                                f'(key, value) VALUES ($1, $2) '
                                 f'ON CONFLICT (key) DO UPDATE SET '
                                 f'value = EXCLUDED.value, '
-                                f'seq = nextval(\'"{self._seq}"\')',
+                                f'inserted_at = now()',
                                 key, value,
                             )
         except Exception as exc:
@@ -294,7 +308,7 @@ class PostgresBackend(CacheBackend):
             async with pool.acquire() as conn:
                 rows = await conn.fetch(
                     f'SELECT key, value FROM "{self._table}" '
-                    f'ORDER BY seq DESC LIMIT $1',
+                    f'ORDER BY inserted_at DESC LIMIT $1',
                     limit,
                 )
         except Exception as exc:
@@ -302,28 +316,22 @@ class PostgresBackend(CacheBackend):
         # Came back newest-first; flip so the caller sees oldest-first.
         return [(r["key"], bytes(r["value"])) for r in reversed(rows)]
 
-    async def evict_excess(self, max_rows: int) -> None:
+    async def evict_expired(self, ttl_seconds: int) -> None:
         if self._closed:
             return
         pool = _get_postgres_pool()
         try:
             async with pool.acquire() as conn:
-                async with conn.transaction():
-                    count = await conn.fetchval(
-                        f'SELECT COUNT(*) FROM "{self._table}"'
-                    )
-                    if count <= max_rows:
-                        return
-                    overflow = count - max_rows
-                    await conn.execute(
-                        f'DELETE FROM "{self._table}" WHERE seq IN ('
-                        f'    SELECT seq FROM "{self._table}" '
-                        f'    ORDER BY seq LIMIT $1'
-                        f')',
-                        overflow,
-                    )
+                # Single indexed range delete via the
+                # inserted_at_idx — no COUNT, no full table scan,
+                # cost proportional to the number of expired rows.
+                await conn.execute(
+                    f'DELETE FROM "{self._table}" WHERE '
+                    f'inserted_at < now() - make_interval(secs => $1)',
+                    ttl_seconds,
+                )
         except Exception as exc:
-            raise self._wrap(exc, "evict_excess") from exc
+            raise self._wrap(exc, "evict_expired") from exc
 
     async def count_rows(self) -> int:
         if self._closed:
