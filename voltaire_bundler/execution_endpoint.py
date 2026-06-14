@@ -522,7 +522,10 @@ class ExecutionEndpoint(Endpoint):
                 "Unsupported entrypoint",
             )
 
-        MAX_GAS_PER_USER_OPERATION = 15_000_000
+        if self.chain_id in (5031, 50312):  # Somnia
+            MAX_GAS_PER_USER_OPERATION = 50_000_000
+        else:
+            MAX_GAS_PER_USER_OPERATION = 15_000_000
         max_gas = user_operation.get_max_gas_without_pre_verification_gas()
         if max_gas > MAX_GAS_PER_USER_OPERATION:
             raise ValidationException(

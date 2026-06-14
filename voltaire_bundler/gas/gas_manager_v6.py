@@ -78,8 +78,15 @@ class GasManagerV6(GasManager):
         if input_verification_gas_limit == 0:
             # 10_000 buffer overhead
             result_verification_gas_limit = estimated_verification_gas_limit + 10_000
-            if self.chain_id == 137 or self.chain_id == 80002 or self.chain_id == 1337:
-                result_verification_gas_limit = math.ceil(result_verification_gas_limit*1.1)
+            if self.chain_id in (137, 80002, 1337):
+                result_verification_gas_limit = math.ceil(
+                    result_verification_gas_limit*1.1
+                )
+            elif self.chain_id in (5031, 50312):  # Somnia
+                result_verification_gas_limit = estimated_verification_gas_limit + 600_000
+                result_verification_gas_limit = math.ceil(
+                    result_verification_gas_limit*2
+                )
         else:
             result_verification_gas_limit = input_verification_gas_limit
 
@@ -307,7 +314,10 @@ class GasManagerV6(GasManager):
             )
 
         fixed = 21000
-        per_user_operation = 18300
+        if self.chain_id == 5031 or self.chain_id == 50312:  # Somnia chain
+            per_user_operation = 18300 + 200_000
+        else:
+            per_user_operation = 18300
         per_user_operation_word = 4
         zero_byte = 4
         non_zero_byte = 16

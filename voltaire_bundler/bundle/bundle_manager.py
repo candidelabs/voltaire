@@ -359,9 +359,13 @@ class BundlerManager:
             logging.debug(
                 "Sending bundle failed. failed call data or gas estimation.")
             return
-        
+
+        multiplier = self.bundle_gas_estimation_multiplier
+        if self.chain_id in (5031, 50312):
+            multiplier = max(multiplier, 1.5)
+
         gas_estimation_int = math.ceil(
-            gas_estimation_hex * self.bundle_gas_estimation_multiplier
+            gas_estimation_hex * multiplier
         )
         gas_estimation_hex = hex(gas_estimation_int)
 
@@ -765,6 +769,8 @@ class BundlerManager:
             bundle_gas_limit += user_operation.get_max_gas_with_pre_verification_gas()
 
         bundle_gas_limit += 50_000 + bundle_calldata_init_gas
+        if self.chain_id in (5031, 50312):  # Somnia
+            bundle_gas_limit += 200_000 * len(user_operations)
 
         # arbitrum One or arbitrum sepolia
         if self.chain_id == 42161 or self.chain_id == 421614:
