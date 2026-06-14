@@ -110,6 +110,11 @@ class InitData:
     # full ``fromBlock="earliest"`` eth_getLogs scan in
     # eth_getUserOperationByHash/Receipt.
     logs_fallback_recent_window: int
+    # Seconds for which a freshly submitted userop short-circuits the
+    # receipt and byHash chain probes — the op cannot be on-chain yet,
+    # so the chain RPC fan-out is a guaranteed waste. Tune to the
+    # operator's bundle cadence + block time. Defaults to 1.0.
+    recent_submission_fast_path_window: float
 
 
 def address(ep: str):
@@ -640,6 +645,25 @@ def initialize_argument_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
+        "--recent_submission_fast_path_window",
+        type=positive_float,
+        help=(
+            "Seconds during which a freshly submitted userop "
+            "short-circuits the receipt / byHash chain probes — within "
+            "this window the op cannot be on-chain yet, so the chain "
+            "RPC fan-out would be a guaranteed waste. The receipt path "
+            "returns null and the byHash path returns the mempool form. "
+            "Pick a value <= the operator's bundle cadence + expected "
+            "block time. Defaults to 1.0."
+        ),
+        nargs="?",
+        const=1.0,
+        default=_get_env_or_default(
+            "VOLTAIRE_RECENT_SUBMISSION_FAST_PATH_WINDOW",
+            1.0, positive_float),
+    )
+
+    parser.add_argument(
         "--health_check_interval",
         type=int,
         help=(
@@ -1140,6 +1164,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.postgres_cache_ttl_days,
         args.enable_banning,
         args.logs_fallback_recent_window,
+        args.recent_submission_fast_path_window,
     )
 
     if args.verbose:

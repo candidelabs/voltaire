@@ -68,9 +68,17 @@ _SEEN_CACHE_ENTRYPOINTS = (
 # form directly. Together they remove the upstream RPC pressure that the
 # storm would otherwise generate.
 #
-# In-memory only and never persisted: a process restart simply degrades the
-# next 1 s of polls back to the normal lookup path, which is fine because
-# the worst case is just paying the cost we already pay today.
+# The 1.0 s default suits a typical mainnet configuration (bundle_interval
+# 2 s, 12 s block time). Operators on a fast L2 with sub-second bundle
+# intervals may want to shrink this to reduce the stale "queued" window;
+# operators on chains with longer cadence may want to grow it to cover
+# more polls. Tune via the ``--recent_submission_fast_path_window``
+# CLI flag, which writes the chosen value into this module attribute at
+# startup.
+#
+# In-memory only and never persisted: a process restart simply degrades
+# the next window of polls back to the normal lookup path, which is fine
+# because the worst case is just paying the cost we already pay today.
 #
 # Each value is ``(monotonic_submitted_at, entrypoint_lowercase)``. The
 # entrypoint is what the byHash path needs to jump straight to the right
@@ -216,8 +224,17 @@ class ExecutionEndpoint(Endpoint):
         bundle_gas_estimation_multiplier: float,
         enable_banning: bool,
         logs_fallback_recent_window: int,
+        recent_submission_fast_path_window: float,
     ):
         super().__init__("bundler_endpoint")
+        # Resize the receipt / byHash fast-path window to the operator's
+        # chosen value before any RPC handler can read it. Module-level
+        # mutation (rather than an instance attribute) keeps the helpers
+        # free functions — no ``self`` to thread through every
+        # send/receipt/byHash path — and there is only one
+        # ExecutionEndpoint per process, so contention is a non-issue.
+        global RECENT_SUBMISSION_FAST_PATH_S
+        RECENT_SUBMISSION_FAST_PATH_S = recent_submission_fast_path_window
         self.ethereum_node_urls = ethereum_node_urls
         self.chain_id = chain_id
 
