@@ -55,19 +55,28 @@ _SEEN_CACHE_ENTRYPOINTS = (
 )
 
 
-# Guaranteed-miss fast path for ``eth_getUserOperationReceipt``: a userop
+# Fast path for ``eth_getUserOperationReceipt`` /
+# ``eth_getUserOperationByHash`` on freshly submitted userops: a userop
 # submitted to this bundler less than RECENT_SUBMISSION_FAST_PATH_S seconds
 # ago cannot possibly be on-chain — bundle interval + block propagation puts
 # the floor above 1 s in every realistic configuration. Many clients submit
-# then poll receipt in a tight loop; returning ``None`` immediately skips up
-# to four eth_getLogs / eth_getTransactionReceipt fan-outs per poll and
-# removes the upstream RPC pressure that the storm would otherwise generate.
+# then poll in a tight loop; for the receipt path returning ``None`` skips
+# up to four eth_getLogs / eth_getTransactionReceipt fan-outs per poll, and
+# for the byHash path we already know which entrypoint owns the hash and
+# that the op is still in our local mempool, so we can skip the same
+# eth_getLogs / eth_getTransactionByHash fan-out and return the mempool
+# form directly. Together they remove the upstream RPC pressure that the
+# storm would otherwise generate.
 #
 # In-memory only and never persisted: a process restart simply degrades the
 # next 1 s of polls back to the normal lookup path, which is fine because
 # the worst case is just paying the cost we already pay today.
+#
+# Each value is ``(monotonic_submitted_at, entrypoint_lowercase)``. The
+# entrypoint is what the byHash path needs to jump straight to the right
+# local mempool; the receipt path only consults the timestamp.
 RECENT_SUBMISSION_FAST_PATH_S = 1.0
-_recent_userop_submissions: dict[str, float] = {}
+_recent_userop_submissions: dict[str, tuple[float, str]] = {}
 
 
 def _prune_stale_recent_submissions(now: float) -> None:
@@ -86,7 +95,7 @@ def _prune_stale_recent_submissions(now: float) -> None:
             oldest_key = next(iterator)
         except StopIteration:
             return
-        if _recent_userop_submissions[oldest_key] >= threshold:
+        if _recent_userop_submissions[oldest_key][0] >= threshold:
             return
         _recent_userop_submissions.pop(oldest_key, None)
         # Re-take the iterator — mutating the dict invalidates the
@@ -94,8 +103,11 @@ def _prune_stale_recent_submissions(now: float) -> None:
         iterator = iter(_recent_userop_submissions)
 
 
-def _record_recent_submission(user_operation_hash: str) -> None:
-    """Mark ``user_operation_hash`` as submitted to this bundler "now".
+def _record_recent_submission(
+    user_operation_hash: str, entrypoint_lowercase: str,
+) -> None:
+    """Mark ``user_operation_hash`` as submitted to this bundler "now"
+    under ``entrypoint_lowercase``.
 
     Uses ``time.monotonic`` rather than wall clock so the window is
     immune to NTP slews and DST jumps. We only ever compare two
@@ -103,23 +115,35 @@ def _record_recent_submission(user_operation_hash: str) -> None:
     """
     now = time.monotonic()
     _prune_stale_recent_submissions(now)
-    _recent_userop_submissions[user_operation_hash.lower()] = now
+    _recent_userop_submissions[user_operation_hash.lower()] = (
+        now, entrypoint_lowercase.lower(),
+    )
+
+
+def _get_recent_submission_entrypoint(
+    user_operation_hash: str,
+) -> str | None:
+    """Return the (lowercased) entrypoint the userop was submitted under
+    iff the submission is still inside the freshness window. Returns
+    ``None`` and evicts the entry when stale, so an expired hash polled
+    repeatedly does not stay resident in memory."""
+    h = user_operation_hash.lower()
+    entry = _recent_userop_submissions.get(h)
+    if entry is None:
+        return None
+    submitted_at, entrypoint_lowercase = entry
+    if time.monotonic() - submitted_at < RECENT_SUBMISSION_FAST_PATH_S:
+        return entrypoint_lowercase
+    _recent_userop_submissions.pop(h, None)
+    return None
 
 
 def _is_recent_submission(user_operation_hash: str) -> bool:
     """Return True if the userop was submitted to this bundler within the
-    last ``RECENT_SUBMISSION_FAST_PATH_S`` seconds. Drops the entry as a
-    side effect when it is found to be stale, so a long-tail poll that
-    keeps hitting the same expired hash does not leave a permanent
-    cache resident."""
-    h = user_operation_hash.lower()
-    submitted_at = _recent_userop_submissions.get(h)
-    if submitted_at is None:
-        return False
-    if time.monotonic() - submitted_at < RECENT_SUBMISSION_FAST_PATH_S:
-        return True
-    _recent_userop_submissions.pop(h, None)
-    return False
+    last ``RECENT_SUBMISSION_FAST_PATH_S`` seconds. Thin wrapper over
+    :py:func:`_get_recent_submission_entrypoint` for the receipt path,
+    which only needs a yes/no answer."""
+    return _get_recent_submission_entrypoint(user_operation_hash) is not None
 
 
 async def search_user_operation_seen_cache(
@@ -610,11 +634,11 @@ class ExecutionEndpoint(Endpoint):
                 f"{input_entrypoint}:{user_operation_hash}",
                 user_operation.validated_at_block_hex,
             )
-        # Arm the receipt-lookup fast path: the userop just entered our
-        # mempool, so any receipt poll arriving in the next
-        # RECENT_SUBMISSION_FAST_PATH_S seconds is a guaranteed miss and
-        # can be answered without touching the upstream RPC.
-        _record_recent_submission(user_operation_hash)
+        # Arm the receipt + byHash fast paths: the userop just entered our
+        # mempool under ``input_entrypoint``, so any poll arriving in the
+        # next RECENT_SUBMISSION_FAST_PATH_S seconds is a guaranteed miss
+        # against chain and a guaranteed hit against the mempool.
+        _record_recent_submission(user_operation_hash, input_entrypoint)
 
         if not self.disable_p2p:
             if (input_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase):
@@ -642,6 +666,57 @@ class ExecutionEndpoint(Endpoint):
 
         return user_operation_hash
 
+    def _lookup_userop_in_local_mempool_by_entrypoint(
+        self, user_operation_hash: str, entrypoint_lowercase: str,
+    ) -> dict | None:
+        """Return the byHash mempool form for ``user_operation_hash`` if
+        the local mempool for ``entrypoint_lowercase`` has it, else
+        ``None``. Pure in-memory dict walk — no chain probe. Used by the
+        byHash fresh-submission fast path, where we already know which
+        entrypoint owns the hash and that the op cannot be on-chain yet,
+        so the chain probe in ``get_user_operation_by_hash_rpc`` would
+        be a guaranteed miss followed by this same mempool fallback.
+        """
+        handler: UserOperationHandlerV6 | UserOperationHandlerV7V8V9
+        if entrypoint_lowercase == LocalMempoolManagerV6.entrypoint_lowercase:
+            if (
+                self.user_operation_handler_v6 is None or
+                self.local_mempool_manager_v6 is None
+            ):
+                return None
+            handler = self.user_operation_handler_v6
+            entrypoint = LocalMempoolManagerV6.entrypoint
+            senders_mempools = (
+                self.local_mempool_manager_v6
+                .senders_to_senders_mempools.values()
+            )
+        elif entrypoint_lowercase == LocalMempoolManagerV7.entrypoint_lowercase:
+            handler = self.user_operation_handler_v7v8v9
+            entrypoint = LocalMempoolManagerV7.entrypoint
+            senders_mempools = (
+                self.local_mempool_manager_v7
+                .senders_to_senders_mempools.values()
+            )
+        elif entrypoint_lowercase == LocalMempoolManagerV8.entrypoint_lowercase:
+            handler = self.user_operation_handler_v7v8v9
+            entrypoint = LocalMempoolManagerV8.entrypoint
+            senders_mempools = (
+                self.local_mempool_manager_v8
+                .senders_to_senders_mempools.values()
+            )
+        elif entrypoint_lowercase == LocalMempoolManagerV9.entrypoint_lowercase:
+            handler = self.user_operation_handler_v7v8v9
+            entrypoint = LocalMempoolManagerV9.entrypoint
+            senders_mempools = (
+                self.local_mempool_manager_v9
+                .senders_to_senders_mempools.values()
+            )
+        else:
+            return None
+        return handler.get_user_operation_by_hash_from_local_mempool(
+            user_operation_hash, entrypoint, senders_mempools,
+        )
+
     async def _event_rpc_getUserOperationByHash(
             self, req_arguments: list) -> dict | None:
         global user_operation_by_hash_cache
@@ -653,6 +728,30 @@ class ExecutionEndpoint(Endpoint):
             )
         if user_operation_hash in user_operation_by_hash_cache:
             return user_operation_by_hash_cache[user_operation_hash]
+
+        # Fresh-submission fast path: the op cannot be on-chain yet, so
+        # the normal cascade (eth_getLogs + eth_getTransactionByHash, fan
+        # out across 3-4 entrypoints) would just be a guaranteed miss
+        # before falling back to the local-mempool lookup we do here
+        # directly. We know which entrypoint owns the hash because
+        # _record_recent_submission tagged it at submit time. We
+        # deliberately do not write the result to
+        # ``user_operation_by_hash_cache`` (matching the existing code
+        # path, which only caches once ``blockNumber`` is non-null) so a
+        # subsequent poll after inclusion still returns the on-chain
+        # form.
+        recent_entrypoint = _get_recent_submission_entrypoint(
+            user_operation_hash,
+        )
+        if recent_entrypoint is not None:
+            mempool_form = self._lookup_userop_in_local_mempool_by_entrypoint(
+                user_operation_hash, recent_entrypoint,
+            )
+            if mempool_form is not None:
+                return mempool_form
+            # Mempool miss despite a recent-submission tag (bundled and
+            # evicted within the window — possible on sub-1 s block-time
+            # chains). Fall through to the normal cascade.
 
         search_result = await search_user_operation_seen_cache(user_operation_hash)
         if search_result is not None:
