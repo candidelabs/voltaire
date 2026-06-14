@@ -154,6 +154,60 @@ class UserOperationHandler(ABC):
         entrypoint: str,
         validated_at_block_hex: str | None,
     ) -> dict | None:
+        # Single-flight: when many clients poll the same userop hash in a
+        # tight loop (the common "wait for inclusion" pattern), funnel all
+        # concurrent lookups for the same (entrypoint, userOpHash) into a
+        # single underlying eth_getLogs / eth_getTransactionReceipt chain.
+        # See _inflight_receipt_lookups below for the rationale.
+        key = (entrypoint.lower(), user_operation_hash.lower())
+        inflight = _inflight_receipt_lookups.get(key)
+        if inflight is None:
+            inflight = asyncio.create_task(
+                self._build_user_operation_receipt_rpc(
+                    user_operation_hash, entrypoint, validated_at_block_hex,
+                ),
+                name=(
+                    f"receipt-lookup:{entrypoint[:10]}:"
+                    f"{user_operation_hash[:10]}"
+                ),
+            )
+            _inflight_receipt_lookups[key] = inflight
+            # Drop the entry the instant the work finishes so the next
+            # poll (which may want a fresher answer) does its own lookup
+            # rather than reusing a stale future. add_done_callback fires
+            # synchronously on completion, before any pending waiter is
+            # resumed, so every waiter still observes the same result.
+            def _evict(_task: "asyncio.Task[dict[str, Any] | None]",
+                       k: tuple[str, str] = key) -> None:
+                _inflight_receipt_lookups.pop(k, None)
+            inflight.add_done_callback(_evict)
+
+        # asyncio.shield decouples this awaiter's cancellation from the
+        # underlying task: if this RPC handler is cancelled (client
+        # disconnect, timeout), the lookup keeps running for any other
+        # waiters and for the in-flight slot.
+        result = await asyncio.shield(inflight)
+        if result is None:
+            return None
+        # Preserve the existing raise-on-found contract that
+        # execution_endpoint._event_rpc_getUserOperationReceipt relies on
+        # to short-circuit its FIRST_EXCEPTION wait across entrypoints.
+        raise UserOpReceiptFoundException(result)
+
+    async def _build_user_operation_receipt_rpc(
+        self,
+        user_operation_hash: str,
+        entrypoint: str,
+        validated_at_block_hex: str | None,
+    ) -> dict[str, Any] | None:
+        """Compute the receipt RPC dict, or ``None`` if not yet included.
+
+        Separated from :py:meth:`get_user_operation_receipt_rpc` so the
+        outer method can apply single-flight coalescing without entangling
+        request dedup logic with the lookup pipeline. Returns the dict
+        instead of raising ``UserOpReceiptFoundException`` so the same
+        value can be replayed to every coalesced waiter.
+        """
         user_operation_receipt = await self.get_user_operation_receipt(
             user_operation_hash, entrypoint, validated_at_block_hex
         )
@@ -181,7 +235,7 @@ class UserOperationHandler(ABC):
             gas_info = {"effectiveGasPrice": receipt_info.effectiveGasPrice}
             receipt_info_json.update(gas_info)
 
-        user_operation_receipt_rpc_json = {
+        return {
             "userOpHash": user_operation_receipt_info.userOpHash,
             "entryPoint": entrypoint,
             "sender": user_operation_receipt_info.sender,
@@ -193,7 +247,6 @@ class UserOperationHandler(ABC):
             "logs": user_operation_receipt_info.logs,
             "receipt": receipt_info_json,
         }
-        raise UserOpReceiptFoundException(user_operation_receipt_rpc_json)
 
     async def get_user_operation_event_log_info(
         self, user_operation_hash: str,
@@ -477,6 +530,24 @@ async def get_deposit_info(
 # Flattens the previous per-entrypoint nested dict (which also had a broken
 # eviction path: ``logs_cache = {}`` rebound a local, never the outer dict).
 user_operation_logs_cache = PersistentFIFOCache(name="user_operation_logs")
+
+
+# Single-flight registry: keyed by ``(entrypoint_lowercase, userOpHash_lowercase)``,
+# value is the in-progress lookup task. While a key is present, every new
+# call to ``get_user_operation_receipt_rpc`` for that key awaits the same
+# task instead of firing its own eth_getLogs / eth_getTransactionReceipt
+# chain. Entries are removed via add_done_callback the moment the task
+# completes — there is no TTL here, so a fresh poll arriving right after
+# a None result still does a fresh lookup (negative caching is intentionally
+# out of scope; see #1 in the receipt-congestion notes).
+#
+# Module-level so a single registry is shared by all UserOperationHandler
+# instances (v6 + v7v8v9 process-wide). Asyncio's single-threaded loop
+# guarantees the dict.get / dict[key]=task sequence is atomic between
+# awaits, so no lock is needed.
+_inflight_receipt_lookups: dict[
+    tuple[str, str], "asyncio.Task[dict[str, Any] | None]"
+] = {}
 
 # Wall-clock budget for a single RPC lookup against an Ethereum node
 # (eth_getLogs / eth_getTransactionReceipt / eth_getTransactionByHash).
