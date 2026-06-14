@@ -250,6 +250,59 @@ async def test_exception_propagates_to_all_waiters():
 
 
 @pytest.mark.asyncio
+async def test_abandoned_failing_task_does_not_log_unretrieved_warning(caplog):
+    """When all waiters cancel a single-flight lookup that ends up
+    raising, the underlying task continues to completion (asyncio.shield
+    semantics). If nothing consumes ``task.exception()`` asyncio logs
+    "Task exception was never retrieved" at GC time — under a transient
+    upstream outage that would spam logs. The _evict callback must
+    consume the exception so the warning never fires."""
+    import gc
+    import logging
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def boom(*_args):
+        started.set()
+        await release.wait()
+        raise RuntimeError("upstream rpc down")
+
+    handler = _make_handler(boom)
+
+    waiter = asyncio.create_task(handler.get_user_operation_receipt_rpc(
+        USEROP_HASH, ENTRYPOINT_V7, None,
+    ))
+    await started.wait()
+
+    # Sole waiter abandons before the task finishes. The shielded task
+    # keeps running and will raise; nothing else awaits its result.
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+
+    with caplog.at_level(logging.WARNING, logger="asyncio"):
+        release.set()
+        # Let the underlying task run to completion + done callback fire.
+        # Two yields are enough: one to schedule the task's exception,
+        # one to run the done callback.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        # Force GC of the task object so any deferred "exception never
+        # retrieved" warning would surface now if it were going to.
+        gc.collect()
+
+    unretrieved = [
+        r for r in caplog.records
+        if "exception was never retrieved" in r.getMessage()
+    ]
+    assert not unretrieved, (
+        "single-flight should consume task.exception() in _evict — "
+        f"saw: {[r.getMessage() for r in unretrieved]}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_key_is_case_insensitive_for_entrypoint_and_hash():
     """Coalescing must hold even when callers pass mixed-case hex
     (different EIP-55 checksums for the same address, or 0xABC vs 0xabc

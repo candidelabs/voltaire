@@ -179,6 +179,19 @@ class UserOperationHandler(ABC):
             # resumed, so every waiter still observes the same result.
             def _evict(_task: "asyncio.Task[dict[str, Any] | None]",
                        k: tuple[str, str] = key) -> None:
+                # Consume the task's exception so asyncio doesn't log
+                # "Task exception was never retrieved" at GC time when
+                # every waiter cancelled before the task finished.
+                # add_done_callback does NOT count as a consumer for
+                # that check; only .exception() / .result() do.
+                # ``.exception()`` returns the exception (does not raise)
+                # for a normally-finished task, and raises CancelledError
+                # only when the task itself was cancelled — which is the
+                # one case we need to catch.
+                try:
+                    _task.exception()
+                except asyncio.CancelledError:
+                    pass
                 _inflight_receipt_lookups.pop(k, None)
             inflight.add_done_callback(_evict)
 
