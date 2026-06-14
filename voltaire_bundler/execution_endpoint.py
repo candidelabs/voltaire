@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 import traceback
 import math
 import os
@@ -52,6 +53,73 @@ _SEEN_CACHE_ENTRYPOINTS = (
     LocalMempoolManagerV8.entrypoint_lowercase,
     LocalMempoolManagerV9.entrypoint_lowercase,
 )
+
+
+# Guaranteed-miss fast path for ``eth_getUserOperationReceipt``: a userop
+# submitted to this bundler less than RECENT_SUBMISSION_FAST_PATH_S seconds
+# ago cannot possibly be on-chain — bundle interval + block propagation puts
+# the floor above 1 s in every realistic configuration. Many clients submit
+# then poll receipt in a tight loop; returning ``None`` immediately skips up
+# to four eth_getLogs / eth_getTransactionReceipt fan-outs per poll and
+# removes the upstream RPC pressure that the storm would otherwise generate.
+#
+# In-memory only and never persisted: a process restart simply degrades the
+# next 1 s of polls back to the normal lookup path, which is fine because
+# the worst case is just paying the cost we already pay today.
+RECENT_SUBMISSION_FAST_PATH_S = 1.0
+_recent_userop_submissions: dict[str, float] = {}
+
+
+def _prune_stale_recent_submissions(now: float) -> None:
+    """Pop expired entries from the head of ``_recent_userop_submissions``.
+
+    Entries are inserted in monotonic-clock order, and Python 3.7+ dicts
+    iterate in insertion order, so the head is always the oldest entry —
+    once we hit a non-stale entry we can stop. Amortized O(1) per
+    submission; bounds memory to "submissions in the last
+    ``RECENT_SUBMISSION_FAST_PATH_S`` seconds" without a hard cap.
+    """
+    threshold = now - RECENT_SUBMISSION_FAST_PATH_S
+    iterator = iter(_recent_userop_submissions)
+    while True:
+        try:
+            oldest_key = next(iterator)
+        except StopIteration:
+            return
+        if _recent_userop_submissions[oldest_key] >= threshold:
+            return
+        _recent_userop_submissions.pop(oldest_key, None)
+        # Re-take the iterator — mutating the dict invalidates the
+        # current one. Cheap: ``iter`` is O(1) on dict.
+        iterator = iter(_recent_userop_submissions)
+
+
+def _record_recent_submission(user_operation_hash: str) -> None:
+    """Mark ``user_operation_hash`` as submitted to this bundler "now".
+
+    Uses ``time.monotonic`` rather than wall clock so the window is
+    immune to NTP slews and DST jumps. We only ever compare two
+    monotonic readings against each other.
+    """
+    now = time.monotonic()
+    _prune_stale_recent_submissions(now)
+    _recent_userop_submissions[user_operation_hash.lower()] = now
+
+
+def _is_recent_submission(user_operation_hash: str) -> bool:
+    """Return True if the userop was submitted to this bundler within the
+    last ``RECENT_SUBMISSION_FAST_PATH_S`` seconds. Drops the entry as a
+    side effect when it is found to be stale, so a long-tail poll that
+    keeps hitting the same expired hash does not leave a permanent
+    cache resident."""
+    h = user_operation_hash.lower()
+    submitted_at = _recent_userop_submissions.get(h)
+    if submitted_at is None:
+        return False
+    if time.monotonic() - submitted_at < RECENT_SUBMISSION_FAST_PATH_S:
+        return True
+    _recent_userop_submissions.pop(h, None)
+    return False
 
 
 async def search_user_operation_seen_cache(
@@ -542,6 +610,11 @@ class ExecutionEndpoint(Endpoint):
                 f"{input_entrypoint}:{user_operation_hash}",
                 user_operation.validated_at_block_hex,
             )
+        # Arm the receipt-lookup fast path: the userop just entered our
+        # mempool, so any receipt poll arriving in the next
+        # RECENT_SUBMISSION_FAST_PATH_S seconds is a guaranteed miss and
+        # can be answered without touching the upstream RPC.
+        _record_recent_submission(user_operation_hash)
 
         if not self.disable_p2p:
             if (input_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase):
@@ -720,6 +793,14 @@ class ExecutionEndpoint(Endpoint):
             )
         if user_operation_hash in user_operation_receipt_cache:
             return user_operation_receipt_cache[user_operation_hash]
+
+        # Guaranteed-miss fast path: if the userop was submitted to this
+        # bundler less than RECENT_SUBMISSION_FAST_PATH_S ago, it cannot
+        # be on-chain yet (bundle interval + block propagation). Skipping
+        # the chain probe here is what prevents a "submit + tight poll"
+        # client from melting the upstream RPC connection pool.
+        if _is_recent_submission(user_operation_hash):
+            return None
 
         search_result = await search_user_operation_seen_cache(user_operation_hash)
         if search_result is not None:
