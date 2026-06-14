@@ -46,7 +46,6 @@ class LocalMempoolManager():
     latest_paymaster_deposits_cache_block: int
     min_stake: int
     min_unstake_delay: int
-    max_compined_bundle_user_operations_gas_limit: int = 15_000_000
     MAX_OPS_PER_REQUEST = 4096
 
     def clear_user_operations(self) -> None:
@@ -370,6 +369,12 @@ class LocalMempoolManager():
             )
         new_code_hash_results = await asyncio.gather(*new_code_hash_ops)
         compined_gas_limit = 0
+
+        if self.chain_id in (5031, 50312):  # Somnia
+            max_compined_bundle_user_operations_gas_limit = 500_000_000
+        else:
+            max_compined_bundle_user_operations_gas_limit = 15_000_000
+
         for (
             user_operation,
             (is_valid, associated_addresses, storage_map),
@@ -386,14 +391,14 @@ class LocalMempoolManager():
                 user_operation_max_gas = user_operation.get_max_gas_without_pre_verification_gas()
                 if (
                     (compined_gas_limit + user_operation_max_gas) >
-                    self.max_compined_bundle_user_operations_gas_limit
+                    max_compined_bundle_user_operations_gas_limit
                 ):
                     logging.debug(
                         "user operation skipped for bundling because "
                         "because max bundle gas limit was reached. "
                         f"user operation max gas: {user_operation_max_gas}, "
                         f"compined cas limit: {compined_gas_limit + user_operation_max_gas}, "
-                        f"max compined bundle gas limit: {self.max_compined_bundle_user_operations_gas_limit}"
+                        f"max compined bundle gas limit: {max_compined_bundle_user_operations_gas_limit}"
                     )
                     continue
 
