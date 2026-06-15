@@ -27,7 +27,8 @@ from voltaire_bundler.user_operation.user_operation_handler_v6 import \
 from voltaire_bundler.user_operation.user_operation_handler_v7v8v9 import \
     UserOperationHandlerV7V8V9
 from voltaire_bundler.user_operation.user_operation_handler import \
-    fell_user_operation_optional_parameters_for_estimateUserOperationGas
+    fell_user_operation_optional_parameters_for_estimateUserOperationGas, \
+    set_receipt_fast_path_disabled
 from voltaire_bundler.utils.cache import PersistentFIFOCache
 from voltaire_bundler.utils.eth_client_utils import get_block_info, send_rpc_request_to_eth_client
 
@@ -237,6 +238,11 @@ class ExecutionEndpoint(Endpoint):
         # ExecutionEndpoint per process, so contention is a non-issue.
         global RECENT_SUBMISSION_FAST_PATH_S
         RECENT_SUBMISSION_FAST_PATH_S = recent_submission_fast_path_window
+        # Receipt fast path lives as a module-level flag in
+        # user_operation_handler so the central gate inside
+        # ``get_user_operation_logs_for_block_range`` can read it without
+        # threading a handler reference through every callsite.
+        set_receipt_fast_path_disabled(disable_receipt_fast_path)
         self.ethereum_node_urls = ethereum_node_urls
         self.chain_id = chain_id
 
@@ -260,7 +266,6 @@ class ExecutionEndpoint(Endpoint):
             logs_incremental_range,
             logs_number_of_ranges,
             logs_fallback_recent_window,
-            disable_receipt_fast_path,
         )
 
         self.local_mempool_manager_v9 = LocalMempoolManagerV9(
@@ -329,7 +334,6 @@ class ExecutionEndpoint(Endpoint):
                 logs_incremental_range,
                 logs_number_of_ranges,
                 logs_fallback_recent_window,
-                disable_receipt_fast_path,
             )
 
             self.local_mempool_manager_v6 = LocalMempoolManagerV6(

@@ -29,7 +29,6 @@ class UserOperationHandler(ABC):
     logs_incremental_range: int
     logs_number_of_ranges: int
     logs_fallback_recent_window: int
-    disable_receipt_fast_path: bool
 
     async def _find_handle_ops_calldata(
         self,
@@ -267,19 +266,10 @@ class UserOperationHandler(ABC):
         entrypoint: str,
         validated_at_block_hex: str | None
     ) -> tuple | None:
-        # Fast path: when this bundler sent the bundle, we already know the
-        # tx hash. Reading the receipt directly and scanning its logs for
-        # the matching UserOperationEvent skips the eth_getLogs round trip
-        # entirely. Falls through silently on any miss (no stored hash,
-        # receipt not yet ready, wrong tx, event not in receipt logs) so
-        # the eth_getLogs cascade still runs.
-        if not self.disable_receipt_fast_path:
-            fast = await self._try_event_log_info_via_known_tx(
-                user_operation_hash, entrypoint,
-            )
-            if fast is not None:
-                return fast
-
+        # The receipt fast path lives inside
+        # ``get_user_operation_logs_for_block_range``, so this method
+        # stays a thin wrapper: fetch logs (cache → receipt fast path →
+        # eth_getLogs cascade, all inside that one function) and decode.
         logs: Any = await self.get_user_operation_logs(
             user_operation_hash,
             entrypoint,
@@ -291,122 +281,12 @@ class UserOperationHandler(ABC):
             return None
         return _decode_user_operation_event_log_info(logs)
 
-    async def _try_event_log_info_via_known_tx(
-        self, user_operation_hash: str, entrypoint: str,
-    ) -> tuple | None:
-        """If the bundler submitted the bundle holding this userop, the
-        registry has the tx hash. Pull the receipt (often cache-hot), find
-        the UserOperationEvent for ``user_operation_hash`` in its logs,
-        and synthesize the same tuple ``get_user_operation_event_log_info``
-        normally returns from eth_getLogs.
-
-        Returns ``None`` on any miss — caller falls back to eth_getLogs."""
-        tx_hash = get_bundle_tx_hash(user_operation_hash)
-        if tx_hash is None:
-            return None
-
-        receipt = await self.get_transaction_receipt(tx_hash)
-        if receipt is None:
-            return None
-
-        receipt_logs = receipt.get("logs")
-        if not isinstance(receipt_logs, list):
-            return None
-
-        entrypoint_lower = entrypoint.lower()
-        hash_lower = user_operation_hash.lower()
-        matching = None
-        for log in receipt_logs:
-            topics = log.get("topics") or []
-            if (
-                len(topics) >= 2
-                and topics[0] == USER_OPERATION_EVENT_DESCRIPTOR
-                and topics[1].lower() == hash_lower
-                and log.get("address", "").lower() == entrypoint_lower
-            ):
-                matching = log
-                break
-        if matching is None:
-            # Registered hash but the receipt has no event for it. Possible
-            # if the bundler's submit-time tx was replaced or the userop
-            # was bundled by a peer in a different tx. Fall back.
-            return None
-
-        # Inclusion confirmed via the stored hash — drop the registry
-        # entry so it can't linger and burn future receipt calls. Matters
-        # most under --disable_bundle_monitoring, where the monitor-driven
-        # eviction path never runs and the FIFO cap is the only backstop.
-        forget_bundle_tx_hash(user_operation_hash)
-        return _decode_user_operation_event_log_info([matching])
-
     async def get_transaction_receipt(
         self, transaction_hash: str
     ) -> dict | None:
-        cached = await transaction_receipts_cache.get(transaction_hash)
-        if cached is not None:
-            return cached
-
-        params = [transaction_hash]
-        # Same safety net as eth_getLogs: cap wall time and swallow every
-        # error mode (timeout, network error, non-standard response shape,
-        # RPC-level error after retries). A missed receipt is just a "not
-        # yet confirmed" signal to the caller; nothing here should bubble
-        # up and fail the RPC handler.
-        try:
-            res = await asyncio.wait_for(
-                send_rpc_request_to_eth_client(
-                    self.ethereum_node_urls, "eth_getTransactionReceipt",
-                    params, None, "result",
-                ),
-                timeout=ETH_RPC_LOOKUP_TIMEOUT_S,
-            )
-            # Same guard as get_transaction_by_hash: even with
-            # expected_key="result", the RPC layer can return a response
-            # whose error code short-circuits the retry (-32000, -32603,
-            # etc.) and leaves us with only "error". Surface that as a
-            # miss with a useful log line instead of a KeyError.
-            if "result" not in res:
-                if "error" in res:
-                    logging.error(
-                        "eth_getTransactionReceipt(%s) failed. error: %s",
-                        transaction_hash, str(res["error"]),
-                    )
-                else:
-                    logging.error(
-                        "eth_getTransactionReceipt(%s) failed. response: %s",
-                        transaction_hash, str(res),
-                    )
-                return None
-            transaction = res["result"]
-            if (  # pending or missing receipt — don't cache, let the caller retry
-                transaction is None or
-                transaction.get("blockNumber") is None or
-                transaction.get("transactionHash") is None or
-                transaction.get("transactionIndex") is None or
-                "blockHash" not in transaction
-            ):
-                return None
-
-            trimmed = {
-                field: transaction[field]
-                for field in TRANSACTION_RECEIPT_CACHED_FIELDS
-                if field in transaction
-            }
-            transaction_receipts_cache.set(transaction_hash, trimmed)
-            return trimmed
-        except asyncio.TimeoutError:
-            logging.error(
-                "eth_getTransactionReceipt(%s) timed out after %ss; "
-                "treating as miss",
-                transaction_hash, ETH_RPC_LOOKUP_TIMEOUT_S,
-            )
-            return None
-        except Exception:
-            logging.error(
-                "eth_getTransactionReceipt(%s) failed; treating as miss",
-                transaction_hash, exc_info=True,
-            )
-            return None
+        return await fetch_transaction_receipt(
+            self.ethereum_node_urls, transaction_hash,
+        )
 
     async def get_user_operation_logs(
         self,
@@ -506,6 +386,81 @@ class UserOperationHandler(ABC):
             return user_operation_by_hash_json
         else:
             return None
+
+
+async def fetch_transaction_receipt(
+    ethereum_node_urls: list[str], transaction_hash: str,
+) -> dict | None:
+    """Receipt fetcher decoupled from any handler instance so the
+    centralized fast path inside ``get_user_operation_logs_for_block_range``
+    can reuse it without holding a handler reference.
+
+    Same safety net as eth_getLogs: cap wall time and swallow every error
+    mode (timeout, network error, non-standard response shape, RPC-level
+    error after retries). A missed receipt is just a "not yet confirmed"
+    signal to the caller; nothing here should bubble up and fail the RPC
+    handler."""
+    cached = await transaction_receipts_cache.get(transaction_hash)
+    if cached is not None:
+        return cached
+
+    params = [transaction_hash]
+    try:
+        res = await asyncio.wait_for(
+            send_rpc_request_to_eth_client(
+                ethereum_node_urls, "eth_getTransactionReceipt",
+                params, None, "result",
+            ),
+            timeout=ETH_RPC_LOOKUP_TIMEOUT_S,
+        )
+        # Same guard as get_transaction_by_hash: even with
+        # expected_key="result", the RPC layer can return a response
+        # whose error code short-circuits the retry (-32000, -32603, etc.)
+        # and leaves us with only "error". Surface that as a miss with a
+        # useful log line instead of a KeyError.
+        if "result" not in res:
+            if "error" in res:
+                logging.error(
+                    "eth_getTransactionReceipt(%s) failed. error: %s",
+                    transaction_hash, str(res["error"]),
+                )
+            else:
+                logging.error(
+                    "eth_getTransactionReceipt(%s) failed. response: %s",
+                    transaction_hash, str(res),
+                )
+            return None
+        transaction = res["result"]
+        # pending or missing receipt — don't cache, let the caller retry
+        if (
+            transaction is None or
+            transaction.get("blockNumber") is None or
+            transaction.get("transactionHash") is None or
+            transaction.get("transactionIndex") is None or
+            "blockHash" not in transaction
+        ):
+            return None
+
+        trimmed = {
+            field: transaction[field]
+            for field in TRANSACTION_RECEIPT_CACHED_FIELDS
+            if field in transaction
+        }
+        transaction_receipts_cache.set(transaction_hash, trimmed)
+        return trimmed
+    except asyncio.TimeoutError:
+        logging.error(
+            "eth_getTransactionReceipt(%s) timed out after %ss; "
+            "treating as miss",
+            transaction_hash, ETH_RPC_LOOKUP_TIMEOUT_S,
+        )
+        return None
+    except Exception:
+        logging.error(
+            "eth_getTransactionReceipt(%s) failed; treating as miss",
+            transaction_hash, exc_info=True,
+        )
+        return None
 
 
 def _find_handle_ops_input_in_trace(
@@ -709,6 +664,20 @@ def get_bundle_tx_hash(user_operation_hash: str) -> str | None:
     return _bundle_tx_hash_registry.get(user_operation_hash)
 
 
+# When True, the receipt fast path in
+# ``get_user_operation_logs_for_block_range`` is skipped and every
+# lookup goes straight to eth_getLogs. ExecutionEndpoint flips this at
+# startup from the CLI flag — set as module state (not a handler attr)
+# so the central gate inside the free function can read it without a
+# handler reference. Same pattern as ``RECENT_SUBMISSION_FAST_PATH_S``.
+_DISABLE_RECEIPT_FAST_PATH: bool = False
+
+
+def set_receipt_fast_path_disabled(disabled: bool) -> None:
+    global _DISABLE_RECEIPT_FAST_PATH
+    _DISABLE_RECEIPT_FAST_PATH = disabled
+
+
 async def _eth_getLogs_once(
     ethereum_node_eth_get_logs_urls: list[str],
     user_operation_hash: str,
@@ -845,6 +814,72 @@ async def _fetch_latest_block_number(
         return None
 
 
+async def _try_logs_via_known_bundle_tx(
+    ethereum_node_urls: list[str],
+    user_operation_hash: str,
+    entrypoint: str,
+) -> list | None:
+    """Receipt-first probe for the central gate.
+
+    1. If the fast path is disabled or no tx hash is registered for
+       ``user_operation_hash``, returns ``None`` immediately so the
+       caller runs eth_getLogs.
+    2. Otherwise fetches the receipt for the registered hash. On any
+       failure (pending, malformed, RPC error), returns ``None``.
+    3. Scans the receipt's logs for every ``UserOperationEvent`` at
+       this entrypoint. Each matching log is cached under its own
+       ``entrypoint:userOpHash`` key and its registry entry is dropped,
+       so the next call for any of those userops hits
+       ``user_operation_logs_cache`` instantly — one receipt fetch
+       resolves a whole bundle.
+    4. Returns the queried userop's single-element log list, or
+       ``None`` if the registered tx didn't carry an event for it
+       (replacement tx / peer-bundled / unrelated)."""
+    if _DISABLE_RECEIPT_FAST_PATH:
+        return None
+
+    tx_hash = get_bundle_tx_hash(user_operation_hash)
+    if tx_hash is None:
+        return None
+
+    receipt = await fetch_transaction_receipt(ethereum_node_urls, tx_hash)
+    if receipt is None:
+        return None
+
+    receipt_logs = receipt.get("logs")
+    if not isinstance(receipt_logs, list):
+        return None
+
+    entrypoint_lower = entrypoint.lower()
+    queried_hash_lower = user_operation_hash.lower()
+    queried_result: list | None = None
+    for log in receipt_logs:
+        topics = log.get("topics") or []
+        if (
+            len(topics) < 2
+            or topics[0] != USER_OPERATION_EVENT_DESCRIPTOR
+            or log.get("address", "").lower() != entrypoint_lower
+        ):
+            continue
+        event_userop_hash = topics[1]
+        single = [log]
+        # Cache every event the receipt carries so peers in the same
+        # bundle hit the userop-logs cache on their next poll. Use the
+        # event's own userOpHash for the key (the receipt may have been
+        # fetched for userop A but also resolve B and C bundled with A).
+        user_operation_logs_cache.set(
+            f"{entrypoint_lower}:{event_userop_hash}", single,
+        )
+        # Drop the registry entry — once observed via receipt, future
+        # polls for this userop will hit user_operation_logs_cache and
+        # never need to re-fetch the receipt.
+        forget_bundle_tx_hash(event_userop_hash)
+        if event_userop_hash.lower() == queried_hash_lower:
+            queried_result = single
+
+    return queried_result
+
+
 async def get_user_operation_logs_for_block_range(
     ethereum_node_eth_get_logs_urls: list[str],
     user_operation_hash: str,
@@ -864,6 +899,21 @@ async def get_user_operation_logs_for_block_range(
         # entry so we don't keep serving stale data, then fall through to
         # the fresh eth_getLogs path below.
         user_operation_logs_cache.delete(cache_key)
+
+    # Receipt fast path: if this bundler submitted the bundle holding
+    # ``user_operation_hash``, it knows the tx hash and can pull the
+    # receipt directly — one round trip vs the eth_getLogs cascade
+    # below. A receipt typically carries events for EVERY userop in the
+    # bundle, so we opportunistically prime ``user_operation_logs_cache``
+    # for the other userops too (and drop their registry entries), turning
+    # a single receipt fetch into N resolved lookups. Falls through
+    # silently on any miss so the eth_getLogs path stays a clean fallback.
+    fast_path_result = await _try_logs_via_known_bundle_tx(
+        ethereum_node_eth_get_logs_urls,
+        user_operation_hash, entrypoint,
+    )
+    if fast_path_result is not None:
+        return fast_path_result
 
     # If the caller asked for the whole chain, first probe the last
     # ``earliest_fallback_recent_window`` blocks — that covers the

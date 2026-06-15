@@ -18,11 +18,10 @@ from voltaire_bundler.mempool.mempool_manager_v8 import LocalMempoolManagerV8
 from voltaire_bundler.mempool.mempool_manager_v9 import LocalMempoolManagerV9
 from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.user_operation_handler import \
-        USER_OPERATION_EVENT_DESCRIPTOR, UserOperationHandler, \
-        decode_failed_op_event, decode_failed_op_with_revert_event, \
-        forget_bundle_tx_hash, get_deposit_info, \
-        get_transaction_by_hash, get_user_operation_logs_for_block_range, \
-        record_bundle_tx_hash
+        UserOperationHandler, decode_failed_op_event, \
+        decode_failed_op_with_revert_event, forget_bundle_tx_hash, \
+        get_deposit_info, get_transaction_by_hash, \
+        get_user_operation_logs_for_block_range, record_bundle_tx_hash
 from voltaire_bundler.user_operation.user_operation_v6 import UserOperationV6
 from voltaire_bundler.user_operation.user_operation_v7v8v9 import UserOperationV7V8V9
 
@@ -620,98 +619,28 @@ class BundlerManager:
             entrypoint: str,
             local_mempool: LocalMempoolManagerV6 | LocalMempoolManagerV7 | LocalMempoolManagerV8
     ) -> None:
-        op_hashes = list(user_operations_to_monitor.keys())
-        ops = list(user_operations_to_monitor.values())
-        handler = local_mempool.user_operation_handler
-
-        # Fast path: this bundler submitted the bundle for every op in
-        # ``user_operations_to_monitor``, so each op carries the tx hash
-        # it was bundled into. Userops in the same bundle share that
-        # hash, so one eth_getTransactionReceipt resolves every op from
-        # that bundle. Falls back to the eth_getLogs cascade for any op
-        # the receipt can't confirm (pending receipt, replaced tx,
-        # peer-bundled tx).
-        fast_path_hits: list[str | None] = [None] * len(ops)
-        indices_needing_logs: list[int] = []
-
-        if not handler.disable_receipt_fast_path:
-            tx_to_indices: dict[str, list[int]] = {}
-            for idx, op in enumerate(ops):
-                tx = op.attempted_bundle_transaction_hash
-                if tx is None:
-                    indices_needing_logs.append(idx)
-                    continue
-                tx_to_indices.setdefault(tx, []).append(idx)
-
-            if tx_to_indices:
-                receipt_results = await asyncio.gather(*(
-                    handler.get_transaction_receipt(tx)
-                    for tx in tx_to_indices
-                ))
-                entrypoint_lower = entrypoint.lower()
-                for tx, receipt in zip(tx_to_indices, receipt_results):
-                    indices = tx_to_indices[tx]
-                    receipt_logs = (
-                        receipt.get("logs")
-                        if receipt is not None else None
-                    )
-                    if not isinstance(receipt_logs, list):
-                        # Pending receipt or malformed payload — fall
-                        # back to eth_getLogs for every op in this bundle.
-                        indices_needing_logs.extend(indices)
-                        continue
-                    included_hashes: set[str] = set()
-                    for log in receipt_logs:
-                        topics = log.get("topics") or []
-                        if (
-                            len(topics) >= 2
-                            and topics[0] == USER_OPERATION_EVENT_DESCRIPTOR
-                            and log.get("address", "").lower()
-                            == entrypoint_lower
-                        ):
-                            included_hashes.add(topics[1].lower())
-                    for idx in indices:
-                        if op_hashes[idx].lower() in included_hashes:
-                            fast_path_hits[idx] = tx
-                        else:
-                            # Bundle tx exists but doesn't carry an event
-                            # for this userop (replacement / peer bundle).
-                            indices_needing_logs.append(idx)
-        else:
-            indices_needing_logs = list(range(len(ops)))
-
-        logs_fallback: dict[int, list | None] = {}
-        if indices_needing_logs:
-            coros = []
-            for idx in indices_needing_logs:
-                op = ops[idx]
-                assert op.validated_at_block_hex is not None
-                coros.append(get_user_operation_logs_for_block_range(
-                    # not using the ethereum_node_eth_get_logs_urls as the
-                    # block range can't be large and to role out the possibility
-                    # that the logs node is slightly behind/out of sync
-                    self.ethereum_node_urls,
-                    op_hashes[idx],
-                    entrypoint,
-                    op.validated_at_block_hex,
-                    "latest",
-                ))
-            results = await asyncio.gather(*coros)
-            for idx, res in zip(indices_needing_logs, results):
-                logs_fallback[idx] = res
-
-        user_operations_logs: list = []
-        for idx in range(len(ops)):
-            if fast_path_hits[idx] is not None:
-                # Synthesize the single-element log-list shape the
-                # downstream loop expects. Only ``transactionHash`` is
-                # consumed by the warmup code below; other fields are
-                # left out intentionally.
-                user_operations_logs.append(
-                    [{"transactionHash": fast_path_hits[idx]}],
-                )
-            else:
-                user_operations_logs.append(logs_fallback.get(idx))
+        # ``get_user_operation_logs_for_block_range`` short-circuits to
+        # eth_getTransactionReceipt when this bundler submitted the
+        # bundle holding the userop, so a 10-op bundle resolves with one
+        # receipt call (the other 9 hit the receipt cache) instead of 10
+        # eth_getLogs round trips. See the receipt fast path inside that
+        # function for details. Falls back to eth_getLogs on every miss.
+        logs_res_ops = []
+        for user_operation_hash, user_operation in user_operations_to_monitor.items():
+            assert user_operation.validated_at_block_hex is not None
+            earliest_block = user_operation.validated_at_block_hex
+            logs_res_op = get_user_operation_logs_for_block_range(
+                # not using the ethereum_node_eth_get_logs_urls as the
+                # block range can't be large and to role out the possibility
+                # that the logs node is slightly behind/out of sync
+                self.ethereum_node_urls,
+                user_operation_hash,
+                entrypoint,
+                earliest_block,
+                "latest"
+            )
+            logs_res_ops.append(logs_res_op)
+        user_operations_logs = await asyncio.gather(*logs_res_ops)
 
         user_operations_hashes_to_remove_from_monitoring = []
         # Multiple userops in one bundle share the inclusion tx hash, so
@@ -1084,37 +1013,10 @@ class BundlerManager:
             raise ValueError(
                 "useroperation without validated_at_block_hex")
 
-        # Fast path: if a prior bundle for this userop got sent, we
-        # have the tx hash. A receipt with the matching UserOperationEvent
-        # means the op already executed — same answer as eth_getLogs,
-        # one round trip. Rare in practice (gas-estimation-failure ops
-        # usually never made it to send_raw_transaction), but cheap.
-        handler = mempool_manager.user_operation_handler
-        if (
-            not handler.disable_receipt_fast_path
-            and user_operation.attempted_bundle_transaction_hash is not None
-        ):
-            receipt = await handler.get_transaction_receipt(
-                user_operation.attempted_bundle_transaction_hash,
-            )
-            if receipt is not None and isinstance(receipt.get("logs"), list):
-                entrypoint_lower = entrypoint.lower()
-                hash_lower = user_operation.user_operation_hash.lower()
-                for log in receipt["logs"]:
-                    topics = log.get("topics") or []
-                    if (
-                        len(topics) >= 2
-                        and topics[0] == USER_OPERATION_EVENT_DESCRIPTOR
-                        and topics[1].lower() == hash_lower
-                        and log.get("address", "").lower()
-                        == entrypoint_lower
-                    ):
-                        logging.warning(
-                            "Not banning a useroperation that was already included."
-                            f"useroperation: {user_operation.user_operation_hash}"
-                        )
-                        return
-
+        # The receipt fast path inside
+        # ``get_user_operation_logs_for_block_range`` already short-
+        # circuits to eth_getTransactionReceipt when this bundler holds
+        # a tx hash for the userop, so no extra branch is needed here.
         logs_res = await get_user_operation_logs_for_block_range(
             # not using the ethereum_node_eth_get_logs_urls as the
             # block range can't be large and to role out the possibility
