@@ -225,6 +225,7 @@ class ExecutionEndpoint(Endpoint):
         enable_banning: bool,
         logs_fallback_recent_window: int,
         recent_submission_fast_path_window: float,
+        disable_bundle_monitoring: bool,
     ):
         super().__init__("bundler_endpoint")
         # Resize the receipt / byHash fast-path window to the operator's
@@ -360,6 +361,7 @@ class ExecutionEndpoint(Endpoint):
             max_fee_per_gas_percentage_multiplier,
             max_priority_fee_per_gas_percentage_multiplier,
             bundle_gas_estimation_multiplier,
+            disable_bundle_monitoring,
         )
         self.peer_ids_to_cursor = dict()
         self.peer_ids_to_user_ops_hashes_queue = dict()

@@ -106,7 +106,9 @@ class BundlerManager:
         max_fee_per_gas_percentage_multiplier: int,
         max_priority_fee_per_gas_percentage_multiplier: int,
         bundle_gas_estimation_multiplier: float,
+        disable_bundle_monitoring: bool,
     ):
+        self.disable_bundle_monitoring = disable_bundle_monitoring
         self.local_mempool_manager_v6 = local_mempool_manager_v6
         self.local_mempool_manager_v7 = local_mempool_manager_v7
         self.local_mempool_manager_v8 = local_mempool_manager_v8
@@ -221,22 +223,17 @@ class BundlerManager:
         await asyncio.gather(*useroperation_banning_ops)
 
     async def update_send_queue_and_monitor_queue(self) -> None:
-        tasks_arr = [
-            self.remove_included_and_readd_to_mempool_userops_monitoring(
-                self.user_operations_to_monitor_v9,
-                self.local_mempool_manager_v9.entrypoint,
-                self.local_mempool_manager_v9
-            ),
-            self.remove_included_and_readd_to_mempool_userops_monitoring(
-                self.user_operations_to_monitor_v8,
-                self.local_mempool_manager_v8.entrypoint,
-                self.local_mempool_manager_v8
-            ),
-            self.remove_included_and_readd_to_mempool_userops_monitoring(
-                self.user_operations_to_monitor_v7,
-                self.local_mempool_manager_v7.entrypoint,
-                self.local_mempool_manager_v7
-            ),
+        # Two independent pipelines run here concurrently:
+        #   1. bundle prep — pull the next batch from each mempool
+        #   2. monitor sweep — check previously-bundled ops for inclusion
+        #      and re-add any that dropped from the chain mempool
+        # They share no state until prep results are committed below, so
+        # we can keep the bundle-prep indices stable (still 0..3) by
+        # splitting the two into separate ``gather`` calls instead of
+        # one mixed list. That keeps the monitor side cleanly behind
+        # ``disable_bundle_monitoring`` without re-indexing prep results
+        # depending on whether v6 is enabled.
+        bundle_prep_arr = [
             self.local_mempool_manager_v9.get_user_operations_to_bundle(
                 self.conditional_rpc is not None
             ),
@@ -245,40 +242,70 @@ class BundlerManager:
             ),
             self.local_mempool_manager_v7.get_user_operations_to_bundle(
                 self.conditional_rpc is not None
-            )
+            ),
         ]
-        if self.local_mempool_manager_v6 is not None:
-            tasks_arr += [
+        monitor_arr = []
+        if not self.disable_bundle_monitoring:
+            monitor_arr = [
                 self.remove_included_and_readd_to_mempool_userops_monitoring(
-                    self.user_operations_to_monitor_v6,
-                    self.local_mempool_manager_v6.entrypoint,
-                    self.local_mempool_manager_v6
+                    self.user_operations_to_monitor_v9,
+                    self.local_mempool_manager_v9.entrypoint,
+                    self.local_mempool_manager_v9
                 ),
-                self.local_mempool_manager_v6.get_user_operations_to_bundle(
-                    self.conditional_rpc is not None
+                self.remove_included_and_readd_to_mempool_userops_monitoring(
+                    self.user_operations_to_monitor_v8,
+                    self.local_mempool_manager_v8.entrypoint,
+                    self.local_mempool_manager_v8
+                ),
+                self.remove_included_and_readd_to_mempool_userops_monitoring(
+                    self.user_operations_to_monitor_v7,
+                    self.local_mempool_manager_v7.entrypoint,
+                    self.local_mempool_manager_v7
                 ),
             ]
-        tasks = await asyncio.gather(*tasks_arr)
+        if self.local_mempool_manager_v6 is not None:
+            bundle_prep_arr.append(
+                self.local_mempool_manager_v6.get_user_operations_to_bundle(
+                    self.conditional_rpc is not None
+                )
+            )
+            if not self.disable_bundle_monitoring:
+                monitor_arr.append(
+                    self.remove_included_and_readd_to_mempool_userops_monitoring(
+                        self.user_operations_to_monitor_v6,
+                        self.local_mempool_manager_v6.entrypoint,
+                        self.local_mempool_manager_v6
+                    )
+                )
 
-        user_operations_to_bundle_v9 = cast(dict[str, UserOperationV7V8V9], tasks[3])
+        bundle_results, _ = await asyncio.gather(
+            asyncio.gather(*bundle_prep_arr),
+            asyncio.gather(*monitor_arr),
+        )
+
+        user_operations_to_bundle_v9 = cast(dict[str, UserOperationV7V8V9], bundle_results[0])
         self.bundles_to_send_v9.append(user_operations_to_bundle_v9)
-        self.user_operations_to_monitor_v9 |= copy.deepcopy(user_operations_to_bundle_v9)
+        if not self.disable_bundle_monitoring:
+            self.user_operations_to_monitor_v9 |= copy.deepcopy(user_operations_to_bundle_v9)
 
-        user_operations_to_bundle_v8 = cast(dict[str, UserOperationV7V8V9], tasks[4])
+        user_operations_to_bundle_v8 = cast(dict[str, UserOperationV7V8V9], bundle_results[1])
         self.bundles_to_send_v8.append(user_operations_to_bundle_v8)
-        self.user_operations_to_monitor_v8 |= copy.deepcopy(user_operations_to_bundle_v8)
+        if not self.disable_bundle_monitoring:
+            self.user_operations_to_monitor_v8 |= copy.deepcopy(user_operations_to_bundle_v8)
 
-        user_operations_to_bundle_v7 = cast(dict[str, UserOperationV7V8V9], tasks[5])
+        user_operations_to_bundle_v7 = cast(dict[str, UserOperationV7V8V9], bundle_results[2])
         self.bundles_to_send_v7.append(user_operations_to_bundle_v7)
-        self.user_operations_to_monitor_v7 |= copy.deepcopy(user_operations_to_bundle_v7)
+        if not self.disable_bundle_monitoring:
+            self.user_operations_to_monitor_v7 |= copy.deepcopy(user_operations_to_bundle_v7)
 
         if self.local_mempool_manager_v6 is not None:
             if self.bundles_to_send_v6 is None:
                 self.bundles_to_send_v6 = []
-            user_operations_to_bundle_v6 = cast(dict[str, UserOperationV6], tasks[7])
+            user_operations_to_bundle_v6 = cast(dict[str, UserOperationV6], bundle_results[3])
             self.bundles_to_send_v6.append(user_operations_to_bundle_v6)
-            self.user_operations_to_monitor_v6 |= copy.deepcopy(
-                user_operations_to_bundle_v6)
+            if not self.disable_bundle_monitoring:
+                self.user_operations_to_monitor_v6 |= copy.deepcopy(
+                    user_operations_to_bundle_v6)
 
     def _secret_for_mempool(
         self,

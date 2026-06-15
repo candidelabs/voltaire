@@ -115,6 +115,13 @@ class InitData:
     # so the chain RPC fan-out is a guaranteed waste. Tune to the
     # operator's bundle cadence + block time. Defaults to 1.0.
     recent_submission_fast_path_window: float
+    # When True, skip the post-bundle monitoring loop: bundled userops
+    # are not tracked for inclusion, not re-added to the mempool when a
+    # bundle drops, and getUserOperationByHash will not surface the
+    # "in-flight after eviction" form. Trade-off for high-volume
+    # bundlers where clients re-submit on their own and the extra
+    # eth_getLogs per monitor cycle is not worth it.
+    disable_bundle_monitoring: bool
 
 
 def address(ep: str):
@@ -465,6 +472,27 @@ def initialize_argument_parser() -> ArgumentParser:
         nargs="?",
         const=True,
         default=_get_env_or_default("VOLTAIRE_DISABLE_V6", False, lambda v: v.lower() == "true"),
+    )
+
+    parser.add_argument(
+        "--disable_bundle_monitoring",
+        type=str_to_bool,
+        help=(
+            "Disable the post-bundle monitoring loop. Bundled userops "
+            "are not tracked for inclusion, are not re-added to the "
+            "mempool when a bundle is dropped, and "
+            "eth_getUserOperationByHash will not surface the "
+            "\"in-flight\" form for ops between mempool eviction and "
+            "chain inclusion. Off by default; turn on for high-volume "
+            "bundlers where clients re-submit on their own and the "
+            "extra eth_getLogs per monitor cycle is wasted load."
+        ),
+        nargs="?",
+        const=True,
+        default=_get_env_or_default(
+            "VOLTAIRE_DISABLE_BUNDLE_MONITORING", False,
+            lambda v: v.lower() == "true",
+        ),
     )
 
     parser.add_argument(
@@ -1165,6 +1193,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.enable_banning,
         args.logs_fallback_recent_window,
         args.recent_submission_fast_path_window,
+        args.disable_bundle_monitoring,
     )
 
     if args.verbose:
