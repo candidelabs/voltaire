@@ -130,6 +130,19 @@ async def send_rpc_request_to_eth_client(
                     err_message = json_result["error"]["message"]
                 else:
                     err_message = ""
+                # eth_getLogs may hit a node that has pruned the
+                # requested block range (never coming back) or hasn't
+                # synced it yet (might come back, but not within our
+                # 2 s outer wait_for cap). Either way, the default
+                # 60 × 1 s retry loop just pins this coroutine for no
+                # gain. Return the error response so the caller treats
+                # it as a miss and either probes a different range or
+                # lets the client re-poll later from a fresh request.
+                if (
+                    method == "eth_getLogs"
+                    and "missing block data" in err_message.lower()
+                ):
+                    return json_result
                 if (
                     "code" in json_result["error"] and
                     json_result["error"]["code"] != 3 and
