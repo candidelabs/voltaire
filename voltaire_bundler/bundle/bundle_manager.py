@@ -19,8 +19,9 @@ from voltaire_bundler.mempool.mempool_manager_v9 import LocalMempoolManagerV9
 from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.user_operation_handler import \
         UserOperationHandler, decode_failed_op_event, \
-        decode_failed_op_with_revert_event, get_deposit_info, \
-        get_transaction_by_hash, get_user_operation_logs_for_block_range
+        decode_failed_op_with_revert_event, forget_bundle_tx_hash, \
+        get_deposit_info, get_transaction_by_hash, \
+        get_user_operation_logs_for_block_range, record_bundle_tx_hash
 from voltaire_bundler.user_operation.user_operation_v6 import UserOperationV6
 from voltaire_bundler.user_operation.user_operation_v7v8v9 import UserOperationV7V8V9
 
@@ -698,6 +699,12 @@ class BundlerManager:
                     )
         for user_operation_hash in user_operations_hashes_to_remove_from_monitoring:
             del user_operations_to_monitor[user_operation_hash]
+            # Mirror the registry to the monitor lifecycle: drop the
+            # known-tx-hash mapping the same moment the userop leaves
+            # monitoring (inclusion observed, max-attempts trip, or
+            # re-add to the mempool, which will register a fresh hash
+            # on the next bundle).
+            forget_bundle_tx_hash(user_operation_hash)
 
     def update_monitor_status_transation_hash(
         self,
@@ -706,6 +713,10 @@ class BundlerManager:
     ) -> None:
         for user_operation in user_operations:
             user_operation_hash = user_operation.user_operation_hash
+            # Always register, even when --disable_bundle_monitoring is on
+            # (the monitor dicts stay empty in that mode, but the receipt
+            # fast path still gets to use the known tx hash).
+            record_bundle_tx_hash(user_operation_hash, transaction_hash)
             if user_operation_hash in self.user_operations_to_monitor_v9:
                 user_operation_to_monitor = self.user_operations_to_monitor_v9[
                     user_operation_hash
@@ -726,7 +737,7 @@ class BundlerManager:
                     user_operation_hash
                 ]
                 user_operation_to_monitor.attempted_bundle_transaction_hash = transaction_hash
-            else:
+            elif not self.disable_bundle_monitoring:
                 logging.error(
                     f"can't find user operation hash: {user_operation_hash} in "
                     "monitoring list"

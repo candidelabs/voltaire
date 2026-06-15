@@ -152,6 +152,7 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
                 init_data.logs_fallback_recent_window,
                 init_data.recent_submission_fast_path_window,
                 init_data.disable_bundle_monitoring,
+                init_data.disable_receipt_fast_path,
             )
             task_group.create_task(execution_endpoint.start_execution_endpoint())
 

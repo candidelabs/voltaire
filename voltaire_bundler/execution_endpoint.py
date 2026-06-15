@@ -226,6 +226,7 @@ class ExecutionEndpoint(Endpoint):
         logs_fallback_recent_window: int,
         recent_submission_fast_path_window: float,
         disable_bundle_monitoring: bool,
+        disable_receipt_fast_path: bool,
     ):
         super().__init__("bundler_endpoint")
         # Resize the receipt / byHash fast-path window to the operator's
@@ -259,6 +260,7 @@ class ExecutionEndpoint(Endpoint):
             logs_incremental_range,
             logs_number_of_ranges,
             logs_fallback_recent_window,
+            disable_receipt_fast_path,
         )
 
         self.local_mempool_manager_v9 = LocalMempoolManagerV9(
@@ -327,6 +329,7 @@ class ExecutionEndpoint(Endpoint):
                 logs_incremental_range,
                 logs_number_of_ranges,
                 logs_fallback_recent_window,
+                disable_receipt_fast_path,
             )
 
             self.local_mempool_manager_v6 = LocalMempoolManagerV6(

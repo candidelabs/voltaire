@@ -122,6 +122,12 @@ class InitData:
     # bundlers where clients re-submit on their own and the extra
     # eth_getLogs per monitor cycle is not worth it.
     disable_bundle_monitoring: bool
+    # When True, skip the eth_getTransactionReceipt fast path in
+    # eth_getUserOperationReceipt that uses the bundler's recorded
+    # submit-time tx hash. The full eth_getLogs cascade is used instead.
+    # Off by default; turn on if a node returns malformed receipts or
+    # the recorded tx hash race becomes a problem.
+    disable_receipt_fast_path: bool
 
 
 def address(ep: str):
@@ -472,6 +478,25 @@ def initialize_argument_parser() -> ArgumentParser:
         nargs="?",
         const=True,
         default=_get_env_or_default("VOLTAIRE_DISABLE_V6", False, lambda v: v.lower() == "true"),
+    )
+
+    parser.add_argument(
+        "--disable_receipt_fast_path",
+        type=str_to_bool,
+        help=(
+            "Disable the eth_getTransactionReceipt fast path in "
+            "eth_getUserOperationReceipt. When the bundler submitted "
+            "the bundle itself, it knows the tx hash and can read the "
+            "receipt directly — 1 RPC round trip instead of the "
+            "eth_getLogs + eth_getTransactionReceipt cascade. Disabling "
+            "forces the full cascade. Off by default."
+        ),
+        nargs="?",
+        const=True,
+        default=_get_env_or_default(
+            "VOLTAIRE_DISABLE_RECEIPT_FAST_PATH", False,
+            lambda v: v.lower() == "true",
+        ),
     )
 
     parser.add_argument(
@@ -1194,6 +1219,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.logs_fallback_recent_window,
         args.recent_submission_fast_path_window,
         args.disable_bundle_monitoring,
+        args.disable_receipt_fast_path,
     )
 
     if args.verbose:

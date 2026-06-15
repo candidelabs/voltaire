@@ -29,6 +29,7 @@ class UserOperationHandler(ABC):
     logs_incremental_range: int
     logs_number_of_ranges: int
     logs_fallback_recent_window: int
+    disable_receipt_fast_path: bool
 
     async def _find_handle_ops_calldata(
         self,
@@ -266,6 +267,19 @@ class UserOperationHandler(ABC):
         entrypoint: str,
         validated_at_block_hex: str | None
     ) -> tuple | None:
+        # Fast path: when this bundler sent the bundle, we already know the
+        # tx hash. Reading the receipt directly and scanning its logs for
+        # the matching UserOperationEvent skips the eth_getLogs round trip
+        # entirely. Falls through silently on any miss (no stored hash,
+        # receipt not yet ready, wrong tx, event not in receipt logs) so
+        # the eth_getLogs cascade still runs.
+        if not self.disable_receipt_fast_path:
+            fast = await self._try_event_log_info_via_known_tx(
+                user_operation_hash, entrypoint,
+            )
+            if fast is not None:
+                return fast
+
         logs: Any = await self.get_user_operation_logs(
             user_operation_hash,
             entrypoint,
@@ -275,45 +289,55 @@ class UserOperationHandler(ABC):
         )
         if logs is None:
             return None
-        log = logs[0]
+        return _decode_user_operation_event_log_info(logs)
 
-        log_object = Log(
-            removed=log.get("removed", False),
-            logIndex=log["logIndex"],
-            transactionIndex=log["transactionIndex"],
-            transactionHash=log["transactionHash"],
-            blockHash=log["blockHash"],
-            blockNumber=log["blockNumber"],
-            address=log["address"],
-            data=log["data"],
-            topics=log["topics"],
-        )
+    async def _try_event_log_info_via_known_tx(
+        self, user_operation_hash: str, entrypoint: str,
+    ) -> tuple | None:
+        """If the bundler submitted the bundle holding this userop, the
+        registry has the tx hash. Pull the receipt (often cache-hot), find
+        the UserOperationEvent for ``user_operation_hash`` in its logs,
+        and synthesize the same tuple ``get_user_operation_event_log_info``
+        normally returns from eth_getLogs.
 
-        topics = log["topics"]
-        data = log["data"]
+        Returns ``None`` on any miss — caller falls back to eth_getLogs."""
+        tx_hash = get_bundle_tx_hash(user_operation_hash)
+        if tx_hash is None:
+            return None
 
-        userOpHash = topics[1]
-        sender = decode(["address"], bytes.fromhex(topics[2][2:]))[0]
-        paymaster = decode(["address"], bytes.fromhex(topics[3][2:]))[0]
+        receipt = await self.get_transaction_receipt(tx_hash)
+        if receipt is None:
+            return None
 
-        data_abi = ["uint256", "bool", "uint256", "uint256"]
-        decode_result = decode(data_abi, bytes.fromhex(data[2:]))
-        nonce = decode_result[0]
-        success = decode_result[1]
-        actualGasCost = hex(decode_result[2])
-        actualGasUsed = hex(decode_result[3])
+        receipt_logs = receipt.get("logs")
+        if not isinstance(receipt_logs, list):
+            return None
 
-        return (
-            log_object,
-            userOpHash,
-            sender,
-            paymaster,
-            nonce,
-            success,
-            actualGasCost,
-            actualGasUsed,
-            logs,
-        )
+        entrypoint_lower = entrypoint.lower()
+        hash_lower = user_operation_hash.lower()
+        matching = None
+        for log in receipt_logs:
+            topics = log.get("topics") or []
+            if (
+                len(topics) >= 2
+                and topics[0] == USER_OPERATION_EVENT_DESCRIPTOR
+                and topics[1].lower() == hash_lower
+                and log.get("address", "").lower() == entrypoint_lower
+            ):
+                matching = log
+                break
+        if matching is None:
+            # Registered hash but the receipt has no event for it. Possible
+            # if the bundler's submit-time tx was replaced or the userop
+            # was bundled by a peer in a different tx. Fall back.
+            return None
+
+        # Inclusion confirmed via the stored hash — drop the registry
+        # entry so it can't linger and burn future receipt calls. Matters
+        # most under --disable_bundle_monitoring, where the monitor-driven
+        # eviction path never runs and the FIFO cap is the only backstop.
+        forget_bundle_tx_hash(user_operation_hash)
+        return _decode_user_operation_event_log_info([matching])
 
     async def get_transaction_receipt(
         self, transaction_hash: str
@@ -598,6 +622,91 @@ def del_user_operation_logs_cache_entry(
 USER_OPERATION_EVENT_DESCRIPTOR = (
     "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
 )
+
+
+def _decode_user_operation_event_log_info(logs: list) -> tuple:
+    """Decode the first UserOperationEvent in ``logs`` into the tuple
+    shape callers of ``get_user_operation_event_log_info`` expect.
+
+    Factored out so both the eth_getLogs path and the receipt fast path
+    can share the same decode."""
+    log = logs[0]
+
+    log_object = Log(
+        removed=log.get("removed", False),
+        logIndex=log["logIndex"],
+        transactionIndex=log["transactionIndex"],
+        transactionHash=log["transactionHash"],
+        blockHash=log["blockHash"],
+        blockNumber=log["blockNumber"],
+        address=log["address"],
+        data=log["data"],
+        topics=log["topics"],
+    )
+
+    topics = log["topics"]
+    data = log["data"]
+
+    userOpHash = topics[1]
+    sender = decode(["address"], bytes.fromhex(topics[2][2:]))[0]
+    paymaster = decode(["address"], bytes.fromhex(topics[3][2:]))[0]
+
+    data_abi = ["uint256", "bool", "uint256", "uint256"]
+    decode_result = decode(data_abi, bytes.fromhex(data[2:]))
+    nonce = decode_result[0]
+    success = decode_result[1]
+    actualGasCost = hex(decode_result[2])
+    actualGasUsed = hex(decode_result[3])
+
+    return (
+        log_object,
+        userOpHash,
+        sender,
+        paymaster,
+        nonce,
+        success,
+        actualGasCost,
+        actualGasUsed,
+        logs,
+    )
+
+
+# Submit-time userOpHash → bundle tx hash registry, populated by the
+# bundle manager the moment eth_sendRawTransaction returns. Lets the
+# receipt RPC handler call eth_getTransactionReceipt directly instead
+# of paying an eth_getLogs round trip first. Bounded FIFO — the natural
+# lifetime is "submitted but not yet observed on-chain", so a single-
+# digit number of seconds; the cap exists purely as a leak backstop in
+# case the bundle_manager paths that ``forget_bundle_tx_hash`` drop a
+# call. Entries are forgotten the moment monitoring drops the userop
+# (inclusion observed, max-attempts trip, or re-add to mempool).
+_BUNDLE_TX_HASH_REGISTRY_MAX = 10_000
+_bundle_tx_hash_registry: dict[str, str] = {}
+
+
+def record_bundle_tx_hash(
+    user_operation_hash: str, transaction_hash: str,
+) -> None:
+    if (
+        user_operation_hash not in _bundle_tx_hash_registry
+        and len(_bundle_tx_hash_registry) >= _BUNDLE_TX_HASH_REGISTRY_MAX
+    ):
+        # FIFO cap: drop the oldest entry. dicts preserve insertion order
+        # in Py3.7+. Not LRU because every hit on this map is followed
+        # immediately by a ``forget``, so promote-on-read would never
+        # actually save anything.
+        _bundle_tx_hash_registry.pop(
+            next(iter(_bundle_tx_hash_registry)), None,
+        )
+    _bundle_tx_hash_registry[user_operation_hash] = transaction_hash
+
+
+def forget_bundle_tx_hash(user_operation_hash: str) -> None:
+    _bundle_tx_hash_registry.pop(user_operation_hash, None)
+
+
+def get_bundle_tx_hash(user_operation_hash: str) -> str | None:
+    return _bundle_tx_hash_registry.get(user_operation_hash)
 
 
 async def _eth_getLogs_once(
