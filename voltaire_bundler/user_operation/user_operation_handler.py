@@ -528,6 +528,24 @@ async def _eth_getLogs_once(
     (timeout, network error, non-standard response shape, RPC-level error
     after retries). Nothing here bubbles up — the caller decides whether to
     retry with a different range or fall through to "not found"."""
+    # Skip and treat as a miss when both bounds are numeric and from > to.
+    # This can happen when validated_at_block_hex came from a node slightly
+    # ahead of the logs node (multi-node mid-sync) and the loop emitted a
+    # range that's effectively in the future of the logs node — the node
+    # would just reject it with "fromBlock must be less than toBlock".
+    try:
+        from_int = int(from_block_hex, 16)
+        to_int = int(to_block_hex, 16)
+    except (ValueError, TypeError):
+        from_int = to_int = None
+    if from_int is not None and to_int is not None and from_int > to_int:
+        logging.warning(
+            "eth_getLogs from %s (%d) > to %s (%d); "
+            "skipping call and treating as miss",
+            from_block_hex, from_int, to_block_hex, to_int,
+        )
+        return None
+
     params = [
         {
             "address": entrypoint,
