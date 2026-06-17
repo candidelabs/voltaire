@@ -70,7 +70,7 @@ _SEEN_CACHE_ENTRYPOINTS = (
 # storm would otherwise generate.
 #
 # The 1.0 s default suits a typical mainnet configuration (bundle_interval
-# 2 s, 12 s block time). Operators on a fast L2 with sub-second bundle
+# 2000 ms, 12 s block time). Operators on a fast L2 with sub-second bundle
 # intervals may want to shrink this to reduce the stale "queued" window;
 # operators on chains with longer cadence may want to grow it to cover
 # more polls. Tune via the ``--recent_submission_fast_path_window``
@@ -204,7 +204,7 @@ class ExecutionEndpoint(Endpoint):
         is_legacy_mode: bool,
         conditional_rpc: ConditionalRpc | None,
         flashbots_protect_node_urls: list[str] | None,
-        bundle_interval: int,
+        bundle_interval_ms: int,
         max_fee_per_gas_percentage_multiplier: int,
         max_priority_fee_per_gas_percentage_multiplier: int,
         enforce_gas_price_tolerance: int,
@@ -376,14 +376,21 @@ class ExecutionEndpoint(Endpoint):
         self.disable_v6 = disable_v6
         self.is_eip7702 = is_eip7702
 
-        asyncio.ensure_future(self.execute_cron_job(is_debug, bundle_interval))
+        asyncio.ensure_future(
+            self.execute_cron_job(is_debug, bundle_interval_ms)
+        )
 
-    async def execute_cron_job(self, is_debug: bool, bundle_interval: int) -> None:
+    async def execute_cron_job(
+        self, is_debug: bool, bundle_interval_ms: int
+    ) -> None:
+        bundle_interval_seconds = bundle_interval_ms / 1000
         if not self.disable_p2p:
             heartbeat_counter = 0
             heartbeat_interval = 0.1  # decisecond
-            deciseconds_per_bundle = math.floor(
-                bundle_interval / heartbeat_interval
+            # Floor sub-heartbeat intervals to one heartbeat; max(1, ...) also
+            # guards against modulo-by-zero when the interval is 0 / sub-100ms.
+            deciseconds_per_bundle = max(
+                1, math.floor(bundle_interval_seconds / heartbeat_interval)
             )
 
             p2pClient: Client = Client("p2p_endpoint")
@@ -418,7 +425,7 @@ class ExecutionEndpoint(Endpoint):
                 except:
                     logging.error(traceback.format_exc())
 
-                await asyncio.sleep(bundle_interval)
+                await asyncio.sleep(bundle_interval_seconds)
 
     async def send_pooled_user_op_hashes_to_all_peers(self) -> None:
         pass
