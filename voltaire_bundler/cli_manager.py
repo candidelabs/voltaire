@@ -54,7 +54,7 @@ class InitData:
     is_legacy_mode: bool
     conditional_rpc: ConditionalRpc | None
     flashbots_protect_node_urls: list[str] | None
-    bundle_interval: int
+    bundle_interval_ms: int
     max_fee_per_gas_percentage_multiplier: int
     max_priority_fee_per_gas_percentage_multiplier: int
     is_metrics: bool
@@ -392,12 +392,12 @@ def initialize_argument_parser() -> ArgumentParser:
         "--bundle_interval",
         type=int,
         help=(
-            "set the bundle interval in seconds for the auto bundle mode - "
-            "set to zero for manual mode - defaults to 2 seconds"
+            "set the bundle interval in milliseconds for the auto bundle mode "
+            "- set to zero for manual mode - defaults to 2000 milliseconds"
         ),
         nargs="?",
-        const=1,
-        default=_get_env_or_default("VOLTAIRE_BUNDLE_INTERVAL", 2, int),
+        const=1000,
+        default=_get_env_or_default("VOLTAIRE_BUNDLE_INTERVAL", 2000, int),
     )
 
     parser.add_argument(
