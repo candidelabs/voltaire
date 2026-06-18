@@ -361,8 +361,21 @@ class UserOperationHandler(ABC):
             for earliest_block in range(earliest_block_number,
                                         latest_block_number + 1,
                                         logs_incremental_range):
-                latest_block = earliest_block + logs_incremental_range
-                if latest_block <= earliest_block:
+                # Clamp toBlock to the chain head. Without this, the final
+                # iteration requests earliest_block + logs_incremental_range,
+                # which overshoots latest_block_number by up to one full
+                # window — a toBlock that isn't on-chain yet. Tolerant nodes
+                # silently clamp it to head; stricter ones (and multi-node
+                # setups where the logs endpoint lags the head read) reject it
+                # with "missing block data", spamming errors and making
+                # eth_getUserOperationReceipt miss freshly included userops.
+                # eth_getLogs is inclusive on both ends, so a [head, head]
+                # window is a valid single-block query and loses no coverage.
+                latest_block = min(
+                    earliest_block + logs_incremental_range,
+                    latest_block_number,
+                )
+                if latest_block < earliest_block:
                     break
                 res = await get_user_operation_logs_for_block_range(
                     self.ethereum_node_eth_get_logs_urls,
