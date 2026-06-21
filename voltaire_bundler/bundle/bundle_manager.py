@@ -9,6 +9,7 @@ from eth_account import Account
 from eth_abi import encode
 
 from voltaire_bundler.cli_manager import ConditionalRpc
+from voltaire_bundler.gas.gas_price_cache import GasPriceCache
 from voltaire_bundler.user_operation.models import \
     FailedOp, FailedOpWithRevert
 from voltaire_bundler.bundle.exceptions import ExecutionException, ValidationException
@@ -89,6 +90,7 @@ class BundlerManager:
     gas_price_percentage_multiplier: int
     bundle_gas_estimation_multiplier: float
     entrypoint_v9_reentrant: str
+    gas_price_cache: GasPriceCache
 
     def __init__(
         self,
@@ -106,6 +108,7 @@ class BundlerManager:
         max_fee_per_gas_percentage_multiplier: int,
         max_priority_fee_per_gas_percentage_multiplier: int,
         bundle_gas_estimation_multiplier: float,
+        gas_price_cache: GasPriceCache,
     ):
         self.local_mempool_manager_v6 = local_mempool_manager_v6
         self.local_mempool_manager_v7 = local_mempool_manager_v7
@@ -141,6 +144,7 @@ class BundlerManager:
         self.user_operations_to_ban = {}
         self.bundle_gas_estimation_multiplier = bundle_gas_estimation_multiplier
         self.entrypoint_v9_reentrant = load_bytecode("EntryPointV9Reentrant.json")
+        self.gas_price_cache = gas_price_cache
 
     async def send_next_bundle(self) -> None:
         await self.update_send_queue_and_monitor_queue()
@@ -320,40 +324,32 @@ class BundlerManager:
             highest_verified_at_block
         )
 
-        block_max_fee_per_gas_op = send_rpc_request_to_eth_client(
-            self.ethereum_node_urls, "eth_gasPrice", None, None, "result"
-        )
-
         nonce_op = send_rpc_request_to_eth_client(
             self.ethereum_node_urls,
             "eth_getTransactionCount",
             [bundler_address, "latest"], None, "result"
         )
 
-        tasks_arr = [
-            call_data_and_call_gas_limit_op,
-            block_max_fee_per_gas_op,
-            nonce_op,
-        ]
-
-        # skip eth_maxPriorityFeePerGas in legacy mode and on HyperEVM
-        if not (
-            self.is_legacy_mode or
-            self.chain_id == 999 or self.chain_id == 998
-        ):
-            block_max_priority_fee_per_gas_op = send_rpc_request_to_eth_client(
-                self.ethereum_node_urls, "eth_maxPriorityFeePerGas",
-                None, None, "result"
-            )
-            tasks_arr.append(block_max_priority_fee_per_gas_op)
-
+        # Gas-price values come from the background-refreshed cache so each
+        # bundle round drops two RPCs (eth_gasPrice + eth_maxPriorityFeePerGas)
+        # off the upstream node. Snapshot is fetched in parallel with the
+        # bundle gas estimate + nonce so a stale-fallback refresh, if it
+        # happens, doesn't add wall-clock latency.
         try:
-            tasks = await asyncio.gather(*tasks_arr)
+            (
+                call_data_tuple,
+                nonce_result,
+                gas_price_snapshot,
+            ) = await asyncio.gather(
+                call_data_and_call_gas_limit_op,
+                nonce_op,
+                self.gas_price_cache.get_snapshot(),
+            )
         except ExecutionException as err:
             logging.error(f"Sending bundle failed with erro: {err.message}")
             return
 
-        call_data, gas_estimation_hex, merged_storage_map, auth_list = tasks[0]
+        call_data, gas_estimation_hex, merged_storage_map, auth_list = call_data_tuple
 
         if call_data is None or gas_estimation_hex is None:
             logging.debug(
@@ -369,10 +365,9 @@ class BundlerManager:
         )
         gas_estimation_hex = hex(gas_estimation_int)
 
-        block_max_fee_per_gas = tasks[1]["result"]
-        nonce = tasks[2]["result"]
+        nonce = nonce_result["result"]
 
-        block_max_fee_per_gas_dec = int(block_max_fee_per_gas, 16)
+        block_max_fee_per_gas_dec = gas_price_snapshot.max_fee_per_gas
         block_max_fee_per_gas_dec_mod = math.ceil(
             block_max_fee_per_gas_dec
             * (self.max_fee_per_gas_percentage_multiplier / 100)
@@ -381,14 +376,17 @@ class BundlerManager:
         block_max_fee_per_gas_hex = hex(block_max_fee_per_gas_dec_mod)
 
         block_max_priority_fee_per_gas_hex = "0x0"
-        # skip eth_maxPriorityFeePerGas in legacy mode and on HyperEVM
+        # skip eth_maxPriorityFeePerGas in legacy mode and on HyperEVM —
+        # the cache also skips fetching it in these cases, so the snapshot
+        # value is None.
         if not (
             self.is_legacy_mode or
             self.chain_id == 999 or self.chain_id == 998
         ):
-            block_max_priority_fee_per_gas = tasks[3]["result"]
-            block_max_priority_fee_per_gas_dec = int(
-                    block_max_priority_fee_per_gas, 16)
+            assert gas_price_snapshot.max_priority_fee_per_gas is not None
+            block_max_priority_fee_per_gas_dec = (
+                gas_price_snapshot.max_priority_fee_per_gas
+            )
             block_max_priority_fee_per_gas_dec_mod = math.ceil(
                 block_max_priority_fee_per_gas_dec
                 * (self.max_priority_fee_per_gas_percentage_multiplier / 100)

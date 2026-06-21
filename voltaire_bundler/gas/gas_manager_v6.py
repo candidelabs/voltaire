@@ -7,6 +7,7 @@ from eth_abi import decode, encode
 from voltaire_bundler.bundle.exceptions import ExecutionException, \
         ExecutionExceptionCode, ValidationException, ValidationExceptionCode
 from voltaire_bundler.gas.gas_manager import GasManager, calculate_deposit_slot_index, deep_union
+from voltaire_bundler.gas.gas_price_cache import GasPriceCache
 from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.models import FailedOp
 from voltaire_bundler.user_operation.user_operation_handler import \
@@ -39,6 +40,7 @@ class GasManagerV6(GasManager):
         is_legacy_mode,
         max_verification_gas,
         max_call_data_gas,
+        gas_price_cache: GasPriceCache,
     ):
         self.ethereum_node_urls = ethereum_node_urls
         self.chain_id = chain_id
@@ -47,6 +49,7 @@ class GasManagerV6(GasManager):
         self.estimate_gas_with_override_enabled = True
         self.max_verification_gas = max_verification_gas
         self.max_call_data_gas = max_call_data_gas
+        self.gas_price_cache = gas_price_cache
         self.entrypoint_code_override = load_bytecode(
             "EntryPointSimulationsV6WithBinarySearch.json")
 
