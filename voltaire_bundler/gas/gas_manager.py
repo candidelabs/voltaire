@@ -9,6 +9,7 @@ from eth_abi import encode, decode
 from eth_utils import keccak
 
 from voltaire_bundler.custom_types import Address
+from voltaire_bundler.gas.gas_price_cache import GasPriceCache
 from voltaire_bundler.user_operation.models import UserOperationType
 from voltaire_bundler.bundle.exceptions import \
     ValidationException, ValidationExceptionCode
@@ -25,35 +26,28 @@ class GasManager(ABC, Generic[UserOperationType]):
     max_verification_gas: int
     max_call_data_gas: int
     entrypoint_code_override: str
+    gas_price_cache: GasPriceCache
 
     async def verify_gas_fees_and_get_price(
         self, user_operation: UserOperationType,
         enforce_gas_price_tolerance: int
     ):
+        # When tolerance is 100% the validation below is a no-op; skip
+        # touching the cache (including its staleness-fallback fetch) so
+        # operators running with the gas check disabled never pay any RPC
+        # cost here.
+        if enforce_gas_price_tolerance >= 100:
+            return
+
         max_fee_per_gas = user_operation.max_fee_per_gas
         max_priority_fee_per_gas = user_operation.max_priority_fee_per_gas
 
-        block_max_fee_per_gas_op = send_rpc_request_to_eth_client(
-            self.ethereum_node_urls, "eth_gasPrice", None, None, "result"
-        )
-
-        tasks_arr = [block_max_fee_per_gas_op]
-
-        # skip eth_maxPriorityFeePerGas in legacy mode and on HyperEVM and Arbitrum
-        if not (
-            self.is_legacy_mode or
-            self.chain_id == 999 or self.chain_id == 998 or  # HyperEVM
-            self.chain_id == 42161 or self.chain_id == 421614  # Arbitrum
-        ):
-            block_max_priority_fee_per_gas_op = send_rpc_request_to_eth_client(
-                self.ethereum_node_urls, "eth_maxPriorityFeePerGas", None, None, "result"
-            )
-            tasks_arr.append(block_max_priority_fee_per_gas_op)
-
-        tasks: Any = await asyncio.gather(*tasks_arr)
-
-        block_max_fee_per_gas_hex = tasks[0]["result"]
-        block_max_fee_per_gas = int(block_max_fee_per_gas_hex, 16)
+        # Read the cached gas-price snapshot instead of issuing fresh
+        # eth_gasPrice / eth_maxPriorityFeePerGas calls per userop. The
+        # snapshot is refreshed by GasPriceCache.run() on a per-chain
+        # cadence (see gas_price_cache.py).
+        snapshot = await self.gas_price_cache.get_snapshot()
+        block_max_fee_per_gas = snapshot.max_fee_per_gas
         block_max_fee_per_gas_with_tolerance = math.ceil(
             block_max_fee_per_gas * (1 - (enforce_gas_price_tolerance / 100))
         )
@@ -61,52 +55,54 @@ class GasManager(ABC, Generic[UserOperationType]):
             block_max_fee_per_gas_with_tolerance
         )
 
-        if enforce_gas_price_tolerance < 100:
-            if (
-                self.is_legacy_mode or
-                self.chain_id == 999 or self.chain_id == 998 or  # HyperEVM
-                self.chain_id == 42161 or self.chain_id == 421614  # Arbitrum
-            ):
-                if self.is_legacy_mode:
-                    block_max_priority_fee_per_gas = block_max_fee_per_gas
-                else: # HyperEVM or Arbitrum
-                    block_max_priority_fee_per_gas = 0
-                if max_fee_per_gas < block_max_fee_per_gas_with_tolerance:
-                    raise ValidationException(
-                        ValidationExceptionCode.InvalidFields,
-                        "maxFeePerGas is too low. it should be minimum : " +
-                        f"{block_max_fee_per_gas_with_tolerance_hex}",
-                    )
-            else:
-                block_max_priority_fee_per_gas = int(tasks[1]["result"], 16)
-
-                # max priority fee per gas can't be higher than max fee per gas
-                if block_max_priority_fee_per_gas > block_max_fee_per_gas:
-                    block_max_priority_fee_per_gas = block_max_fee_per_gas
-
-                estimated_base_fee = max(
-                    block_max_fee_per_gas - block_max_priority_fee_per_gas, 1
+        if (
+            self.is_legacy_mode or
+            self.chain_id == 999 or self.chain_id == 998 or  # HyperEVM
+            self.chain_id == 42161 or self.chain_id == 421614  # Arbitrum
+        ):
+            if self.is_legacy_mode:
+                block_max_priority_fee_per_gas = block_max_fee_per_gas
+            else:  # HyperEVM or Arbitrum
+                block_max_priority_fee_per_gas = 0
+            if max_fee_per_gas < block_max_fee_per_gas_with_tolerance:
+                raise ValidationException(
+                    ValidationExceptionCode.InvalidFields,
+                    "maxFeePerGas is too low. it should be minimum : " +
+                    f"{block_max_fee_per_gas_with_tolerance_hex}",
                 )
+        else:
+            # On non-legacy non-HyperEVM/Arbitrum chains the cache always
+            # populates the priority fee, so the snapshot value is non-None.
+            assert snapshot.max_priority_fee_per_gas is not None
+            block_max_priority_fee_per_gas = snapshot.max_priority_fee_per_gas
 
-                if max_fee_per_gas < estimated_base_fee:
-                    raise ValidationException(
-                        ValidationExceptionCode.InvalidFields,
-                        "maxFeePerGas is too low." +
-                        "it should be minimum the estimated base fee: " +
-                        f"{hex(estimated_base_fee)}",
-                    )
-                if (
-                    min(
-                        max_fee_per_gas,
-                        estimated_base_fee + max_priority_fee_per_gas,
-                    )
-                    < block_max_fee_per_gas_with_tolerance
-                ):
-                    raise ValidationException(
-                        ValidationExceptionCode.InvalidFields,
-                        "maxFeePerGas and (maxPriorityFeePerGas + estimated basefee) " +
-                        f"should be equal or higher than : {block_max_fee_per_gas_with_tolerance_hex}",
-                    )
+            # max priority fee per gas can't be higher than max fee per gas
+            if block_max_priority_fee_per_gas > block_max_fee_per_gas:
+                block_max_priority_fee_per_gas = block_max_fee_per_gas
+
+            estimated_base_fee = max(
+                block_max_fee_per_gas - block_max_priority_fee_per_gas, 1
+            )
+
+            if max_fee_per_gas < estimated_base_fee:
+                raise ValidationException(
+                    ValidationExceptionCode.InvalidFields,
+                    "maxFeePerGas is too low." +
+                    "it should be minimum the estimated base fee: " +
+                    f"{hex(estimated_base_fee)}",
+                )
+            if (
+                min(
+                    max_fee_per_gas,
+                    estimated_base_fee + max_priority_fee_per_gas,
+                )
+                < block_max_fee_per_gas_with_tolerance
+            ):
+                raise ValidationException(
+                    ValidationExceptionCode.InvalidFields,
+                    "maxFeePerGas and (maxPriorityFeePerGas + estimated basefee) " +
+                    f"should be equal or higher than : {block_max_fee_per_gas_with_tolerance_hex}",
+                )
 
     async def verify_preverification_gas_and_verification_gas_limit(
         self,
@@ -235,17 +231,17 @@ class GasManager(ABC, Generic[UserOperationType]):
             block_number_hex,
         ]
 
-        eth_call_op = send_rpc_request_to_eth_client(
-            self.ethereum_node_urls, "eth_call", params, None, "result"
+        # Run the OP gas-oracle eth_call in parallel with a cached gas-price
+        # read. The cache read returns immediately unless the background
+        # refresh loop has fallen far enough behind to trigger the
+        # synchronous staleness fallback (see GasPriceCache.get_snapshot).
+        result, snapshot = await asyncio.gather(
+            send_rpc_request_to_eth_client(
+                self.ethereum_node_urls, "eth_call", params, None, "result"
+            ),
+            self.gas_price_cache.get_snapshot(),
         )
-        block_max_fee_per_gas_op = send_rpc_request_to_eth_client(
-            self.ethereum_node_urls, "eth_gasPrice", None, None, "result"
-        )
-        tasks_arr = [eth_call_op, block_max_fee_per_gas_op]
-        tasks: Any = await asyncio.gather(*tasks_arr)
-        result = tasks[0]
-        block_max_fee_per_gas_hex = tasks[1]['result']
-        block_max_fee_per_gas = int(block_max_fee_per_gas_hex, 16)
+        block_max_fee_per_gas = snapshot.max_fee_per_gas
 
         l1_fee = decode(["uint256"], bytes.fromhex(result["result"][2:]))[0]
         gas_estimate_for_l1 = math.ceil(l1_fee / block_max_fee_per_gas)

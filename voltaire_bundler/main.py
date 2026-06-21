@@ -150,8 +150,13 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
                 init_data.bundle_gas_estimation_multiplier,
                 init_data.enable_banning,
                 init_data.logs_fallback_recent_window,
+                init_data.gas_price_cache,
             )
             task_group.create_task(execution_endpoint.start_execution_endpoint())
+            # Keep the gas-price cache fresh in the background. Already
+            # warmed synchronously in cli_manager.get_init_data, so the
+            # first userop never waits on this task.
+            task_group.create_task(init_data.gas_price_cache.run())
 
             node_urls_to_check = init_data.ethereum_node_urls
             if init_data.ethereum_node_urls != init_data.ethereum_node_debug_trace_call_urls:
