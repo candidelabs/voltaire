@@ -10,6 +10,10 @@ from importlib.metadata import version
 
 import aiohttp
 
+from voltaire_bundler.gas.gas_price_cache import (
+    GasPriceCache,
+    default_refresh_interval,
+)
 from voltaire_bundler.mempool.mempool_info import DEFAULT_MEMPOOL_INFO
 from voltaire_bundler.utils.eth_client_utils import \
     send_rpc_request_to_eth_client_no_retry
@@ -110,6 +114,10 @@ class InitData:
     # full ``fromBlock="earliest"`` eth_getLogs scan in
     # eth_getUserOperationByHash/Receipt.
     logs_fallback_recent_window: int
+    # Background-refreshed cache of eth_gasPrice / eth_maxPriorityFeePerGas.
+    # Warmed synchronously in get_init_data so a bad ethereum node URL is
+    # caught at startup. Started as a TaskGroup child in main().
+    gas_price_cache: GasPriceCache
 
 
 def address(ep: str):
@@ -380,6 +388,22 @@ def initialize_argument_parser() -> ArgumentParser:
         nargs="?",
         const=1,
         default=_get_env_or_default("VOLTAIRE_BUNDLE_INTERVAL", 2, int),
+    )
+
+    parser.add_argument(
+        "--gas_price_refresh_interval",
+        type=positive_float,
+        help=(
+            "seconds between background refreshes of the cached "
+            "eth_gasPrice / eth_maxPriorityFeePerGas values. Defaults to a "
+            "per-chain value roughly matching the chain's block time "
+            "(e.g. 10s on Ethereum mainnet, 2s on L2s, 1s on Arbitrum / "
+            "HyperEVM / Somnia)."
+        ),
+        nargs="?",
+        default=_get_env_or_default(
+            "VOLTAIRE_GAS_PRICE_REFRESH_INTERVAL", None, positive_float,
+        ),
     )
 
     parser.add_argument(
@@ -1055,6 +1079,33 @@ async def get_init_data(args: Namespace) -> InitData:
         await check_valid_entrypoints(
             ethereum_node_urls_rearranged[0], args.disable_v6)
 
+    # Warm the gas-price cache synchronously so a misconfigured eth node
+    # URL fails at startup instead of on the first userop. The CLI override
+    # takes precedence over the per-chain default; both are positive floats.
+    gas_price_refresh_interval = (
+        args.gas_price_refresh_interval
+        if args.gas_price_refresh_interval is not None
+        else default_refresh_interval(args.chain_id)
+    )
+    gas_price_cache = GasPriceCache(
+        ethereum_node_urls_rearranged,
+        args.chain_id,
+        args.legacy_mode,
+        gas_price_refresh_interval,
+    )
+    try:
+        await gas_price_cache.warm()
+    except Exception as exc:
+        logging.critical(
+            "Failed to warm gas-price cache from "
+            f"{ethereum_node_urls_rearranged}: {exc}"
+        )
+        sys.exit(1)
+    logging.info(
+        "Gas-price cache warmed (refresh interval: "
+        f"{gas_price_refresh_interval}s)."
+    )
+
     if not args.disable_p2p:
         if args.p2p_canonical_mempool_id_08 is None:
             if args.chain_id not in DEFAULT_MEMPOOL_INFO[
@@ -1140,6 +1191,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.postgres_cache_ttl_days,
         args.enable_banning,
         args.logs_fallback_recent_window,
+        gas_price_cache,
     )
 
     if args.verbose:
