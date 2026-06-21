@@ -718,6 +718,94 @@ async def get_user_operation_logs_for_block_range(
     return None
 
 
+async def get_user_operation_logs_for_many_hashes(
+    ethereum_node_eth_get_logs_urls: list[str],
+    user_operation_hashes: list[str],
+    entrypoint: str,
+    from_block_hex: str,
+    to_block_hex: str = "latest",
+) -> dict[str, list[Any]]:
+    """One eth_getLogs across the entire monitored set, indexed by userop hash.
+
+    Instead of N parallel eth_getLogs (one per monitored userop, each filtered
+    to that userop's hash topic), issue a single broad query covering the
+    UserOperationEvent topic on the entrypoint for the full block range, then
+    bucket the results client-side by topic[1] (userOpHash).
+
+    Each hit is also written through to the per-userop logs cache so the
+    eth_getUserOperationByHash / Receipt RPCs served to clients hit cache
+    instead of re-issuing eth_getLogs.
+
+    Returns ``{userop_hash: [log_entry]}`` for hashes present in the result;
+    misses are absent from the dict (callers check membership).
+    """
+    if not user_operation_hashes:
+        return {}
+
+    wanted = {h.lower() for h in user_operation_hashes}
+    params = [
+        {
+            "address": entrypoint,
+            "topics": [USER_OPERATION_EVENT_DESCRIPTOR],
+            "fromBlock": from_block_hex,
+            "toBlock": to_block_hex,
+        }
+    ]
+    try:
+        res = await asyncio.wait_for(
+            send_rpc_request_to_eth_client(
+                ethereum_node_eth_get_logs_urls, "eth_getLogs", params,
+            ),
+            timeout=ETH_RPC_LOOKUP_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError:
+        logging.error(
+            "coalesced eth_getLogs (%s -> %s, %d hashes) timed out after %ss; "
+            "treating all as miss",
+            from_block_hex, to_block_hex, len(wanted), ETH_RPC_LOOKUP_TIMEOUT_S,
+        )
+        return {}
+    except Exception:
+        logging.error(
+            "coalesced eth_getLogs (%s -> %s) failed; treating all as miss",
+            from_block_hex, to_block_hex, exc_info=True,
+        )
+        return {}
+
+    if not (
+        isinstance(res, dict)
+        and isinstance(res.get("result"), list)
+    ):
+        return {}
+
+    found: dict[str, list[Any]] = {}
+    for log_entry in res["result"]:
+        topics = log_entry.get("topics") or []
+        if len(topics) < 2:
+            continue
+        userop_hash = topics[1].lower()
+        if userop_hash in wanted:
+            found.setdefault(userop_hash, []).append(log_entry)
+
+    # Warm the per-userop logs cache for each hit so the client's next
+    # getUserOperationByHash/Receipt poll hits memory/disk instead of
+    # re-issuing eth_getLogs.
+    ep_lower = entrypoint.lower()
+    for userop_hash, log_list in found.items():
+        user_operation_logs_cache.set(
+            f"{ep_lower}:{userop_hash}", log_list,
+        )
+
+    # Return keys matched to the caller's casing so callers can look up by
+    # the same hash string they passed in.
+    by_caller_hash: dict[str, list[Any]] = {}
+    for h in user_operation_hashes:
+        hit = found.get(h.lower())
+        if hit is not None:
+            by_caller_hash[h] = hit
+    return by_caller_hash
+
+
 transactions_cache = PersistentFIFOCache(name="transactions")
 
 

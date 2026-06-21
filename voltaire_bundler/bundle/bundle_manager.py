@@ -21,7 +21,8 @@ from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.user_operation_handler import \
         UserOperationHandler, decode_failed_op_event, \
         decode_failed_op_with_revert_event, get_deposit_info, \
-        get_transaction_by_hash, get_user_operation_logs_for_block_range
+        get_transaction_by_hash, get_user_operation_logs_for_block_range, \
+        get_user_operation_logs_for_many_hashes
 from voltaire_bundler.user_operation.user_operation_v6 import UserOperationV6
 from voltaire_bundler.user_operation.user_operation_v7v8v9 import UserOperationV7V8V9
 
@@ -589,31 +590,41 @@ class BundlerManager:
             entrypoint: str,
             local_mempool: LocalMempoolManagerV6 | LocalMempoolManagerV7 | LocalMempoolManagerV8
     ) -> None:
-        logs_res_ops = []
-        for user_operation_hash, user_operation in user_operations_to_monitor.items():
-            assert user_operation.validated_at_block_hex is not None
-            earliest_block = user_operation.validated_at_block_hex
-            logs_res_op = get_user_operation_logs_for_block_range(
-                # not using the ethereum_node_eth_get_logs_urls as the
-                # block range can't be large and to role out the possibility
-                # that the logs node is slightly behind/out of sync
-                self.ethereum_node_urls,
-                user_operation_hash,
-                entrypoint,
-                earliest_block,
-                "latest"
+        # One eth_getLogs across the entire monitored set instead of one per
+        # userop. Scans from the oldest monitored userop's validation block
+        # forward; the helper buckets results by topic[1] (userOpHash) and
+        # warms the per-userop logs cache for each hit.
+        # Not using ethereum_node_eth_get_logs_urls so we stay on the same
+        # node as validation/bundle traffic, ruling out the case where a
+        # logs-only node is slightly behind and reports the userop as still
+        # pending.
+        if user_operations_to_monitor:
+            earliest_block_int = min(
+                int(op.validated_at_block_hex, 16)
+                for op in user_operations_to_monitor.values()
+                if op.validated_at_block_hex is not None
             )
-            logs_res_ops.append(logs_res_op)
-        user_operations_logs = await asyncio.gather(*logs_res_ops)
+            user_operations_logs_by_hash = (
+                await get_user_operation_logs_for_many_hashes(
+                    self.ethereum_node_urls,
+                    list(user_operations_to_monitor.keys()),
+                    entrypoint,
+                    hex(earliest_block_int),
+                    "latest",
+                )
+            )
+        else:
+            user_operations_logs_by_hash = {}
 
         user_operations_hashes_to_remove_from_monitoring = []
         # Multiple userops in one bundle share the inclusion tx hash, so
         # dedupe before scheduling warmups to avoid redundant RPC round
         # trips for the same transaction.
         seen_warmup_tx_hashes: set[str] = set()
-        for user_operation, user_operation_log in zip(
-            list(user_operations_to_monitor.values()), user_operations_logs
-        ):
+        for user_operation in list(user_operations_to_monitor.values()):
+            user_operation_log = user_operations_logs_by_hash.get(
+                user_operation.user_operation_hash
+            )
             assert user_operation.last_add_to_mempool_date is not None
             time_diff_sec = (
                 datetime.now() - user_operation.last_add_to_mempool_date
