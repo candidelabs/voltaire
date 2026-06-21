@@ -105,7 +105,7 @@ class ExecutionEndpoint(Endpoint):
         is_legacy_mode: bool,
         conditional_rpc: ConditionalRpc | None,
         flashbots_protect_node_urls: list[str] | None,
-        bundle_interval: int,
+        bundle_interval: float,
         max_fee_per_gas_percentage_multiplier: int,
         max_priority_fee_per_gas_percentage_multiplier: int,
         enforce_gas_price_tolerance: int,
@@ -266,13 +266,15 @@ class ExecutionEndpoint(Endpoint):
 
         asyncio.ensure_future(self.execute_cron_job(is_debug, bundle_interval))
 
-    async def execute_cron_job(self, is_debug: bool, bundle_interval: int) -> None:
+    async def execute_cron_job(self, is_debug: bool, bundle_interval: float) -> None:
         if not self.disable_p2p:
             heartbeat_counter = 0
             heartbeat_interval = 0.1  # decisecond
-            deciseconds_per_bundle = math.floor(
+            # Floor at one heartbeat tick (100 ms) so a sub-100 ms
+            # bundle_interval doesn't produce a zero modulus below.
+            deciseconds_per_bundle = max(1, math.floor(
                 bundle_interval / heartbeat_interval
-            )
+            ))
 
             p2pClient: Client = Client("p2p_endpoint")
             p2p_file = ("p2p_endpoint.port"
