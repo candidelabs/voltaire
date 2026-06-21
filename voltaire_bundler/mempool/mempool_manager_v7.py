@@ -31,6 +31,7 @@ class LocalMempoolManagerV7(LocalMempoolManager):
         min_stake: int,
         min_unstake_delay: int,
         enable_banning: bool,
+        is_fast_mode: bool,
     ):
         self.validation_manager = ValidationManagerV7V8V9(
             user_operation_handler,
@@ -50,6 +51,7 @@ class LocalMempoolManagerV7(LocalMempoolManager):
         self.bundler_address = bundler_address
         self.chain_id = chain_id
         self.is_unsafe = is_unsafe
+        self.is_fast_mode = is_fast_mode
         self.enforce_gas_price_tolerance = enforce_gas_price_tolerance
         self.enforce_pre_verification_gas_tolerance = enforce_pre_verification_gas_tolerance
         self.senders_to_senders_mempools = {}

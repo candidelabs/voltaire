@@ -118,6 +118,12 @@ class InitData:
     # Warmed synchronously in get_init_data so a bad ethereum node URL is
     # caught at startup. Started as a TaskGroup child in main().
     gas_price_cache: GasPriceCache
+    # Skip per-userop validation work that costs an extra upstream RPC but is
+    # not strictly required: the associated-addresses code-hash fetch and the
+    # paymaster balanceOf check. Trades correctness in edge cases (a paymaster
+    # that becomes insolvent between submit and inclusion, or an associated
+    # contract whose code changes mid-flight) for ~2 fewer RPCs per submit.
+    is_fast_mode: bool
 
 
 def address(ep: str):
@@ -337,6 +343,23 @@ def initialize_argument_parser() -> ArgumentParser:
         nargs="?",
         const=True,
         default=_get_env_or_default("VOLTAIRE_UNSAFE", False, lambda v: v.lower() == "true"),
+    )
+
+    parser.add_argument(
+        "--fast_mode",
+        type=str_to_bool,
+        help=(
+            "FAST mode: skip the per-userop associated-addresses code-hash "
+            "fetch and the paymaster balanceOf check. Removes two upstream "
+            "RPCs per eth_sendUserOperation at the cost of catching "
+            "paymaster insolvency and mid-flight associated-contract code "
+            "changes only at bundle time (not on submit)."
+        ),
+        nargs="?",
+        const=True,
+        default=_get_env_or_default(
+            "VOLTAIRE_FAST_MODE", False, lambda v: v.lower() == "true"
+        ),
     )
 
     parser.add_argument(
@@ -1192,6 +1215,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.enable_banning,
         args.logs_fallback_recent_window,
         gas_price_cache,
+        args.fast_mode,
     )
 
     if args.verbose:

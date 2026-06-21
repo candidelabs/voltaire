@@ -36,6 +36,13 @@ class LocalMempoolManager():
     chain_id: int
     senders_to_senders_mempools: dict[Address, SenderMempool]
     is_unsafe: bool
+    # Fast mode skips two optional per-submit RPCs: get_addresses_code_hash
+    # (so we won't detect a mid-flight code change on associated contracts
+    # until bundle time) and validate_paymaster_deposit (so a paymaster that
+    # is insolvent at submit-time will be caught only when the bundle's
+    # third validation runs the actual simulation). Use when upstream RPC
+    # is the bottleneck and the operator accepts the trade.
+    is_fast_mode: bool
     enforce_gas_price_tolerance: int
     enforce_pre_verification_gas_tolerance: int
     paymasters_and_factories_to_ops_hashes_in_mempool: dict[Address, set[str]]
@@ -108,7 +115,10 @@ class LocalMempoolManager():
                     "An unstaked paymaster may not return a context.",
                 )
 
-        if associated_addresses is None:
+        if associated_addresses is None or self.is_fast_mode:
+            # In fast mode we skip the code-hash fetch — a mid-flight code
+            # change on an associated contract will surface at bundle time
+            # via the second validation instead of being caught on submit.
             user_operation.code_hash = None
         else:
             user_operation.code_hash = (
@@ -124,8 +134,12 @@ class LocalMempoolManager():
             paymaster_stake_info,
         )
 
-        await self.validate_paymaster_deposit(
-            user_operation, validated_at_block_number)
+        # Skip the paymaster balanceOf check in fast mode — an underfunded
+        # paymaster will still be rejected later when the third (bundle)
+        # validation runs the actual simulation.
+        if not self.is_fast_mode:
+            await self.validate_paymaster_deposit(
+                user_operation, validated_at_block_number)
 
         self.validate_multiple_roles_violation(user_operation)
 
@@ -244,7 +258,7 @@ class LocalMempoolManager():
                         "An unstaked paymaster may not return a context.",
                     )
 
-            if associated_addresses is None:
+            if associated_addresses is None or self.is_fast_mode:
                 user_operation.code_hash = None
             else:
                 user_operation.code_hash = (
@@ -280,8 +294,9 @@ class LocalMempoolManager():
             paymaster_stake_info,
         )
 
-        await self.validate_paymaster_deposit(
-            user_operation, validated_at_block_number)
+        if not self.is_fast_mode:
+            await self.validate_paymaster_deposit(
+                user_operation, validated_at_block_number)
 
         self.validate_multiple_roles_violation(user_operation)
 
@@ -360,14 +375,21 @@ class LocalMempoolManager():
                 )
         validation_results = await asyncio.gather(*validate_user_operations_ops)
 
-        new_code_hash_ops = []
-        for (_, associated_addresses, _) in validation_results:
-            new_code_hash_ops.append(
-                self.validation_manager.tracer_manager.get_addresses_code_hash(
-                    associated_addresses
+        # In fast mode we never stored a code_hash on submit, so there is
+        # nothing to compare against — skip the per-op code-hash fan-out.
+        # The bundle's third validation still re-simulates each op, so a
+        # mid-flight code change is caught there before submission.
+        if self.is_fast_mode:
+            new_code_hash_results: list = [None] * len(validation_results)
+        else:
+            new_code_hash_ops = []
+            for (_, associated_addresses, _) in validation_results:
+                new_code_hash_ops.append(
+                    self.validation_manager.tracer_manager.get_addresses_code_hash(
+                        associated_addresses
+                    )
                 )
-            )
-        new_code_hash_results = await asyncio.gather(*new_code_hash_ops)
+            new_code_hash_results = await asyncio.gather(*new_code_hash_ops)
         compined_gas_limit = 0
 
         if self.chain_id in (5031, 50312):  # Somnia

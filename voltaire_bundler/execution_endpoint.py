@@ -126,6 +126,7 @@ class ExecutionEndpoint(Endpoint):
         enable_banning: bool,
         logs_fallback_recent_window: int,
         gas_price_cache: GasPriceCache,
+        is_fast_mode: bool,
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_urls = ethereum_node_urls
@@ -169,6 +170,7 @@ class ExecutionEndpoint(Endpoint):
             min_stake,
             min_unstake_delay,
             enable_banning,
+            is_fast_mode,
         )
 
         self.local_mempool_manager_v8 = LocalMempoolManagerV8(
@@ -186,6 +188,7 @@ class ExecutionEndpoint(Endpoint):
             min_stake,
             min_unstake_delay,
             enable_banning,
+            is_fast_mode,
         )
 
         self.local_mempool_manager_v7 = LocalMempoolManagerV7(
@@ -203,6 +206,7 @@ class ExecutionEndpoint(Endpoint):
             min_stake,
             min_unstake_delay,
             enable_banning,
+            is_fast_mode,
         )
 
         if disable_v6:
@@ -238,6 +242,7 @@ class ExecutionEndpoint(Endpoint):
                 min_stake,
                 min_unstake_delay,
                 enable_banning,
+                is_fast_mode,
             )
 
         self.bundle_manager = BundlerManager(
