@@ -359,7 +359,6 @@ class LocalMempoolManager():
     ) -> dict[str, UserOperation]:
         bundle = {}
         senders_lowercase = [x.lower() for x in self.senders_to_senders_mempools.keys()]
-        validate_user_operations_ops = []
         user_operations = []
         for sender_address in list(self.senders_to_senders_mempools):
             sender_mempool = self.senders_to_senders_mempools[sender_address]
@@ -370,18 +369,30 @@ class LocalMempoolManager():
                 user_operation = sender_mempool.user_operation_hashs_to_verified_user_operation[
                     user_operation_hash].user_operation
                 user_operations.append(user_operation)
-                validate_user_operations_ops.append(
-                    self.validate_user_operation_to_bundle(user_operation)
-                )
-        validation_results = await asyncio.gather(*validate_user_operations_ops)
 
-        # In fast mode we never stored a code_hash on submit, so there is
-        # nothing to compare against — skip the per-op code-hash fan-out.
-        # The bundle's third validation still re-simulates each op, so a
-        # mid-flight code change is caught there before submission.
+        # In fast mode we skip the per-op second validation entirely. Any
+        # op whose state has drifted since first validation (failed sig,
+        # insufficient prefund, code change on an associated contract) will
+        # be caught by the bundle's third validation in
+        # create_bundle_calldata_and_estimate_gas — that path runs handleOps
+        # on the full bundle, decodes FailedOp, drops the offending op, and
+        # recurses (see bundle_manager.py:875). This trades per-op eth_calls
+        # for occasional bundle retries; at low conflict rates it's a clear
+        # net win. We also drop the storage-isolation check (storage_map is
+        # None for every op) since that signal is only produced by the
+        # second validation.
         if self.is_fast_mode:
-            new_code_hash_results: list = [None] * len(validation_results)
+            validation_results: list[
+                tuple[bool, list[str] | None, dict[str, str | dict[str, str]] | None]
+            ] = [(True, None, None) for _ in user_operations]
+            new_code_hash_results: list = [None] * len(user_operations)
         else:
+            validate_user_operations_ops = [
+                self.validate_user_operation_to_bundle(user_operation)
+                for user_operation in user_operations
+            ]
+            validation_results = await asyncio.gather(*validate_user_operations_ops)
+
             new_code_hash_ops = []
             for (_, associated_addresses, _) in validation_results:
                 new_code_hash_ops.append(
