@@ -1,7 +1,9 @@
 import asyncio
 import json
 import logging
+import time
 import traceback
+from collections import defaultdict
 from typing import Any
 from eth_abi import encode
 
@@ -12,6 +14,91 @@ from eth_utils import keccak
 
 
 _session: ClientSession | None = None
+
+
+# --- per-method concurrency / latency profiler (outbound) ----------------
+# Mirrors the inbound profiler in rpc_http_server.py. Tracks every outbound
+# RPC method (eth_call, eth_getLogs, eth_sendRawTransaction, etc.) and dumps
+# a per-method table every 5s. Each retry attempt is recorded as its own
+# sample so a method that's silently bouncing off retries shows up here.
+_out_inflight: dict[str, int] = defaultdict(int)
+_out_samples: dict[str, list[float]] = defaultdict(list)
+_out_peak_inflight_window: dict[str, int] = defaultdict(int)
+_out_sum_inflight_at_start: dict[str, int] = defaultdict(int)
+_profiler_started: bool = False
+
+
+def _out_record_sample(method: str, duration: float, inflight_at_start: int) -> None:
+    _out_samples[method].append(duration)
+    _out_sum_inflight_at_start[method] += inflight_at_start
+    if inflight_at_start > _out_peak_inflight_window[method]:
+        _out_peak_inflight_window[method] = inflight_at_start
+
+
+def _out_percentile(sorted_values: list[float], p: float) -> float:
+    if not sorted_values:
+        return 0.0
+    k = max(0, min(len(sorted_values) - 1, int(round(p * (len(sorted_values) - 1)))))
+    return sorted_values[k]
+
+
+def _out_fmt_ms(s: float) -> str:
+    return f"{s * 1000:.1f}ms"
+
+
+async def _outbound_profiler_logger(interval: float = 5.0) -> None:
+    """Periodically log per-method outbound latency stats + concurrency."""
+    while True:
+        await asyncio.sleep(interval)
+        methods = sorted(set(_out_samples.keys()) | set(_out_inflight.keys()))
+        if not methods:
+            continue
+
+        lines = [
+            f"[rpc-outbound-profile window={interval:.0f}s] "
+            f"{'method':<38} {'reqs':>5} {'inflight_now':>12} "
+            f"{'peak_inflight':>13} {'avg_inflight':>12} "
+            f"{'p50':>9} {'p95':>9} {'p99':>9} {'max':>9}"
+        ]
+        for method in methods:
+            samples = _out_samples.get(method, [])
+            count = len(samples)
+            inflight_now = _out_inflight.get(method, 0)
+            peak = _out_peak_inflight_window.get(method, 0)
+            avg_inflight = (
+                _out_sum_inflight_at_start.get(method, 0) / count if count else 0.0
+            )
+            if samples:
+                samples.sort()
+                p50 = _out_percentile(samples, 0.50)
+                p95 = _out_percentile(samples, 0.95)
+                p99 = _out_percentile(samples, 0.99)
+                mx = samples[-1]
+            else:
+                p50 = p95 = p99 = mx = 0.0
+
+            lines.append(
+                f"[rpc-outbound-profile] {method:<38} {count:>5d} {inflight_now:>12d} "
+                f"{peak:>13d} {avg_inflight:>12.2f} "
+                f"{_out_fmt_ms(p50):>9} {_out_fmt_ms(p95):>9} "
+                f"{_out_fmt_ms(p99):>9} {_out_fmt_ms(mx):>9}"
+            )
+
+        logging.info("\n".join(lines))
+
+        _out_samples.clear()
+        _out_peak_inflight_window.clear()
+        _out_sum_inflight_at_start.clear()
+
+
+def _ensure_outbound_profiler_started() -> None:
+    """Start the outbound profiler task once, on the running event loop."""
+    global _profiler_started
+    if _profiler_started:
+        return
+    _profiler_started = True
+    asyncio.create_task(_outbound_profiler_logger(interval=5.0))
+# --------------------------------------------------------------------------
 
 
 def get_eth_client_session() -> ClientSession:
@@ -50,6 +137,7 @@ def get_eth_client_session() -> ClientSession:
                 sock_read=60,            # max idle between bytes mid-response
             ),
         )
+    _ensure_outbound_profiler_started()
     return _session
 
 
@@ -73,6 +161,27 @@ async def send_rpc_request_to_eth_client(
     params=None,
     flashbots_signer_private_key_pair: tuple[str, str] | None = None,
     expected_key: str | None = None
+) -> Any:
+    # Profiler: record total observed latency (including any retries).
+    _t0 = time.perf_counter()
+    _inflight_at_start = _out_inflight[method]
+    _out_inflight[method] = _inflight_at_start + 1
+    try:
+        return await _send_rpc_request_to_eth_client_inner(
+            nodes_urls, method, params,
+            flashbots_signer_private_key_pair, expected_key,
+        )
+    finally:
+        _out_inflight[method] -= 1
+        _out_record_sample(method, time.perf_counter() - _t0, _inflight_at_start)
+
+
+async def _send_rpc_request_to_eth_client_inner(
+    nodes_urls: list[str],
+    method: str,
+    params,
+    flashbots_signer_private_key_pair: tuple[str, str] | None,
+    expected_key: str | None,
 ) -> Any:
     json_request = {
         "jsonrpc": "2.0",
@@ -175,42 +284,53 @@ async def send_rpc_request_to_eth_client_no_retry(
     method,
     params=None,
 ) -> Any:
-    json_request = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": method,
-        "params": params,
-    }
-    headers = {
-        "content-type": "application/json",
-        "connection": "keep-alive"
-    }
-    session = get_eth_client_session()
-    async with session.post(
-        ethereum_node_url,
-        json=json_request,
-        headers=headers
-    ) as response:
-        try:
-            resp = await response.read()
-            if response.status != 200:
-                logging.warning(
-                    f"Non-200 status {response.status} from {ethereum_node_url} "
-                    f"for {method}: {resp[:200]!r}"
+    # Profiler: tag no-retry calls so they're distinguishable in the table.
+    _profile_key = f"{method} (no_retry)"
+    _t0 = time.perf_counter()
+    _inflight_at_start = _out_inflight[_profile_key]
+    _out_inflight[_profile_key] = _inflight_at_start + 1
+    try:
+        json_request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": method,
+            "params": params,
+        }
+        headers = {
+            "content-type": "application/json",
+            "connection": "keep-alive"
+        }
+        session = get_eth_client_session()
+        async with session.post(
+            ethereum_node_url,
+            json=json_request,
+            headers=headers
+        ) as response:
+            try:
+                resp = await response.read()
+                if response.status != 200:
+                    logging.warning(
+                        f"Non-200 status {response.status} from {ethereum_node_url} "
+                        f"for {method}: {resp[:200]!r}"
+                    )
+                return json.loads(resp)
+            except asyncio.CancelledError:
+                raise
+            except json.decoder.JSONDecodeError:
+                logging.critical("Invalid json response from eth client")
+                raise ValueError("Invalid json response from eth client")
+            except Exception as excp:
+                logging.error(
+                    "Call to node rpc failed." +
+                    str(traceback.format_exc()) +
+                    str(excp)
                 )
-            return json.loads(resp)
-        except asyncio.CancelledError:
-            raise
-        except json.decoder.JSONDecodeError:
-            logging.critical("Invalid json response from eth client")
-            raise ValueError("Invalid json response from eth client")
-        except Exception as excp:
-            logging.error(
-                "Call to node rpc failed." +
-                str(traceback.format_exc()) +
-                str(excp)
-            )
-            await asyncio.sleep(1)  # in seconds
+                await asyncio.sleep(1)  # in seconds
+    finally:
+        _out_inflight[_profile_key] -= 1
+        _out_record_sample(
+            _profile_key, time.perf_counter() - _t0, _inflight_at_start
+        )
 
 
 async def get_block_info(
