@@ -28,8 +28,6 @@ def _make_gas_manager() -> GasManagerV7V8V9:
         chain_id="1337",
         bundler_address=BUNDLER_ADDRESS,
         is_legacy_mode=False,
-        max_fee_per_gas_percentage_multiplier=100,
-        max_priority_fee_per_gas_percentage_multiplier=100,
         max_verification_gas=1_000_000,
         max_call_data_gas=1_000_000,
     )
