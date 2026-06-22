@@ -1,3 +1,6 @@
+import asyncio
+import time
+from collections import defaultdict
 from dataclasses import dataclass
 from functools import partial
 import logging
@@ -102,6 +105,83 @@ REQUEST_TIME_chainId_eth_getUserOperationByHash = Summary(
 
 
 rpcClient: Client = Client("bundler_endpoint")
+
+
+# --- per-method concurrency / latency profiler ---------------------------
+# Tracks in-flight count and per-window latency samples per RPC method so we
+# can see which method's tail latency degrades as concurrency rises.
+_inflight: dict[str, int] = defaultdict(int)
+_samples: dict[str, list[float]] = defaultdict(list)
+# peak in-flight observed during the current window, per method
+_peak_inflight_window: dict[str, int] = defaultdict(int)
+# sum of inflight_at_start across samples in the window, per method (for avg)
+_sum_inflight_at_start: dict[str, int] = defaultdict(int)
+
+
+def _record_sample(method: str, duration: float, inflight_at_start: int) -> None:
+    _samples[method].append(duration)
+    _sum_inflight_at_start[method] += inflight_at_start
+    if inflight_at_start > _peak_inflight_window[method]:
+        _peak_inflight_window[method] = inflight_at_start
+
+
+def _percentile(sorted_values: list[float], p: float) -> float:
+    if not sorted_values:
+        return 0.0
+    # nearest-rank
+    k = max(0, min(len(sorted_values) - 1, int(round(p * (len(sorted_values) - 1)))))
+    return sorted_values[k]
+
+
+def _fmt_ms(s: float) -> str:
+    return f"{s * 1000:.1f}ms"
+
+
+async def _profiler_logger(interval: float = 5.0) -> None:
+    """Periodically log per-method latency stats + concurrency. Resets window."""
+    while True:
+        await asyncio.sleep(interval)
+        # Snapshot + clear under no-await guarantee (asyncio is cooperative)
+        methods = sorted(set(_samples.keys()) | set(_inflight.keys()))
+        if not methods:
+            continue
+
+        lines = [
+            f"[rpc-profile window={interval:.0f}s] "
+            f"{'method':<38} {'reqs':>5} {'inflight_now':>12} "
+            f"{'peak_inflight':>13} {'avg_inflight':>12} "
+            f"{'p50':>9} {'p95':>9} {'p99':>9} {'max':>9}"
+        ]
+        for method in methods:
+            samples = _samples.get(method, [])
+            count = len(samples)
+            inflight_now = _inflight.get(method, 0)
+            peak = _peak_inflight_window.get(method, 0)
+            avg_inflight = (
+                _sum_inflight_at_start.get(method, 0) / count if count else 0.0
+            )
+            if samples:
+                samples.sort()
+                p50 = _percentile(samples, 0.50)
+                p95 = _percentile(samples, 0.95)
+                p99 = _percentile(samples, 0.99)
+                mx = samples[-1]
+            else:
+                p50 = p95 = p99 = mx = 0.0
+
+            lines.append(
+                f"[rpc-profile] {method:<38} {count:>5d} {inflight_now:>12d} "
+                f"{peak:>13d} {avg_inflight:>12.2f} "
+                f"{_fmt_ms(p50):>9} {_fmt_ms(p95):>9} {_fmt_ms(p99):>9} {_fmt_ms(mx):>9}"
+            )
+
+        logging.info("\n".join(lines))
+
+        # Reset window. Keep _inflight (live counter) as-is.
+        _samples.clear()
+        _peak_inflight_window.clear()
+        _sum_inflight_at_start.clear()
+# --------------------------------------------------------------------------
 
 
 async def _handle_rpc_request(
@@ -289,12 +369,19 @@ METHODS: dict[str, Callable] = {
 async def handle(request: web.Request) -> web.Response:
     req_str = await request.text()
     method = None
+    profiled_method: str | None = None
+    inflight_at_start = 0
+    t0 = time.perf_counter()
     try:
         res = validate_and_load_json_rpc_request(req_str, METHODS)
         logging.debug(f"request: {res}")
         try:
             method = res[0]
             params = res[1]
+            # Bump in-flight counter BEFORE dispatch so concurrent peers see us.
+            profiled_method = method
+            inflight_at_start = _inflight[profiled_method]
+            _inflight[profiled_method] = inflight_at_start + 1
             response = await METHODS[method](*params)
         except TypeError as err:
             raise RPCInvalidMethodParams(err)
@@ -304,6 +391,14 @@ async def handle(request: web.Request) -> web.Response:
     except RPCFault as err:
         response = Error(err.error_code, err.error_message)
         id = "null"
+    finally:
+        if profiled_method is not None:
+            _inflight[profiled_method] -= 1
+            _record_sample(
+                profiled_method,
+                time.perf_counter() - t0,
+                inflight_at_start,
+            )
 
     json_response = {
         "jsonrpc": "2.0",
@@ -427,3 +522,6 @@ async def run_rpc_http_server(
     await runner.setup()
     site = web.TCPSite(runner, host, port)
     await site.start()
+
+    # Background per-method latency/concurrency profiler.
+    asyncio.create_task(_profiler_logger(interval=5.0))
