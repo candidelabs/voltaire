@@ -23,24 +23,32 @@ def get_eth_client_session() -> ClientSession:
 
     HTTP transport tuned for a bundler that fans out many small requests to
     a handful of Ethereum providers per bundle round:
-      - `total=60` seconds: accommodates slow calls (debug_traceCall, wide
-        eth_getLogs) without letting a hung connection pin a coroutine
-        indefinitely.
-      - `connect=10` seconds: generous enough for TLS handshakes to remote
-        providers on slow networks.
+      - Pool sized for high sendUserOperation concurrency. Each inbound op
+        triggers several outbound RPCs (validation, eth_call simulations,
+        fee fetches, receipt polling); at low limits, requests queue inside
+        aiohttp and get cancelled by the wire timeout before ever leaving.
+      - `sock_read=60` / `sock_connect=10`: the wire timeouts only start
+        ticking once a connection is acquired and an HTTP exchange is in
+        progress, so a saturated pool no longer silently consumes the
+        request's deadline.
     """
     global _session
     if _session is None or _session.closed:
         connector = TCPConnector(
-            limit=200,                  # max total open connections (all hosts)
-            limit_per_host=50,          # max concurrent connections per host
+            limit=1000,                 # max total open connections (all hosts)
+            limit_per_host=500,         # max concurrent connections per host
             ttl_dns_cache=300,          # DNS cache TTL, in seconds
             keepalive_timeout=120,      # idle keepalive socket TTL, in seconds
             enable_cleanup_closed=True,
         )
         _session = ClientSession(
             connector=connector,
-            timeout=ClientTimeout(total=60, connect=10),  # values in seconds
+            timeout=ClientTimeout(
+                total=None,             # don't count pool-wait time against the request
+                connect=10,              # acquiring a pooled connection
+                sock_connect=10,         # TCP/TLS handshake
+                sock_read=60,            # max idle between bytes mid-response
+            ),
         )
     return _session
 
@@ -105,6 +113,10 @@ async def send_rpc_request_to_eth_client(
                         f"from {chosen_node_url} for {method}: {resp[:200]!r}"
                     )
                 json_result = json.loads(resp)
+        except asyncio.CancelledError:
+            # Caller (e.g. the inbound HTTP handler) gave up — don't retry,
+            # let cancellation propagate so backpressure works correctly.
+            raise
         except json.decoder.JSONDecodeError:
             logging.error(
                 f"Attempt No. {i+1} to call node rpc failed."
@@ -115,12 +127,6 @@ async def send_rpc_request_to_eth_client(
             logging.error(
                 f"Attempt No. {i+1} to call node rpc failed."
                 f"error: {str(excp)}"
-            )
-            logging.error(f"traceback: {str(traceback.format_exc())}")
-            await asyncio.sleep(1)
-        except:
-            logging.error(
-                f"Attempt No. {i+1} to call node rpc failed."
             )
             logging.error(f"traceback: {str(traceback.format_exc())}")
             await asyncio.sleep(1)
@@ -193,6 +199,8 @@ async def send_rpc_request_to_eth_client_no_retry(
                     f"for {method}: {resp[:200]!r}"
                 )
             return json.loads(resp)
+        except asyncio.CancelledError:
+            raise
         except json.decoder.JSONDecodeError:
             logging.critical("Invalid json response from eth client")
             raise ValueError("Invalid json response from eth client")
@@ -201,11 +209,6 @@ async def send_rpc_request_to_eth_client_no_retry(
                 "Call to node rpc failed." +
                 str(traceback.format_exc()) +
                 str(excp)
-            )
-            await asyncio.sleep(1)  # in seconds
-        except:
-            logging.error(
-                str(traceback.format_exc())
             )
             await asyncio.sleep(1)  # in seconds
 
