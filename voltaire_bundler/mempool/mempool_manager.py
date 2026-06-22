@@ -370,16 +370,6 @@ class LocalMempoolManager():
                     user_operation_hash].user_operation
                 user_operations.append(user_operation)
 
-        # Sort by tip-per-gas descending so the highest-paying ops fill the
-        # bundle gas cap first when the mempool is contended. Tiebreaker is
-        # max_fee_per_gas so that under low base-fee conditions (priority ≈
-        # max_fee for many ops) we still order by total fee. Ops within one
-        # sender remain in mempool/nonce order — we only sort across senders.
-        user_operations.sort(
-            key=lambda op: (op.max_priority_fee_per_gas, op.max_fee_per_gas),
-            reverse=True,
-        )
-
         # In fast mode we skip the per-op second validation entirely. Any
         # op whose state has drifted since first validation (failed sig,
         # insufficient prefund, code change on an associated contract) will
