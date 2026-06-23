@@ -29,6 +29,7 @@ class UserOperationHandler(ABC):
     logs_incremental_range: int
     logs_number_of_ranges: int
     logs_fallback_recent_window: int
+    is_fast_mode: bool
 
     async def _find_handle_ops_calldata(
         self,
@@ -384,6 +385,7 @@ class UserOperationHandler(ABC):
                     hex(earliest_block),
                     hex(latest_block),
                     self.logs_fallback_recent_window,
+                    self.is_fast_mode,
                 )
                 if res is not None:
                     return res
@@ -401,6 +403,7 @@ class UserOperationHandler(ABC):
                 earliest_block_hex,
                 "latest",
                 self.logs_fallback_recent_window,
+                self.is_fast_mode,
             )
 
     def get_user_operation_by_hash_from_local_mempool(
@@ -672,11 +675,15 @@ async def get_user_operation_logs_for_block_range(
     from_block_hex: str,
     to_block_hex: str,
     earliest_fallback_recent_window: int = EARLIEST_FALLBACK_RECENT_WINDOW,
+    is_fast_mode: bool = False,
 ) -> list | None:
     cache_key = f"{entrypoint.lower()}:{user_operation_hash}"
     cached = await user_operation_logs_cache.get(cache_key)
     if cached is not None:
-        if await _cached_logs_block_still_canonical(
+        # Fast mode trusts the cache and skips the per-hit eth_getBlockByNumber
+        # reorg revalidation — saves one outbound RPC per cache hit at the cost
+        # of potentially serving orphaned logs after a reorg.
+        if is_fast_mode or await _cached_logs_block_still_canonical(
             ethereum_node_eth_get_logs_urls, cached,
         ):
             return cached

@@ -153,6 +153,7 @@ class ExecutionEndpoint(Endpoint):
             logs_number_of_ranges,
             logs_fallback_recent_window,
             gas_price_cache,
+            is_fast_mode,
         )
 
         self.local_mempool_manager_v9 = LocalMempoolManagerV9(
@@ -225,6 +226,7 @@ class ExecutionEndpoint(Endpoint):
                 logs_number_of_ranges,
                 logs_fallback_recent_window,
                 gas_price_cache,
+                is_fast_mode,
             )
 
             self.local_mempool_manager_v6 = LocalMempoolManagerV6(
@@ -261,6 +263,7 @@ class ExecutionEndpoint(Endpoint):
             max_priority_fee_per_gas_percentage_multiplier,
             bundle_gas_estimation_multiplier,
             gas_price_cache,
+            is_fast_mode,
         )
         self.peer_ids_to_cursor = dict()
         self.peer_ids_to_user_ops_hashes_queue = dict()

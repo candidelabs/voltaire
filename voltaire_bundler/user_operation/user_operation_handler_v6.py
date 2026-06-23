@@ -28,6 +28,7 @@ class UserOperationHandlerV6(UserOperationHandler):
         logs_number_of_ranges: int,
         logs_fallback_recent_window: int,
         gas_price_cache: GasPriceCache,
+        is_fast_mode: bool,
     ):
         self.ethereum_node_urls = ethereum_node_urls
         self.bundler_address = bundler_address
@@ -45,6 +46,7 @@ class UserOperationHandlerV6(UserOperationHandler):
         self.logs_incremental_range = logs_incremental_range
         self.logs_number_of_ranges = logs_number_of_ranges
         self.logs_fallback_recent_window = logs_fallback_recent_window
+        self.is_fast_mode = is_fast_mode
 
     async def get_user_operation_by_hash(
         self, user_operation_hash: str,

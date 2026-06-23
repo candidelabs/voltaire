@@ -92,6 +92,7 @@ class BundlerManager:
     bundle_gas_estimation_multiplier: float
     entrypoint_v9_reentrant: str
     gas_price_cache: GasPriceCache
+    is_fast_mode: bool
 
     def __init__(
         self,
@@ -110,6 +111,7 @@ class BundlerManager:
         max_priority_fee_per_gas_percentage_multiplier: int,
         bundle_gas_estimation_multiplier: float,
         gas_price_cache: GasPriceCache,
+        is_fast_mode: bool,
     ):
         self.local_mempool_manager_v6 = local_mempool_manager_v6
         self.local_mempool_manager_v7 = local_mempool_manager_v7
@@ -146,6 +148,7 @@ class BundlerManager:
         self.bundle_gas_estimation_multiplier = bundle_gas_estimation_multiplier
         self.entrypoint_v9_reentrant = load_bytecode("EntryPointV9Reentrant.json")
         self.gas_price_cache = gas_price_cache
+        self.is_fast_mode = is_fast_mode
 
     async def send_next_bundle(self) -> None:
         await self.update_send_queue_and_monitor_queue()
@@ -986,7 +989,8 @@ class BundlerManager:
             user_operation.user_operation_hash,
             entrypoint,
             earliest_block,
-            "latest"
+            "latest",
+            is_fast_mode=self.is_fast_mode,
         )
 
         # if there is a UserOperationEvent for the user_operation_hash,
