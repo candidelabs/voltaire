@@ -116,12 +116,23 @@ class ReputationManager:
         if (
             self.is_blacklisted(entity_lowercase)
         ):
+            # Blacklist is an explicit operator deny-list, independent of
+            # enable_banning — always BANNED.
             return ReputationStatus.BANNED
 
         if (
             entity_lowercase not in self.entities_reputation or
             self.is_whitelisted(entity_lowercase)
         ):
+            return ReputationStatus.OK
+
+        # enable_banning gates ALL rep-based enforcement (both BANNED and
+        # THROTTLED), not just bans. Throttling is a softer rejection
+        # (>=4 ops per entity in mempool) but it still rejects, so when
+        # the operator disables banning, throttling is also off.
+        # Blacklist (above) is a separate operator deny-list and stays
+        # effective regardless.
+        if not self.enable_banning:
             return ReputationStatus.OK
 
         reputation_entry = self.entities_reputation[entity_lowercase]
