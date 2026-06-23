@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 import traceback
 import math
 import os
@@ -308,6 +309,14 @@ class ExecutionEndpoint(Endpoint):
                 await asyncio.sleep(heartbeat_interval)
         elif not is_debug:
             while True:
+                # Sleep the REMAINDER of the interval, not the full interval,
+                # so each cycle is `bundle_interval` end-to-end rather than
+                # `bundle_duration + bundle_interval`. Without this, a tick
+                # whose work exceeds bundle_interval drags every subsequent
+                # tick later — and the monitor re-add loop downstream gets
+                # progressively more userops past the 5s staleness threshold,
+                # compounding the slip.
+                t0 = time.monotonic()
                 try:
                     await self.bundle_manager.send_next_bundle()
                 except (ValidationException, ExecutionException) as excp:
@@ -315,7 +324,8 @@ class ExecutionEndpoint(Endpoint):
                 except:
                     logging.error(traceback.format_exc())
 
-                await asyncio.sleep(bundle_interval)
+                elapsed = time.monotonic() - t0
+                await asyncio.sleep(max(0.0, bundle_interval - elapsed))
 
     async def send_pooled_user_op_hashes_to_all_peers(self) -> None:
         pass

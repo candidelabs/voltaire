@@ -1,5 +1,6 @@
 import asyncio
 import copy
+from collections import defaultdict
 from datetime import datetime
 import logging
 import math
@@ -659,6 +660,13 @@ class BundlerManager:
             user_operations_logs_by_hash = {}
 
         user_operations_hashes_to_remove_from_monitoring = []
+        # Stale monitor entries (past the 5s threshold) get re-added below.
+        # We collect them first and run all the re-validations concurrently
+        # via asyncio.gather — the old code awaited each add_user_operation
+        # serially, which under load means N userops × one validation
+        # RPC-per-userop of wall time tacked onto every cron tick, with
+        # nothing depending on the order of re-adds.
+        user_operations_to_readd: list[UserOperationV6 | UserOperationV7V8V9] = []
         # Multiple userops in one bundle share the inclusion tx hash, so
         # dedupe before scheduling warmups to avoid redundant RPC round
         # trips for the same transaction.
@@ -709,17 +717,44 @@ class BundlerManager:
                     f"{user_operation.number_of_add_to_mempool_attempts} "
                     "-readding it to the mempool"
                 )
-                try:
-                    user_operations_hashes_to_remove_from_monitoring.append(
-                        user_operation.user_operation_hash)
-                    await local_mempool.add_user_operation(
-                        user_operation)
-                except (ValidationException, ExecutionException, ValueError) as exp:
-                    logging.info(
-                        "failed readding to the mempool "
-                        f"user operation: {user_operation.user_operation_hash} "
-                        f" - cause : {str(exp)} "
-                    )
+                user_operations_hashes_to_remove_from_monitoring.append(
+                    user_operation.user_operation_hash)
+                user_operations_to_readd.append(user_operation)
+
+        if user_operations_to_readd:
+            # Parallelize ACROSS senders but stay serial WITHIN each sender.
+            # add_user_operation mutates per-sender state behind several
+            # awaits (validation, paymaster checks); two concurrent re-adds
+            # for the same sender could clobber each other's mempool insert.
+            # Different senders touch disjoint state, so they're safe to run
+            # concurrently — and that's where the wall-clock win is.
+            by_sender: dict[
+                str, list[UserOperationV6 | UserOperationV7V8V9]
+            ] = defaultdict(list)
+            for op in user_operations_to_readd:
+                by_sender[op.sender_address].append(op)
+
+            async def readd_chain(
+                ops: list[UserOperationV6 | UserOperationV7V8V9],
+            ) -> None:
+                for op in ops:
+                    try:
+                        await local_mempool.add_user_operation(op)
+                    except (
+                        ValidationException,
+                        ExecutionException,
+                        ValueError,
+                    ) as exp:
+                        logging.info(
+                            "failed readding to the mempool "
+                            f"user operation: {op.user_operation_hash} "
+                            f" - cause : {str(exp)} "
+                        )
+
+            await asyncio.gather(
+                *(readd_chain(ops) for ops in by_sender.values())
+            )
+
         for user_operation_hash in user_operations_hashes_to_remove_from_monitoring:
             del user_operations_to_monitor[user_operation_hash]
 
