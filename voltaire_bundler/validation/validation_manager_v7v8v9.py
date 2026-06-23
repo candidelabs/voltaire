@@ -12,6 +12,7 @@ import voltaire_bundler
 from voltaire_bundler.bundle.exceptions import \
     ValidationException, ValidationExceptionCode
 from voltaire_bundler.user_operation.user_operation_handler import decode_failed_op_event, decode_failed_op_with_revert_event
+from voltaire_bundler.utils import latest_block_cache
 from voltaire_bundler.user_operation.user_operation_v7v8v9 import UserOperationV7V8V9
 from voltaire_bundler.user_operation.user_operation_handler_v7v8v9 import \
     UserOperationHandlerV7V8V9
@@ -115,6 +116,10 @@ class ValidationManagerV7V8V9(ValidationManager):
             validated_at_block_timestamp,
             validated_at_block_hash
         ) = ValidationManagerV7V8V9.decode_validation_result(validation_result)
+        # Simulation just observed the chain head; share it with other
+        # paths (eg the userop-logs fast path) to skip a redundant
+        # eth_getBlockByNumber.
+        latest_block_cache.publish(validated_at_block_number)
         ValidationManagerV7V8V9.verify_sig_and_timestamp(
             return_info.sender_validation_data.sig_failed,
             return_info.sender_validation_data.valid_until,
