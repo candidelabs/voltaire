@@ -10,7 +10,7 @@ from voltaire_bundler.mempool.sender_mempool import VerifiedUserOperation
 from voltaire_bundler.custom_types import Address
 from voltaire_bundler.utils.cache import PersistentFIFOCache
 from voltaire_bundler.utils.eth_client_utils import \
-        get_block_info, send_rpc_request_to_eth_client
+        send_rpc_request_to_eth_client
 from voltaire_bundler.utils import latest_block_cache
 from typing import Any
 from ..gas.gas_manager import GasManager
@@ -328,10 +328,21 @@ class UserOperationHandler(ABC):
         logs_number_of_ranges: int,
     ):
         if logs_incremental_range > 0:
-            block_info = await get_block_info(
-                self.ethereum_node_eth_get_logs_urls)
-
-            latest_block_number = int(block_info[0], 16)
+            # Route the chain-head lookup through latest_block_cache so a
+            # burst of concurrent eth_getUserOperationReceipt / ByHash polls
+            # (each fanning out across v6/v7/v8/v9 EPs) doesn't translate to
+            # one eth_getBlockByNumber per (poll x EP) against the node.
+            # Validation publishes the head into the same cache, so under
+            # any inbound sendUserOperation load this returns cached.
+            cached_latest = await latest_block_cache.get_or_fetch(
+                self.ethereum_node_eth_get_logs_urls,
+            )
+            if cached_latest is None:
+                # Cache miss + RPC failure — preserve the previous failure
+                # mode (caller treats None as "no logs found") rather than
+                # crashing with TypeError below.
+                return None
+            latest_block_number = cached_latest
             if validated_at_block_hex is None:
                 earliest_block_number = latest_block_number - (
                     logs_incremental_range * logs_number_of_ranges)
