@@ -34,6 +34,45 @@ from voltaire_bundler.utils.load_bytecode import load_bytecode
 from ..mempool.reputation_manager import ReputationManager
 
 
+async def _gather_merged_storage_map(
+    ethereum_node_urls: list[str],
+    user_operations: list[UserOperationV6] | list[UserOperationV7V8V9],
+    conditional_rpc: ConditionalRpc | None,
+) -> dict[str, str | dict[str, str]] | None:
+    """Build the merged per-sender storage map for conditional-RPC submission.
+
+    Composed of two parts:
+      - per-op ``storage_map`` accumulated during validation
+      - sender storage root hash from ``eth_getProof`` against the latest block
+
+    Returns ``None`` when conditional_rpc is not configured (the only caller
+    that uses the map). Independent of the bundle simulation, so it's safe to
+    call whether or not the third-validation eth_call ran."""
+    if conditional_rpc is None:
+        return None
+    senders_root_hashs_operations: list[Any] = []
+    merged_storage_map: dict[str, str | dict[str, str]] = {}
+    for user_operation in user_operations:
+        if user_operation.storage_map is not None:
+            merged_storage_map |= user_operation.storage_map
+        senders_root_hashs_operations.append(
+            send_rpc_request_to_eth_client(
+                ethereum_node_urls,
+                "eth_getProof",
+                [user_operation.sender_address, [], "latest"],
+                None, "result"
+            )
+        )
+    senders_root_hashes = await asyncio.gather(*senders_root_hashs_operations)
+    for user_operation, root_hash_result in zip(
+        user_operations, senders_root_hashes
+    ):
+        merged_storage_map[
+            user_operation.sender_address
+        ] = root_hash_result["result"]["storageHash"]
+    return merged_storage_map
+
+
 async def _warm_inclusion_caches(
     ethereum_node_urls: list[str],
     user_operation_handler: UserOperationHandler,
@@ -832,6 +871,21 @@ class BundlerManager:
                 }
             }
 
+        # Fast mode skips the third (bundle-wide) validation eth_call.
+        # The locally computed bundle_gas_limit is already sufficient, and any
+        # userop that would have reverted will surface as a failed
+        # eth_sendRawTransaction at submit time — we trust upstream RPC
+        # reliability and trade per-op ban-on-failure for one fewer round
+        # trip per bundle. Storage proofs for conditional_rpc are still
+        # gathered because they don't depend on the bundle simulation.
+        if self.is_fast_mode:
+            merged_storage_map = await _gather_merged_storage_map(
+                self.ethereum_node_urls,
+                user_operations,
+                self.conditional_rpc,
+            )
+            return call_data, bundle_gas_limit, merged_storage_map, auth_list
+
         result = await send_rpc_request_to_eth_client(
             self.ethereum_node_urls,
             "eth_call",
@@ -843,30 +897,11 @@ class BundlerManager:
         )
 
         if "result" in result:
-            merged_storage_map = None
-            if self.conditional_rpc is not None:
-                senders_root_hashs_operations = list()
-                merged_storage_map = dict()
-                for user_operation in user_operations:
-                    if user_operation.storage_map is not None:
-                        merged_storage_map |= user_operation.storage_map
-                    senders_root_hashs_operations.append(
-                        send_rpc_request_to_eth_client(
-                            self.ethereum_node_urls,
-                            "eth_getProof",
-                            [user_operation.sender_address, [], "latest"],
-                            None, "result"
-                        )
-                    )
-                senders_root_hashes = await asyncio.gather(
-                        *senders_root_hashs_operations)
-
-                for user_operation, root_hash_result in zip(
-                    user_operations, senders_root_hashes
-                ):
-                    merged_storage_map[
-                        user_operation.sender_address
-                    ] = root_hash_result["result"]["storageHash"]
+            merged_storage_map = await _gather_merged_storage_map(
+                self.ethereum_node_urls,
+                user_operations,
+                self.conditional_rpc,
+            )
             return call_data, bundle_gas_limit, merged_storage_map, auth_list
         # the bundler performs the third validation of the entire UserOperations
         # bundle. If any of the UserOperations fail validation,
