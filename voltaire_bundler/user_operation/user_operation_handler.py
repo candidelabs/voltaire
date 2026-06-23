@@ -11,6 +11,7 @@ from voltaire_bundler.custom_types import Address
 from voltaire_bundler.utils.cache import PersistentFIFOCache
 from voltaire_bundler.utils.eth_client_utils import \
         get_block_info, send_rpc_request_to_eth_client
+from voltaire_bundler.utils import latest_block_cache
 from typing import Any
 from ..gas.gas_manager import GasManager
 from .models import (Log, ReceiptInfo, UserOperationReceiptInfo)
@@ -640,29 +641,12 @@ async def _cached_logs_block_still_canonical(
 async def _fetch_latest_block_number(
     ethereum_node_urls: list[str],
 ) -> int | None:
-    """Return the latest block number as int, or ``None`` on any failure.
-    Same 2 s budget + total exception safety as the eth_getLogs path; used
-    to size the recent-window fallback below."""
-    try:
-        block_info = await asyncio.wait_for(
-            get_block_info(ethereum_node_urls),
-            timeout=ETH_RPC_LOOKUP_TIMEOUT_S,
-        )
-        return int(block_info[0], 16)
-    except asyncio.TimeoutError:
-        logging.error(
-            "eth_getBlockByNumber(latest) timed out after %ss; "
-            "skipping recent-window fallback",
-            ETH_RPC_LOOKUP_TIMEOUT_S,
-        )
-        return None
-    except Exception:
-        logging.error(
-            "eth_getBlockByNumber(latest) failed; "
-            "skipping recent-window fallback",
-            exc_info=True,
-        )
-        return None
+    """Return a recent chain-head block number as int, or ``None`` on
+    failure. Reuses validation's already-observed head when fresh (<=2s
+    old) instead of issuing its own eth_getBlockByNumber; falls back to a
+    real RPC when the cache is stale. Same total exception safety as the
+    eth_getLogs path; used to size the recent-window fallback below."""
+    return await latest_block_cache.get_or_fetch(ethereum_node_urls)
 
 
 async def get_user_operation_logs_for_block_range(

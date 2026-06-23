@@ -12,6 +12,7 @@ from voltaire_bundler.user_operation.user_operation_handler import decode_failed
 from voltaire_bundler.user_operation.user_operation_v6 import UserOperationV6
 from voltaire_bundler.user_operation.user_operation_handler_v6 import \
     UserOperationHandlerV6
+from voltaire_bundler.utils import latest_block_cache
 from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
 from voltaire_bundler.utils.load_bytecode import load_bytecode
 from .validation_manager import ValidationManager
@@ -146,6 +147,10 @@ class ValidationManagerV6(ValidationManager):
             validated_at_block_timestamp,
             validated_at_block_hash
         ) = ValidationManagerV6.decode_validation_result(validation_result)
+        # Simulation just observed the chain head; share it with other
+        # paths (eg the userop-logs fast path) to skip a redundant
+        # eth_getBlockByNumber.
+        latest_block_cache.publish(validated_at_block_number)
         ValidationManagerV6.verify_sig_and_timestamp(
             return_info.sigFailed,
             return_info.validUntil,
