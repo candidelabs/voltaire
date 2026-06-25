@@ -846,7 +846,12 @@ class ExecutionEndpoint(Endpoint):
 
         max_fee_per_gas_hex = tasks[0]["result"]
 
-        if self.chain_id == 999 or self.chain_id == 998:  # HyperEVM
+        # HyperEVM and Arbitrum: eth_maxPriorityFeePerGas was skipped above,
+        # so tasks only has one element; default the priority fee to 0.
+        if (
+            self.chain_id == 999 or self.chain_id == 998 or
+            self.chain_id == 42161 or self.chain_id == 421614
+        ):
             max_priority_fee_per_gas_with_buffer = "0x0"
         else:
             max_priority_fee_per_gas_hex = tasks[1]["result"]
