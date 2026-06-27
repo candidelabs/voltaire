@@ -256,12 +256,14 @@ async def send_rpc_request_to_eth_client_no_retry(
                     str(traceback.format_exc()) +
                     str(excp)
                 )
-                await asyncio.sleep(1)  # in seconds
+                # Re-raise so the semaphore slot is freed immediately and
+                # callers see an explicit error instead of a silent None.
+                raise
             except:
                 logging.error(
                     str(traceback.format_exc())
                 )
-                await asyncio.sleep(1)  # in seconds
+                raise
 
 
 async def get_block_info(
