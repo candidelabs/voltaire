@@ -11,10 +11,9 @@ whenever the most recent validation was within ``max_age_s`` seconds.
 When the cache is stale (or never populated, e.g. quiet period right
 after startup), ``get_or_fetch`` falls back to a real
 ``eth_getBlockByNumber("latest")`` and writes the result back into the
-cache so the next caller in the same window hits.
-
-Single-value cache (the chain head is chain-global), no locking — all
-mutation happens synchronously between awaits in the asyncio loop.
+cache so the next caller in the same window hits. A module-level
+asyncio.Lock serialises the fallback fetch so a burst of stale reads
+collapses into a single upstream RPC instead of N parallel ones.
 """
 from __future__ import annotations
 
@@ -32,6 +31,10 @@ _FETCH_TIMEOUT_S = 2.0  # matches ETH_RPC_LOOKUP_TIMEOUT_S in user_operation_han
 
 _cached_block_number: int | None = None
 _cached_at_monotonic: float = 0.0
+# Created lazily so importing this module doesn't require a running event
+# loop (e.g. during unit-test collection). The first awaiter creates the
+# lock; subsequent awaiters share it.
+_fetch_lock: asyncio.Lock | None = None
 
 
 def publish(block_number: int) -> None:
@@ -47,6 +50,13 @@ def publish(block_number: int) -> None:
         _cached_at_monotonic = time.monotonic()
 
 
+def _get_fetch_lock() -> asyncio.Lock:
+    global _fetch_lock
+    if _fetch_lock is None:
+        _fetch_lock = asyncio.Lock()
+    return _fetch_lock
+
+
 async def get_or_fetch(
     ethereum_node_urls: list[str],
     max_age_s: float = 2.0,
@@ -58,7 +68,6 @@ async def get_or_fetch(
     inline implementation in user_operation_handler so callers that use
     this to size a fast-path window degrade to "skip the window" rather
     than crashing."""
-    global _cached_block_number, _cached_at_monotonic
     now = time.monotonic()
     if (
         _cached_block_number is not None
@@ -66,41 +75,54 @@ async def get_or_fetch(
     ):
         return _cached_block_number
 
-    try:
-        res: Any = await asyncio.wait_for(
-            send_rpc_request_to_eth_client(
-                ethereum_node_urls,
-                "eth_getBlockByNumber",
-                ["latest", False],
-            ),
-            timeout=_FETCH_TIMEOUT_S,
-        )
-    except asyncio.TimeoutError:
-        logging.error(
-            "eth_getBlockByNumber(latest) timed out after %ss; "
-            "latest-block cache miss returns None",
-            _FETCH_TIMEOUT_S,
-        )
-        return None
-    except Exception:
-        logging.error(
-            "eth_getBlockByNumber(latest) failed; "
-            "latest-block cache miss returns None",
-            exc_info=True,
-        )
-        return None
+    # Serialise fallback fetches: a burst of concurrent stale reads
+    # (e.g. first batch of getUserOperationReceipt polls after startup,
+    # before validation has called publish()) would otherwise each fire
+    # its own eth_getBlockByNumber, defeating the cache. Re-check inside
+    # the lock so only the first awaiter performs the RPC.
+    async with _get_fetch_lock():
+        now = time.monotonic()
+        if (
+            _cached_block_number is not None
+            and now - _cached_at_monotonic <= max_age_s
+        ):
+            return _cached_block_number
 
-    if not isinstance(res, dict):
-        return None
-    result = res.get("result")
-    if not isinstance(result, dict):
-        return None
-    raw = result.get("number")
-    if not isinstance(raw, str):
-        return None
-    try:
-        block_number = int(raw, 16)
-    except ValueError:
-        return None
-    publish(block_number)
-    return block_number
+        try:
+            res: Any = await asyncio.wait_for(
+                send_rpc_request_to_eth_client(
+                    ethereum_node_urls,
+                    "eth_getBlockByNumber",
+                    ["latest", False],
+                ),
+                timeout=_FETCH_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            logging.error(
+                "eth_getBlockByNumber(latest) timed out after %ss; "
+                "latest-block cache miss returns None",
+                _FETCH_TIMEOUT_S,
+            )
+            return None
+        except Exception:
+            logging.error(
+                "eth_getBlockByNumber(latest) failed; "
+                "latest-block cache miss returns None",
+                exc_info=True,
+            )
+            return None
+
+        if not isinstance(res, dict):
+            return None
+        result = res.get("result")
+        if not isinstance(result, dict):
+            return None
+        raw = result.get("number")
+        if not isinstance(raw, str):
+            return None
+        try:
+            block_number = int(raw, 16)
+        except ValueError:
+            return None
+        publish(block_number)
+        return block_number
