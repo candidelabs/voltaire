@@ -64,10 +64,13 @@ async def get_or_fetch(
     """Return a recent chain head, refreshing via eth_getBlockByNumber if
     the cached value is older than ``max_age_s`` (or never populated).
 
-    On RPC failure, returns ``None`` — same contract as the previous
-    inline implementation in user_operation_handler so callers that use
-    this to size a fast-path window degrade to "skip the window" rather
-    than crashing."""
+    On RPC failure with a populated cache: return the stale cached value
+    rather than ``None``, so a transient upstream blip doesn't propagate
+    as "no head known" to downstream chunking decisions (which then send
+    unbounded ``toBlock=latest`` requests and trigger provider block-
+    range caps). Only the genuinely-broken case — node was unreachable
+    AND cache was never populated — returns ``None``. Call ``warm()`` at
+    startup to make that case impossible in steady state."""
     now = time.monotonic()
     if (
         _cached_block_number is not None
@@ -100,29 +103,53 @@ async def get_or_fetch(
         except asyncio.TimeoutError:
             logging.error(
                 "eth_getBlockByNumber(latest) timed out after %ss; "
-                "latest-block cache miss returns None",
-                _FETCH_TIMEOUT_S,
+                "serving stale cached head (%s)",
+                _FETCH_TIMEOUT_S, _cached_block_number,
             )
-            return None
+            return _cached_block_number
         except Exception:
             logging.error(
                 "eth_getBlockByNumber(latest) failed; "
-                "latest-block cache miss returns None",
-                exc_info=True,
+                "serving stale cached head (%s)",
+                _cached_block_number, exc_info=True,
             )
-            return None
+            return _cached_block_number
 
         if not isinstance(res, dict):
-            return None
+            return _cached_block_number
         result = res.get("result")
         if not isinstance(result, dict):
-            return None
+            return _cached_block_number
         raw = result.get("number")
         if not isinstance(raw, str):
-            return None
+            return _cached_block_number
         try:
             block_number = int(raw, 16)
         except ValueError:
-            return None
+            return _cached_block_number
         publish(block_number)
         return block_number
+
+
+async def warm(ethereum_node_urls: list[str]) -> None:
+    """Populate the cache with one synchronous eth_getBlockByNumber.
+    Raises on failure so a bad ``--ethereum_node_url`` surfaces at
+    startup rather than at the first eth_getLogs sweep. Mirrors
+    ``GasPriceCache.warm``."""
+    res: Any = await asyncio.wait_for(
+        send_rpc_request_to_eth_client(
+            ethereum_node_urls,
+            "eth_getBlockByNumber",
+            ["latest", False],
+        ),
+        timeout=_FETCH_TIMEOUT_S,
+    )
+    if not isinstance(res, dict):
+        raise ValueError(f"eth_getBlockByNumber returned non-dict: {res!r}")
+    result = res.get("result")
+    if not isinstance(result, dict):
+        raise ValueError(f"eth_getBlockByNumber result not a dict: {result!r}")
+    raw = result.get("number")
+    if not isinstance(raw, str):
+        raise ValueError(f"eth_getBlockByNumber result.number not a str: {raw!r}")
+    publish(int(raw, 16))
