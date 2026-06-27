@@ -15,6 +15,7 @@ from voltaire_bundler.gas.gas_price_cache import (
     default_refresh_interval,
 )
 from voltaire_bundler.mempool.mempool_info import DEFAULT_MEMPOOL_INFO
+from voltaire_bundler.user_operation import user_operation_handler
 from voltaire_bundler.utils import latest_block_cache
 from voltaire_bundler.utils.eth_client_utils import \
     send_rpc_request_to_eth_client_no_retry
@@ -668,6 +669,22 @@ def initialize_argument_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
+        "--enable_logs_reorg_check",
+        help=(
+            "When set, on every eth_getUserOperationByHash/Receipt cache "
+            "hit issue an eth_getBlockByNumber to confirm the cached "
+            "block is still on the canonical chain — protects against "
+            "serving receipts for reorged-out blocks. Off by default: "
+            "the extra RPC per poll is expensive on busy bundlers and "
+            "the bundler-side monitor sweep evicts stale entries anyway."
+        ),
+        action="store_true",
+        default=_get_env_or_default(
+            "VOLTAIRE_ENABLE_LOGS_REORG_CHECK", False, lambda v: str(v).lower() in ("1", "true", "yes")
+        ),
+    )
+
+    parser.add_argument(
         "--health_check_interval",
         type=int,
         help=(
@@ -1125,6 +1142,17 @@ async def get_init_data(args: Namespace) -> InitData:
         )
         sys.exit(1)
     logging.info("Latest-block cache warmed.")
+
+    # Toggle the userop-logs reorg revalidation. Off by default — one
+    # eth_getBlockByNumber per cache hit is too expensive on busy
+    # bundlers, and the monitor sweep keeps the cache honest. Operators
+    # who serve receipts directly to end users on reorg-prone chains
+    # should turn it on with --enable_logs_reorg_check.
+    user_operation_handler.ENABLE_LOGS_REORG_CHECK = (
+        args.enable_logs_reorg_check
+    )
+    if args.enable_logs_reorg_check:
+        logging.info("Userop-logs cache reorg revalidation: ENABLED")
 
     if not args.disable_p2p:
         if args.p2p_canonical_mempool_id_08 is None:
