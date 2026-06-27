@@ -15,6 +15,7 @@ from voltaire_bundler.gas.gas_price_cache import (
     default_refresh_interval,
 )
 from voltaire_bundler.mempool.mempool_info import DEFAULT_MEMPOOL_INFO
+from voltaire_bundler.utils import latest_block_cache
 from voltaire_bundler.utils.eth_client_utils import \
     send_rpc_request_to_eth_client_no_retry
 
@@ -1108,6 +1109,22 @@ async def get_init_data(args: Namespace) -> InitData:
         "Gas-price cache warmed (refresh interval: "
         f"{gas_price_refresh_interval}s)."
     )
+
+    # Warm the chain-head cache for the same reason as gas_price_cache:
+    # the coalesced eth_getLogs sweep in bundle_manager pins toBlock to
+    # this resolved head; without a warmup, the first cron tick after
+    # startup falls through to an unresolved-bounds path that sends
+    # toBlock="latest" and trips provider block-range caps on the
+    # operator's first request.
+    try:
+        await latest_block_cache.warm(ethereum_node_urls_rearranged)
+    except Exception as exc:
+        logging.critical(
+            "Failed to warm latest-block cache from "
+            f"{ethereum_node_urls_rearranged}: {exc}"
+        )
+        sys.exit(1)
+    logging.info("Latest-block cache warmed.")
 
     if not args.disable_p2p:
         if args.p2p_canonical_mempool_id_08 is None:
