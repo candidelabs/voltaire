@@ -161,7 +161,14 @@ class GasPriceCache:
             except asyncio.TimeoutError:
                 pass
             try:
-                await self._refresh()
+                # Hold the same lock as the synchronous-fallback path so
+                # the two refreshes can't race: without it, a slow
+                # background gather can complete AFTER a fast fallback
+                # refresh and overwrite the fresher snapshot with stale
+                # data stamped at the (newer) write-time monotonic clock,
+                # defeating the staleness guard.
+                async with self._lock:
+                    await self._refresh()
             except Exception as exc:
                 # Background failures must not kill the loop. The staleness
                 # guard in ``get_snapshot`` will trigger a synchronous retry
