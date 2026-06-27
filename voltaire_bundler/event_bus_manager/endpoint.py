@@ -25,6 +25,14 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 
 IS_WINDOWS = sys.platform == "win32"
 
+# Upper bound on how long a Client.request() may wait for a matching response.
+# Sized well above the slowest realistic handler (gas estimation, which chains
+# multiple upstream eth_calls) so the timeout only fires when a response was
+# truly dropped — e.g. a handler exception path or a "p2p_received" request
+# that legitimately never replies. Without this bound, a missing reply would
+# hang the caller indefinitely.
+_REQUEST_TIMEOUT_S = 120.0
+
 RequestEvent = Dict[str, Any]
 ResponseEvent = Dict[str, Any]
 ResponseFunction = Callable[[Any], Awaitable[ResponseEvent]]
@@ -289,7 +297,7 @@ class Client:
             assert self._writer is not None and self._write_lock is not None
             req_id = self._next_id
             self._next_id += 1
-            fut: asyncio.Future[Any] = asyncio.get_event_loop().create_future()
+            fut: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
             self._pending[req_id] = fut
             envelope = {"id": req_id, "payload": request_event}
             try:
@@ -301,7 +309,15 @@ class Client:
                 if attempt == 0:
                     continue
                 raise
-            return await fut
+            try:
+                return await asyncio.wait_for(fut, timeout=_REQUEST_TIMEOUT_S)
+            except asyncio.TimeoutError:
+                # Response was dropped (handler exception path, p2p_received
+                # branch, or a peer that never replied). Surface as a timeout
+                # rather than hanging the caller; don't retry — the connection
+                # itself is still healthy.
+                self._pending.pop(req_id, None)
+                raise
         # Unreachable — the loop either returns or raises.
         raise RuntimeError("unreachable")
 
