@@ -533,6 +533,14 @@ EARLIEST_FALLBACK_RECENT_WINDOW = 5_000
 # triggering provider errors; wider ranges are split into parallel chunks.
 COALESCED_LOGS_CHUNK_BLOCKS = 1_000
 
+# Whether the userop-logs cache reorg revalidation runs on every cache
+# hit (one eth_getBlockByNumber per poll to confirm the cached block is
+# still canonical). Off by default — on a busy bundler the per-poll RPC
+# overhead outweighs the rare correctness win, and the monitor sweep
+# evicts stale entries on its own cadence. Toggled from cli_manager at
+# startup via --enable_logs_reorg_check.
+ENABLE_LOGS_REORG_CHECK = False
+
 
 def del_user_operation_logs_cache_entry(
     user_operation_hash: str,
@@ -682,6 +690,10 @@ async def get_user_operation_logs_for_block_range(
     cache_key = f"{entrypoint.lower()}:{user_operation_hash.lower()}"
     cached = await user_operation_logs_cache.get(cache_key)
     if cached is not None:
+        if not ENABLE_LOGS_REORG_CHECK:
+            # Reorg revalidation off (default): trust the cache; the
+            # monitor sweep evicts stale entries on its own cadence.
+            return cached
         if await _cached_logs_block_still_canonical(
             ethereum_node_eth_get_logs_urls, cached,
         ):
