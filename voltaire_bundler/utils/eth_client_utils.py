@@ -258,11 +258,8 @@ async def send_rpc_request_to_eth_client_no_retry(
                 )
                 # Re-raise so the semaphore slot is freed immediately and
                 # callers see an explicit error instead of a silent None.
-                raise
-            except:
-                logging.error(
-                    str(traceback.format_exc())
-                )
+                # CancelledError / KeyboardInterrupt / SystemExit are
+                # BaseException subclasses and propagate untouched by design.
                 raise
 
 
