@@ -539,7 +539,7 @@ def del_user_operation_logs_cache_entry(
     entrypoint: str,
 ) -> None:
     user_operation_logs_cache.delete(
-        f"{entrypoint.lower()}:{user_operation_hash}"
+        f"{entrypoint.lower()}:{user_operation_hash.lower()}"
     )
 
 
@@ -675,7 +675,11 @@ async def get_user_operation_logs_for_block_range(
     to_block_hex: str,
     earliest_fallback_recent_window: int = EARLIEST_FALLBACK_RECENT_WINDOW,
 ) -> list | None:
-    cache_key = f"{entrypoint.lower()}:{user_operation_hash}"
+    # Both halves are lowercased to match the writer in
+    # get_user_operation_logs_for_many_hashes (which derives the userop
+    # hash from topics[1].lower()); without it, a client polling with a
+    # checksummed/mixed-case hash misses the warmed entry.
+    cache_key = f"{entrypoint.lower()}:{user_operation_hash.lower()}"
     cached = await user_operation_logs_cache.get(cache_key)
     if cached is not None:
         if await _cached_logs_block_still_canonical(
