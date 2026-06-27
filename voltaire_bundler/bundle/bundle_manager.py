@@ -350,6 +350,18 @@ class BundlerManager:
         except ExecutionException as err:
             logging.error(f"Sending bundle failed with erro: {err.message}")
             return
+        except Exception:
+            # get_snapshot's synchronous-fallback path can raise non-Execution
+            # errors when the upstream node is unreachable or returns a
+            # malformed response (ValueError on int(..,16), KeyError on
+            # missing 'result', transport errors). Skipping the bundle round
+            # cleanly is preferable to leaking and aborting the entire cron
+            # task — the next tick will retry with a fresh snapshot.
+            logging.error(
+                "sending bundle failed: gas-price snapshot fetch errored",
+                exc_info=True,
+            )
+            return
 
         call_data, gas_estimation_hex, merged_storage_map, auth_list = call_data_tuple
 
