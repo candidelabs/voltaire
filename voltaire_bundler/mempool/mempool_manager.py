@@ -344,20 +344,48 @@ class LocalMempoolManager():
     ) -> dict[str, UserOperation]:
         bundle = {}
         senders_lowercase = [x.lower() for x in self.senders_to_senders_mempools.keys()]
-        validate_user_operations_ops = []
-        user_operations = []
+
+        if self.chain_id in (5031, 50312):  # Somnia
+            max_compined_bundle_user_operations_gas_limit = 500_000_000
+        else:
+            max_compined_bundle_user_operations_gas_limit = 15_000_000
+
+        # Collect candidate userops in fee-order (one per sender, head of
+        # queue). This is just dict iteration — no RPC.
+        candidates: list = []
         for sender_address in list(self.senders_to_senders_mempools):
             sender_mempool = self.senders_to_senders_mempools[sender_address]
             if len(sender_mempool.user_operation_hashs_to_verified_user_operation) > 0:
                 user_operation_hash = next(
                     iter(sender_mempool.user_operation_hashs_to_verified_user_operation)
                 )
-                user_operation = sender_mempool.user_operation_hashs_to_verified_user_operation[
-                    user_operation_hash].user_operation
-                user_operations.append(user_operation)
-                validate_user_operations_ops.append(
-                    self.validate_user_operation_to_bundle(user_operation)
+                candidates.append(
+                    sender_mempool.user_operation_hashs_to_verified_user_operation[
+                        user_operation_hash
+                    ].user_operation
                 )
+
+        # Pre-filter to the gas-cap prefix BEFORE validation. Each userop's
+        # max gas is derived from already-known fields (callGasLimit +
+        # verificationGasLimit + ...), no RPC needed. Validation
+        # (eth_call + debug_traceCall in safe mode) is the expensive piece —
+        # running it for ops past the cap is wasted upstream load. If a
+        # validated op later gets dropped (storage conflict, paymaster
+        # rejection), the bundle ships slightly smaller; the dropped op is
+        # reconsidered on the next tick.
+        accumulated = 0
+        prefix_end = 0
+        for op in candidates:
+            op_max = op.get_max_gas_without_pre_verification_gas()
+            if accumulated + op_max > max_compined_bundle_user_operations_gas_limit:
+                break
+            accumulated += op_max
+            prefix_end += 1
+        user_operations = candidates[:prefix_end]
+
+        validate_user_operations_ops = [
+            self.validate_user_operation_to_bundle(op) for op in user_operations
+        ]
         validation_results = await asyncio.gather(*validate_user_operations_ops)
 
         new_code_hash_ops = []
@@ -368,12 +396,6 @@ class LocalMempoolManager():
                 )
             )
         new_code_hash_results = await asyncio.gather(*new_code_hash_ops)
-        compined_gas_limit = 0
-
-        if self.chain_id in (5031, 50312):  # Somnia
-            max_compined_bundle_user_operations_gas_limit = 500_000_000
-        else:
-            max_compined_bundle_user_operations_gas_limit = 15_000_000
 
         for (
             user_operation,
@@ -388,20 +410,6 @@ class LocalMempoolManager():
             sender_mempool = self.senders_to_senders_mempools[sender_address]
             user_operation_hash = user_operation.user_operation_hash
             if is_valid:
-                user_operation_max_gas = user_operation.get_max_gas_without_pre_verification_gas()
-                if (
-                    (compined_gas_limit + user_operation_max_gas) >
-                    max_compined_bundle_user_operations_gas_limit
-                ):
-                    logging.debug(
-                        "user operation skipped for bundling because "
-                        "because max bundle gas limit was reached. "
-                        f"user operation max gas: {user_operation_max_gas}, "
-                        f"compined gas limit: {compined_gas_limit + user_operation_max_gas}, "
-                        f"max compined bundle gas limit: {max_compined_bundle_user_operations_gas_limit}"
-                    )
-                    continue
-
                 if storage_map is not None:
                     to_bundle = True
                     for storage_address_lowercase in storage_map.keys():
@@ -441,7 +449,6 @@ class LocalMempoolManager():
                     )
                 continue
 
-            compined_gas_limit += user_operation_max_gas
             bundle[user_operation_hash] = user_operation
             del sender_mempool.user_operation_hashs_to_verified_user_operation[
                 user_operation_hash]
