@@ -526,6 +526,13 @@ ETH_RPC_LOOKUP_TIMEOUT_S = 2.0
 # handler-driven calls override it with the operator-configured value.
 EARLIEST_FALLBACK_RECENT_WINDOW = 5_000
 
+# Maximum number of blocks per single eth_getLogs call in the coalesced
+# monitor-sweep helper. Most providers cap eth_getLogs at either a block-
+# range limit (Alchemy: 500, Infura: 1000) or a response-size limit
+# (~10k logs). 1000 blocks is the widest range that fits both without
+# triggering provider errors; wider ranges are split into parallel chunks.
+COALESCED_LOGS_CHUNK_BLOCKS = 1_000
+
 
 def del_user_operation_logs_cache_entry(
     user_operation_hash: str,
@@ -738,49 +745,93 @@ async def get_user_operation_logs_for_many_hashes(
         return {}
 
     wanted = {h.lower() for h in user_operation_hashes}
-    params = [
-        {
-            "address": entrypoint,
-            "topics": [USER_OPERATION_EVENT_DESCRIPTOR],
-            "fromBlock": from_block_hex,
-            "toBlock": to_block_hex,
-        }
-    ]
-    try:
-        res = await asyncio.wait_for(
-            send_rpc_request_to_eth_client(
-                ethereum_node_eth_get_logs_urls, "eth_getLogs", params,
-            ),
-            timeout=ETH_RPC_LOOKUP_TIMEOUT_S,
-        )
-    except asyncio.TimeoutError:
-        logging.error(
-            "coalesced eth_getLogs (%s -> %s, %d hashes) timed out after %ss; "
-            "treating all as miss",
-            from_block_hex, to_block_hex, len(wanted), ETH_RPC_LOOKUP_TIMEOUT_S,
-        )
-        return {}
-    except Exception:
-        logging.error(
-            "coalesced eth_getLogs (%s -> %s) failed; treating all as miss",
-            from_block_hex, to_block_hex, exc_info=True,
-        )
-        return {}
 
-    if not (
-        isinstance(res, dict)
-        and isinstance(res.get("result"), list)
+    # Resolve "latest" to a concrete block so the chunking below has a
+    # known upper bound. On failure, fall back to a single unchunked
+    # request — the helper is best-effort and the caller treats all
+    # misses as "still pending".
+    if to_block_hex == "latest":
+        latest_block = await latest_block_cache.get_or_fetch(
+            ethereum_node_eth_get_logs_urls,
+        )
+        to_block_int = latest_block
+    else:
+        try:
+            to_block_int = int(to_block_hex, 16)
+        except (TypeError, ValueError):
+            to_block_int = None
+    try:
+        from_block_int = int(from_block_hex, 16) if from_block_hex != "earliest" else 0
+    except (TypeError, ValueError):
+        from_block_int = None
+
+    if (
+        to_block_int is None
+        or from_block_int is None
+        or to_block_int - from_block_int <= COALESCED_LOGS_CHUNK_BLOCKS
     ):
-        return {}
+        # Single call covers the whole window (or we couldn't resolve
+        # bounds — fall back to the original behaviour and let the node
+        # reject if the range is too wide).
+        chunks = [(from_block_hex, to_block_hex)]
+    else:
+        # Split into parallel chunks of COALESCED_LOGS_CHUNK_BLOCKS each.
+        # eth_getLogs is inclusive on both ends, so adjacent chunks must
+        # not overlap — use a stride equal to the chunk size and a
+        # toBlock of (start + chunk_size - 1).
+        chunks = []
+        cursor = from_block_int
+        while cursor <= to_block_int:
+            chunk_end = min(cursor + COALESCED_LOGS_CHUNK_BLOCKS - 1, to_block_int)
+            chunks.append((hex(cursor), hex(chunk_end)))
+            cursor = chunk_end + 1
+
+    async def _one_chunk(cf: str, ct: str) -> list[Any]:
+        params = [
+            {
+                "address": entrypoint,
+                "topics": [USER_OPERATION_EVENT_DESCRIPTOR],
+                "fromBlock": cf,
+                "toBlock": ct,
+            }
+        ]
+        try:
+            res = await asyncio.wait_for(
+                send_rpc_request_to_eth_client(
+                    ethereum_node_eth_get_logs_urls, "eth_getLogs", params,
+                ),
+                timeout=ETH_RPC_LOOKUP_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            logging.error(
+                "coalesced eth_getLogs (%s -> %s, %d hashes) timed out after %ss; "
+                "treating chunk as miss",
+                cf, ct, len(wanted), ETH_RPC_LOOKUP_TIMEOUT_S,
+            )
+            return []
+        except Exception:
+            logging.error(
+                "coalesced eth_getLogs (%s -> %s) failed; treating chunk as miss",
+                cf, ct, exc_info=True,
+            )
+            return []
+        if not (isinstance(res, dict) and isinstance(res.get("result"), list)):
+            return []
+        return res["result"]
+
+    chunk_results = await asyncio.gather(
+        *(_one_chunk(cf, ct) for cf, ct in chunks)
+    )
 
     found: dict[str, list[Any]] = {}
-    for log_entry in res["result"]:
-        topics = log_entry.get("topics") or []
-        if len(topics) < 2:
-            continue
-        userop_hash = topics[1].lower()
-        if userop_hash in wanted:
-            found.setdefault(userop_hash, []).append(log_entry)
+    for chunk_logs in chunk_results:
+        for log_entry in chunk_logs:
+            topics = log_entry.get("topics") or []
+            if len(topics) < 2:
+                continue
+            userop_hash = topics[1].lower()
+            if userop_hash in wanted:
+                found.setdefault(userop_hash, []).append(log_entry)
 
     # Warm the per-userop logs cache for each hit so the client's next
     # getUserOperationByHash/Receipt poll hits memory/disk instead of
