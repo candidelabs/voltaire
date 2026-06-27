@@ -769,26 +769,32 @@ async def get_user_operation_logs_for_many_hashes(
     except (TypeError, ValueError):
         from_block_int = None
 
-    if (
-        to_block_int is None
-        or from_block_int is None
-        or to_block_int - from_block_int <= COALESCED_LOGS_CHUNK_BLOCKS
-    ):
-        # Single call covers the whole window (or we couldn't resolve
-        # bounds — fall back to the original behaviour and let the node
-        # reject if the range is too wide).
+    if to_block_int is None or from_block_int is None:
+        # Couldn't resolve bounds (e.g. transient latest_block_cache
+        # failure). Fall back to a single call with the original strings
+        # and let the node decide — better than swallowing the round.
         chunks = [(from_block_hex, to_block_hex)]
     else:
-        # Split into parallel chunks of COALESCED_LOGS_CHUNK_BLOCKS each.
-        # eth_getLogs is inclusive on both ends, so adjacent chunks must
-        # not overlap — use a stride equal to the chunk size and a
-        # toBlock of (start + chunk_size - 1).
-        chunks = []
-        cursor = from_block_int
-        while cursor <= to_block_int:
-            chunk_end = min(cursor + COALESCED_LOGS_CHUNK_BLOCKS - 1, to_block_int)
-            chunks.append((hex(cursor), hex(chunk_end)))
-            cursor = chunk_end + 1
+        # Always pin the call to the resolved upper bound (hex(to_block_int)),
+        # NOT the original "latest" string. If we passed "latest", the node
+        # would interpret it against its own head — and on fast chains
+        # (Arbitrum's 250ms blocks vs the cache's TTL) the cached head can
+        # be several blocks behind real head, tipping a "fits in 1000"
+        # decision into a wider node-side range and triggering provider
+        # block-range caps.
+        if to_block_int - from_block_int <= COALESCED_LOGS_CHUNK_BLOCKS:
+            chunks = [(hex(from_block_int), hex(to_block_int))]
+        else:
+            # Split into parallel chunks of COALESCED_LOGS_CHUNK_BLOCKS each.
+            # eth_getLogs is inclusive on both ends, so adjacent chunks must
+            # not overlap — use a stride equal to the chunk size and a
+            # toBlock of (start + chunk_size - 1).
+            chunks = []
+            cursor = from_block_int
+            while cursor <= to_block_int:
+                chunk_end = min(cursor + COALESCED_LOGS_CHUNK_BLOCKS - 1, to_block_int)
+                chunks.append((hex(cursor), hex(chunk_end)))
+                cursor = chunk_end + 1
 
     async def _one_chunk(cf: str, ct: str) -> list[Any]:
         params = [
