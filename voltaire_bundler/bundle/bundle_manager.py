@@ -600,20 +600,27 @@ class BundlerManager:
         # logs-only node is slightly behind and reports the userop as still
         # pending.
         if user_operations_to_monitor:
-            earliest_block_int = min(
+            validated_blocks = [
                 int(op.validated_at_block_hex, 16)
                 for op in user_operations_to_monitor.values()
                 if op.validated_at_block_hex is not None
-            )
-            user_operations_logs_by_hash = (
-                await get_user_operation_logs_for_many_hashes(
-                    self.ethereum_node_urls,
-                    list(user_operations_to_monitor.keys()),
-                    entrypoint,
-                    hex(earliest_block_int),
-                    "latest",
+            ]
+            if validated_blocks:
+                user_operations_logs_by_hash = (
+                    await get_user_operation_logs_for_many_hashes(
+                        self.ethereum_node_urls,
+                        list(user_operations_to_monitor.keys()),
+                        entrypoint,
+                        hex(min(validated_blocks)),
+                        "latest",
+                    )
                 )
-            )
+            else:
+                # No monitored op has a known validation block (e.g. all are
+                # mid-validation right after a restart). Skip the coalesced
+                # scan this tick — the next tick will pick them up once
+                # validation has stamped validated_at_block_hex.
+                user_operations_logs_by_hash = {}
         else:
             user_operations_logs_by_hash = {}
 
