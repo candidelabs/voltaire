@@ -715,9 +715,25 @@ class BundlerManager:
                             f"user operation: {op.user_operation_hash} "
                             f" - cause : {str(exp)} "
                         )
+                    except Exception:
+                        # Don't let an unexpected per-op failure (TypeError,
+                        # KeyError, transport errors not normalised to
+                        # ValueError, etc.) escape and cancel the in-flight
+                        # re-adds for other senders via gather. Log and move
+                        # on — the userop stays removed from monitoring this
+                        # tick, same as the explicitly-caught failure modes.
+                        logging.exception(
+                            "unexpected error readding user operation: %s",
+                            op.user_operation_hash,
+                        )
 
+            # return_exceptions=True belt-and-suspenders against a future
+            # change to readd_chain leaking an exception; without it, one
+            # sender's failure cancels every other sender's coroutine and
+            # the deletion loop below never runs.
             await asyncio.gather(
-                *(readd_chain(ops) for ops in by_sender.values())
+                *(readd_chain(ops) for ops in by_sender.values()),
+                return_exceptions=True,
             )
 
         for user_operation_hash in user_operations_hashes_to_remove_from_monitoring:
