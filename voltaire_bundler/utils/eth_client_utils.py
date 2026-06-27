@@ -169,12 +169,12 @@ async def send_rpc_request_to_eth_client(
             )
             logging.error(f"traceback: {str(traceback.format_exc())}")
             await asyncio.sleep(1)
-        except:
-            logging.error(
-                f"Attempt No. {i+1} to call node rpc failed."
-            )
-            logging.error(f"traceback: {str(traceback.format_exc())}")
-            await asyncio.sleep(1)
+        # No bare except: CancelledError / KeyboardInterrupt / SystemExit
+        # are BaseException subclasses and propagate untouched by design.
+        # Without this, a wait_for(...) timeout on a caller (very common
+        # while queued on the per-method semaphore under load) was being
+        # logged as a node-RPC failure, swamping operator logs with
+        # misleading errors when nothing on the node was actually wrong.
         else:
             if "error" in json_result:
                 if "message" in json_result["error"]:
