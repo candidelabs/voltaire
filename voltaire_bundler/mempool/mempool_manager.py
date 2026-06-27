@@ -397,7 +397,7 @@ class LocalMempoolManager():
                         "user operation skipped for bundling because "
                         "because max bundle gas limit was reached. "
                         f"user operation max gas: {user_operation_max_gas}, "
-                        f"compined cas limit: {compined_gas_limit + user_operation_max_gas}, "
+                        f"compined gas limit: {compined_gas_limit + user_operation_max_gas}, "
                         f"max compined bundle gas limit: {max_compined_bundle_user_operations_gas_limit}"
                     )
                     continue
