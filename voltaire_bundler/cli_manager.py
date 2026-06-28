@@ -675,8 +675,13 @@ def initialize_argument_parser() -> ArgumentParser:
             "hit issue an eth_getBlockByNumber to confirm the cached "
             "block is still on the canonical chain — protects against "
             "serving receipts for reorged-out blocks. Off by default: "
-            "the extra RPC per poll is expensive on busy bundlers and "
-            "the bundler-side monitor sweep evicts stale entries anyway."
+            "the extra RPC per poll is expensive on busy bundlers. With "
+            "this off, the userop-logs cache is only evicted when a "
+            "client poll happens to detect a missing transaction "
+            "(del_user_operation_logs_cache_entry), so a userop whose "
+            "block reorged out AND was not re-bundled AND is never "
+            "polled stays cached — turn this on if you serve receipts "
+            "directly to end users on a reorg-prone chain."
         ),
         action="store_true",
         default=_get_env_or_default(
@@ -1145,9 +1150,10 @@ async def get_init_data(args: Namespace) -> InitData:
 
     # Toggle the userop-logs reorg revalidation. Off by default — one
     # eth_getBlockByNumber per cache hit is too expensive on busy
-    # bundlers, and the monitor sweep keeps the cache honest. Operators
-    # who serve receipts directly to end users on reorg-prone chains
-    # should turn it on with --enable_logs_reorg_check.
+    # bundlers. With this off, eviction is opportunistic (only when a
+    # client poll's tx-by-hash lookup misses), so a reorged-out userop
+    # that no one polls stays cached. Turn on for reorg-prone chains
+    # served directly to end users.
     user_operation_handler.ENABLE_LOGS_REORG_CHECK = (
         args.enable_logs_reorg_check
     )
