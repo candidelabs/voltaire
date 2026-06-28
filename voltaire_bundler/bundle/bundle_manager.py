@@ -6,6 +6,14 @@ import logging
 import math
 from typing import Any, cast
 
+# Per-userop floor on "old enough to be worth checking for inclusion".
+# Below this age the userop almost certainly hasn't been mined yet, so
+# the coalesced eth_getLogs would return no useful new data. Applied
+# per EP: a monitor set with no userop past this age skips its sweep
+# this tick. Short-circuits on the first match, so even a large monitor
+# set with a few stale entries returns immediately.
+MIN_INCLUSION_CHECK_AGE_S = 2.0
+
 from eth_account import Account
 from eth_abi import encode
 
@@ -226,23 +234,38 @@ class BundlerManager:
         self.user_operations_to_ban = {}
         await asyncio.gather(*useroperation_banning_ops)
 
+    @staticmethod
+    def _monitor_set_has_op_past_age(
+        monitor_set: dict,
+        now: datetime,
+        min_age_s: float = MIN_INCLUSION_CHECK_AGE_S,
+    ) -> bool:
+        """True if any userop in the monitor set has been waiting long
+        enough to be worth checking for inclusion. Returns False when the
+        set is empty or every userop is too young — skips the upstream
+        eth_getLogs RPC entirely on that branch."""
+        for op in monitor_set.values():
+            last_add = op.last_add_to_mempool_date
+            if last_add is None:
+                # No add timestamp yet: treat as old enough so we don't
+                # silently leave it un-checked forever.
+                return True
+            if (now - last_add).total_seconds() >= min_age_s:
+                return True
+        return False
+
     async def update_send_queue_and_monitor_queue(self) -> None:
-        tasks_arr = [
-            self.remove_included_and_readd_to_mempool_userops_monitoring(
-                self.user_operations_to_monitor_v9,
-                self.local_mempool_manager_v9.entrypoint,
-                self.local_mempool_manager_v9
-            ),
-            self.remove_included_and_readd_to_mempool_userops_monitoring(
-                self.user_operations_to_monitor_v8,
-                self.local_mempool_manager_v8.entrypoint,
-                self.local_mempool_manager_v8
-            ),
-            self.remove_included_and_readd_to_mempool_userops_monitoring(
-                self.user_operations_to_monitor_v7,
-                self.local_mempool_manager_v7.entrypoint,
-                self.local_mempool_manager_v7
-            ),
+        # The bundle-build tasks (get_user_operations_to_bundle for each
+        # EP version) ALWAYS run on every tick — they're the user-facing
+        # latency path. The monitor sweep tasks (inclusion check via
+        # coalesced eth_getLogs + stale-userop re-add) are gated PER EP
+        # by per-userop age: if no userop in that EP's monitor set is
+        # past MIN_INCLUSION_CHECK_AGE_S, skip the sweep this tick — the
+        # logs scan would return nothing useful and the re-add path is
+        # gated by its own 5s threshold anyway. Effect: busy mempools
+        # sweep often, quiet ones don't; sub-second bundle_interval
+        # doesn't translate to one eth_getLogs per tick.
+        bundle_tasks = [
             self.local_mempool_manager_v9.get_user_operations_to_bundle(
                 self.conditional_rpc is not None
             ),
@@ -251,37 +274,83 @@ class BundlerManager:
             ),
             self.local_mempool_manager_v7.get_user_operations_to_bundle(
                 self.conditional_rpc is not None
-            )
+            ),
         ]
         if self.local_mempool_manager_v6 is not None:
-            tasks_arr += [
+            bundle_tasks.append(
+                self.local_mempool_manager_v6.get_user_operations_to_bundle(
+                    self.conditional_rpc is not None
+                )
+            )
+
+        sweep_tasks: list = []
+        now = datetime.now()
+        if self._monitor_set_has_op_past_age(
+            self.user_operations_to_monitor_v9, now
+        ):
+            sweep_tasks.append(
+                self.remove_included_and_readd_to_mempool_userops_monitoring(
+                    self.user_operations_to_monitor_v9,
+                    self.local_mempool_manager_v9.entrypoint,
+                    self.local_mempool_manager_v9
+                )
+            )
+        if self._monitor_set_has_op_past_age(
+            self.user_operations_to_monitor_v8, now
+        ):
+            sweep_tasks.append(
+                self.remove_included_and_readd_to_mempool_userops_monitoring(
+                    self.user_operations_to_monitor_v8,
+                    self.local_mempool_manager_v8.entrypoint,
+                    self.local_mempool_manager_v8
+                )
+            )
+        if self._monitor_set_has_op_past_age(
+            self.user_operations_to_monitor_v7, now
+        ):
+            sweep_tasks.append(
+                self.remove_included_and_readd_to_mempool_userops_monitoring(
+                    self.user_operations_to_monitor_v7,
+                    self.local_mempool_manager_v7.entrypoint,
+                    self.local_mempool_manager_v7
+                )
+            )
+        if (
+            self.local_mempool_manager_v6 is not None
+            and self._monitor_set_has_op_past_age(
+                self.user_operations_to_monitor_v6, now
+            )
+        ):
+            sweep_tasks.append(
                 self.remove_included_and_readd_to_mempool_userops_monitoring(
                     self.user_operations_to_monitor_v6,
                     self.local_mempool_manager_v6.entrypoint,
                     self.local_mempool_manager_v6
-                ),
-                self.local_mempool_manager_v6.get_user_operations_to_bundle(
-                    self.conditional_rpc is not None
-                ),
-            ]
-        tasks = await asyncio.gather(*tasks_arr)
+                )
+            )
 
-        user_operations_to_bundle_v9 = cast(dict[str, UserOperationV7V8V9], tasks[3])
+        # Run bundle tasks + (optional) sweep tasks concurrently. The
+        # sweep coroutines mutate user_operations_to_monitor_*; the
+        # bundle coroutines don't touch those dicts, so this is safe.
+        all_results = await asyncio.gather(*bundle_tasks, *sweep_tasks)
+
+        bundle_results = all_results[:len(bundle_tasks)]
+        user_operations_to_bundle_v9 = cast(dict[str, UserOperationV7V8V9], bundle_results[0])
         self.bundles_to_send_v9.append(user_operations_to_bundle_v9)
         self.user_operations_to_monitor_v9 |= copy.deepcopy(user_operations_to_bundle_v9)
 
-        user_operations_to_bundle_v8 = cast(dict[str, UserOperationV7V8V9], tasks[4])
+        user_operations_to_bundle_v8 = cast(dict[str, UserOperationV7V8V9], bundle_results[1])
         self.bundles_to_send_v8.append(user_operations_to_bundle_v8)
         self.user_operations_to_monitor_v8 |= copy.deepcopy(user_operations_to_bundle_v8)
 
-        user_operations_to_bundle_v7 = cast(dict[str, UserOperationV7V8V9], tasks[5])
+        user_operations_to_bundle_v7 = cast(dict[str, UserOperationV7V8V9], bundle_results[2])
         self.bundles_to_send_v7.append(user_operations_to_bundle_v7)
         self.user_operations_to_monitor_v7 |= copy.deepcopy(user_operations_to_bundle_v7)
 
         if self.local_mempool_manager_v6 is not None:
             if self.bundles_to_send_v6 is None:
                 self.bundles_to_send_v6 = []
-            user_operations_to_bundle_v6 = cast(dict[str, UserOperationV6], tasks[7])
+            user_operations_to_bundle_v6 = cast(dict[str, UserOperationV6], bundle_results[3])
             self.bundles_to_send_v6.append(user_operations_to_bundle_v6)
             self.user_operations_to_monitor_v6 |= copy.deepcopy(
                 user_operations_to_bundle_v6)
