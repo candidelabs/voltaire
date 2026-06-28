@@ -533,6 +533,13 @@ EARLIEST_FALLBACK_RECENT_WINDOW = 5_000
 # triggering provider errors; wider ranges are split into parallel chunks.
 COALESCED_LOGS_CHUNK_BLOCKS = 1_000
 
+# Maximum number of chunk requests in flight at once. Prevents a post-
+# restart backfill spanning tens of thousands of blocks from fanning
+# out into 100+ parallel eth_getLogs calls, which would trip provider
+# 429s and starve the per-method outbound semaphore queue for every
+# other RPC (validation, eth_getTransactionCount, etc.).
+COALESCED_LOGS_MAX_CONCURRENT_CHUNKS = 8
+
 # Whether the userop-logs cache reorg revalidation runs on every cache
 # hit (one eth_getBlockByNumber per poll to confirm the cached block is
 # still canonical). Off by default — on a busy bundler the per-poll RPC
@@ -691,8 +698,13 @@ async def get_user_operation_logs_for_block_range(
     cached = await user_operation_logs_cache.get(cache_key)
     if cached is not None:
         if not ENABLE_LOGS_REORG_CHECK:
-            # Reorg revalidation off (default): trust the cache; the
-            # monitor sweep evicts stale entries on its own cadence.
+            # Reorg revalidation off (default): trust the cache. Eviction
+            # is opportunistic — only del_user_operation_logs_cache_entry
+            # (called from get_user_operation_receipt when the cached
+            # log's tx hash returns null from eth_getTransactionReceipt)
+            # removes stale entries. A reorged-out userop that no one
+            # ever polls stays cached; turn on --enable_logs_reorg_check
+            # for end-user-facing setups on reorg-prone chains.
             return cached
         if await _cached_logs_block_still_canonical(
             ethereum_node_eth_get_logs_urls, cached,
@@ -786,6 +798,19 @@ async def get_user_operation_logs_for_many_hashes(
         # failure). Fall back to a single call with the original strings
         # and let the node decide — better than swallowing the round.
         chunks = [(from_block_hex, to_block_hex)]
+    elif to_block_int < from_block_int:
+        # latest_block_cache returned a stale head older than the userop's
+        # validation block. Issuing a backwards-range eth_getLogs is a
+        # provider error / empty-result depending on the node; skip the
+        # sweep cleanly so the next tick can retry once the cache catches
+        # up. Don't fall back to "latest" — that re-introduces the
+        # provider-block-range-cap bug 44842a0 was added to fix.
+        logging.debug(
+            "coalesced eth_getLogs skipped: stale latest_block_cache "
+            "(from=%s > to=%s); next tick will retry",
+            hex(from_block_int), hex(to_block_int),
+        )
+        return {}
     else:
         # Always pin the call to the resolved upper bound (hex(to_block_int)),
         # NOT the original "latest" string. If we passed "latest", the node
@@ -808,38 +833,41 @@ async def get_user_operation_logs_for_many_hashes(
                 chunks.append((hex(cursor), hex(chunk_end)))
                 cursor = chunk_end + 1
 
+    chunk_semaphore = asyncio.Semaphore(COALESCED_LOGS_MAX_CONCURRENT_CHUNKS)
+
     async def _one_chunk(cf: str, ct: str) -> list[Any]:
-        params = [
-            {
-                "address": entrypoint,
-                "topics": [USER_OPERATION_EVENT_DESCRIPTOR],
-                "fromBlock": cf,
-                "toBlock": ct,
-            }
-        ]
-        try:
-            res = await asyncio.wait_for(
-                send_rpc_request_to_eth_client(
-                    ethereum_node_eth_get_logs_urls, "eth_getLogs", params,
-                ),
-                timeout=ETH_RPC_LOOKUP_TIMEOUT_S,
-            )
-        except asyncio.TimeoutError:
-            logging.error(
-                "coalesced eth_getLogs (%s -> %s, %d hashes) timed out after %ss; "
-                "treating chunk as miss",
-                cf, ct, len(wanted), ETH_RPC_LOOKUP_TIMEOUT_S,
-            )
-            return []
-        except Exception:
-            logging.error(
-                "coalesced eth_getLogs (%s -> %s) failed; treating chunk as miss",
-                cf, ct, exc_info=True,
-            )
-            return []
-        if not (isinstance(res, dict) and isinstance(res.get("result"), list)):
-            return []
-        return res["result"]
+        async with chunk_semaphore:
+            params = [
+                {
+                    "address": entrypoint,
+                    "topics": [USER_OPERATION_EVENT_DESCRIPTOR],
+                    "fromBlock": cf,
+                    "toBlock": ct,
+                }
+            ]
+            try:
+                res = await asyncio.wait_for(
+                    send_rpc_request_to_eth_client(
+                        ethereum_node_eth_get_logs_urls, "eth_getLogs", params,
+                    ),
+                    timeout=ETH_RPC_LOOKUP_TIMEOUT_S,
+                )
+            except asyncio.TimeoutError:
+                logging.error(
+                    "coalesced eth_getLogs (%s -> %s, %d hashes) timed out after %ss; "
+                    "treating chunk as miss",
+                    cf, ct, len(wanted), ETH_RPC_LOOKUP_TIMEOUT_S,
+                )
+                return []
+            except Exception:
+                logging.error(
+                    "coalesced eth_getLogs (%s -> %s) failed; treating chunk as miss",
+                    cf, ct, exc_info=True,
+                )
+                return []
+            if not (isinstance(res, dict) and isinstance(res.get("result"), list)):
+                return []
+            return res["result"]
 
     chunk_results = await asyncio.gather(
         *(_one_chunk(cf, ct) for cf, ct in chunks)
