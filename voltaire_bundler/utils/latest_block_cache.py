@@ -41,13 +41,17 @@ def publish(block_number: int) -> None:
     """Record a freshly observed chain head. Cheap, sync, no I/O.
 
     Called from validation paths so the cache stays warm under load
-    without ever issuing eth_getBlockByNumber on its own."""
+    without ever issuing eth_getBlockByNumber on its own.
+
+    The most recent publish always wins, even if it carries a LOWER
+    block number than the previous cached value: a reorg can legitimately
+    drop the canonical head, and rejecting the lower value would leave
+    the cache stuck on a phantom block that no longer exists on chain.
+    A late-arriving validation with a stale observation is the trade-off
+    — it self-corrects on the next ``get_or_fetch`` past max_age_s."""
     global _cached_block_number, _cached_at_monotonic
-    # Only move forward — a stale-by-a-block validation result published
-    # after a newer one shouldn't rewind the cache.
-    if _cached_block_number is None or block_number >= _cached_block_number:
-        _cached_block_number = block_number
-        _cached_at_monotonic = time.monotonic()
+    _cached_block_number = block_number
+    _cached_at_monotonic = time.monotonic()
 
 
 def _get_fetch_lock() -> asyncio.Lock:
