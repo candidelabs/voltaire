@@ -243,13 +243,18 @@ class BundlerManager:
         """True if any userop in the monitor set has been waiting long
         enough to be worth checking for inclusion. Returns False when the
         set is empty or every userop is too young — skips the upstream
-        eth_getLogs RPC entirely on that branch."""
+        eth_getLogs RPC entirely on that branch.
+
+        Entries with last_add_to_mempool_date=None are skipped (not
+        treated as "old enough"): they're in an inconsistent state and
+        the sweep body would skip them anyway via the matching guard,
+        so triggering a full sweep on their account would be wasted RPC.
+        The mismatched-state op will be handled the next time something
+        repairs the timestamp (typically a re-add via the mempool)."""
         for op in monitor_set.values():
             last_add = op.last_add_to_mempool_date
             if last_add is None:
-                # No add timestamp yet: treat as old enough so we don't
-                # silently leave it un-checked forever.
-                return True
+                continue
             if (now - last_add).total_seconds() >= min_age_s:
                 return True
         return False
@@ -705,13 +710,19 @@ class BundlerManager:
         else:
             user_operations_logs_by_hash = {}
 
-        user_operations_hashes_to_remove_from_monitoring = []
-        # Stale monitor entries (past the 5s threshold) get re-added below.
-        # We collect them first and run all the re-validations concurrently
-        # via asyncio.gather — the old code awaited each add_user_operation
-        # serially, which under load means N userops × one validation
-        # RPC-per-userop of wall time tacked onto every cron tick, with
-        # nothing depending on the order of re-adds.
+        # Hashes that get removed from monitoring no matter what: either
+        # successfully included on chain, or expired past the 20-attempt
+        # threshold (giving up).
+        unconditional_remove: list[str] = []
+        # Stale-but-not-yet-given-up monitor entries that we're going to
+        # try to re-add this tick. They're removed from monitoring ONLY if
+        # the re-add either succeeds OR fails with a known error. An
+        # unexpected exception (TypeError, transport error, etc.) leaves
+        # the userop in monitor so the next tick retries — without this
+        # split, c18aeb6's broad except silently deleted userops that
+        # the bundler had no business dropping.
+        stale_hashes_attempted: list[str] = []
+        readd_completed: set[str] = set()
         user_operations_to_readd: list[UserOperationV6 | UserOperationV7V8V9] = []
         # Multiple userops in one bundle share the inclusion tx hash, so
         # dedupe before scheduling warmups to avoid redundant RPC round
@@ -721,7 +732,21 @@ class BundlerManager:
             user_operation_log = user_operations_logs_by_hash.get(
                 user_operation.user_operation_hash
             )
-            assert user_operation.last_add_to_mempool_date is not None
+            if user_operation.last_add_to_mempool_date is None:
+                # Inconsistent state — userop in monitor without a mempool-add
+                # timestamp. add_user_operation always stamps this BEFORE the
+                # op can reach the monitor set, so None here indicates either
+                # a future code path that bypasses the mempool (p2p restore,
+                # debug RPC) or a deepcopy edge case. Skip rather than asserting
+                # (under -O the assert is a no-op and the next-line subtraction
+                # would TypeError) — the next mempool roundtrip will populate
+                # the timestamp and the next sweep will pick it up.
+                logging.warning(
+                    "monitor entry %s has no last_add_to_mempool_date; "
+                    "skipping inclusion check this tick",
+                    user_operation.user_operation_hash,
+                )
+                continue
             time_diff_sec = (
                 datetime.now() - user_operation.last_add_to_mempool_date
             ).total_seconds()
@@ -731,7 +756,7 @@ class BundlerManager:
                     "was included onchain after adding to mempool for "
                     f"{user_operation.number_of_add_to_mempool_attempts} times"
                 )
-                user_operations_hashes_to_remove_from_monitoring.append(
+                unconditional_remove.append(
                     user_operation.user_operation_hash)
                 # Preemptively warm the tx-by-hash and tx-receipt caches in
                 # the background so the next client poll for this userop
@@ -754,7 +779,7 @@ class BundlerManager:
                     "was not included onchain yet after readding to mempool 20 times"
                     "-drooping the userop from the monitoring system"
                 )
-                user_operations_hashes_to_remove_from_monitoring.append(
+                unconditional_remove.append(
                     user_operation.user_operation_hash)
             elif time_diff_sec > 5:
                 logging.info(
@@ -763,7 +788,7 @@ class BundlerManager:
                     f"{user_operation.number_of_add_to_mempool_attempts} "
                     "-readding it to the mempool"
                 )
-                user_operations_hashes_to_remove_from_monitoring.append(
+                stale_hashes_attempted.append(
                     user_operation.user_operation_hash)
                 user_operations_to_readd.append(user_operation)
 
@@ -797,28 +822,40 @@ class BundlerManager:
                             f" - cause : {str(exp)} "
                         )
                     except Exception:
-                        # Don't let an unexpected per-op failure (TypeError,
-                        # KeyError, transport errors not normalised to
-                        # ValueError, etc.) escape and cancel the in-flight
-                        # re-adds for other senders via gather. Log and move
-                        # on — the userop stays removed from monitoring this
-                        # tick, same as the explicitly-caught failure modes.
+                        # Unexpected failure (TypeError, KeyError, transport
+                        # errors not normalised to ValueError, etc.). Log
+                        # and KEEP the op in monitor for the next tick to
+                        # retry — don't add to readd_completed. Catching
+                        # this also prevents the exception from escaping
+                        # the gather and cancelling sibling re-adds.
                         logging.exception(
                             "unexpected error readding user operation: %s",
                             op.user_operation_hash,
                         )
+                        continue
+                    # Treat both successful re-add and known-failure (caught
+                    # above) as "done with this userop this tick" — both
+                    # paths fall through to here.
+                    readd_completed.add(op.user_operation_hash)
 
             # return_exceptions=True belt-and-suspenders against a future
             # change to readd_chain leaking an exception; without it, one
             # sender's failure cancels every other sender's coroutine and
-            # the deletion loop below never runs.
+            # the completion-tracking below would miss entries.
             await asyncio.gather(
                 *(readd_chain(ops) for ops in by_sender.values()),
                 return_exceptions=True,
             )
 
-        for user_operation_hash in user_operations_hashes_to_remove_from_monitoring:
+        # Final removal list: unconditional removals (included on-chain
+        # or expired) plus stale ops whose re-add attempt actually
+        # completed. Stale ops with an unexpected failure stay in monitor
+        # for the next tick to retry.
+        for user_operation_hash in unconditional_remove:
             del user_operations_to_monitor[user_operation_hash]
+        for user_operation_hash in stale_hashes_attempted:
+            if user_operation_hash in readd_completed:
+                del user_operations_to_monitor[user_operation_hash]
 
     def update_monitor_status_transation_hash(
         self,
