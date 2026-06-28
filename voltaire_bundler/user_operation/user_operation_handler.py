@@ -540,6 +540,16 @@ COALESCED_LOGS_CHUNK_BLOCKS = 1_000
 # other RPC (validation, eth_getTransactionCount, etc.).
 COALESCED_LOGS_MAX_CONCURRENT_CHUNKS = 8
 
+# Maximum number of userOpHash values in a single eth_getLogs topics[1]
+# OR-filter. JSON-RPC supports an array of values per topic slot, so we
+# can ask the node to return only the userops we're actively monitoring
+# instead of every UserOperationEvent in the block range. Alchemy is the
+# strictest popular provider here (~10 entries per slot); Infura and
+# QuickNode are more generous. Stay at 10 for portability; larger
+# monitor sets fan out into multiple parallel calls (bounded by the
+# chunk semaphore above).
+COALESCED_LOGS_MAX_HASHES_PER_FILTER = 10
+
 # Whether the userop-logs cache reorg revalidation runs on every cache
 # hit (one eth_getBlockByNumber per poll to confirm the cached block is
 # still canonical). Off by default — on a busy bundler the per-poll RPC
@@ -833,14 +843,34 @@ async def get_user_operation_logs_for_many_hashes(
                 chunks.append((hex(cursor), hex(chunk_end)))
                 cursor = chunk_end + 1
 
+    # Split the wanted-hashes set into provider-portable batches and
+    # cross-product with the block-range chunks. Each (block_chunk,
+    # hash_batch) becomes one eth_getLogs call with both filters applied
+    # — the node returns ONLY the userops we care about in that range.
+    # On a typical busy mainnet EP this replaces "fetch every
+    # UserOperationEvent in the range" with "fetch only the K we
+    # actually monitor", collapsing multi-MB responses to bytes.
+    wanted_list = sorted(wanted)  # deterministic batch boundaries help debugging
+    hash_batches: list[list[str]] = [
+        wanted_list[i:i + COALESCED_LOGS_MAX_HASHES_PER_FILTER]
+        for i in range(0, len(wanted_list), COALESCED_LOGS_MAX_HASHES_PER_FILTER)
+    ]
+    work: list[tuple[str, str, list[str]]] = [
+        (cf, ct, batch)
+        for (cf, ct) in chunks
+        for batch in hash_batches
+    ]
+
     chunk_semaphore = asyncio.Semaphore(COALESCED_LOGS_MAX_CONCURRENT_CHUNKS)
 
-    async def _one_chunk(cf: str, ct: str) -> list[Any]:
+    async def _one_chunk(cf: str, ct: str, hashes: list[str]) -> list[Any]:
         async with chunk_semaphore:
             params = [
                 {
                     "address": entrypoint,
-                    "topics": [USER_OPERATION_EVENT_DESCRIPTOR],
+                    # topics[1] is an OR-match over the listed userOpHashes;
+                    # the node returns only logs matching at least one.
+                    "topics": [USER_OPERATION_EVENT_DESCRIPTOR, hashes],
                     "fromBlock": cf,
                     "toBlock": ct,
                 }
@@ -856,7 +886,7 @@ async def get_user_operation_logs_for_many_hashes(
                 logging.error(
                     "coalesced eth_getLogs (%s -> %s, %d hashes) timed out after %ss; "
                     "treating chunk as miss",
-                    cf, ct, len(wanted), ETH_RPC_LOOKUP_TIMEOUT_S,
+                    cf, ct, len(hashes), ETH_RPC_LOOKUP_TIMEOUT_S,
                 )
                 return []
             except Exception:
@@ -870,7 +900,7 @@ async def get_user_operation_logs_for_many_hashes(
             return res["result"]
 
     chunk_results = await asyncio.gather(
-        *(_one_chunk(cf, ct) for cf, ct in chunks)
+        *(_one_chunk(cf, ct, batch) for cf, ct, batch in work)
     )
 
     found: dict[str, list[Any]] = {}
