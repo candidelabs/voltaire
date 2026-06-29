@@ -16,7 +16,6 @@ from voltaire_bundler.gas.gas_price_cache import (
 )
 from voltaire_bundler.user_operation.logs_coalescer import LogsCoalescer
 from voltaire_bundler.mempool.mempool_info import DEFAULT_MEMPOOL_INFO
-from voltaire_bundler.user_operation import user_operation_handler
 from voltaire_bundler.utils import latest_block_cache
 from voltaire_bundler.utils.eth_client_utils import \
     send_rpc_request_to_eth_client_no_retry
@@ -124,6 +123,7 @@ class InitData:
     # Optional batcher for concurrent eth_getLogs cache-miss polls.
     # ``None`` disables it (one upstream call per cache miss, as before).
     logs_coalescer: LogsCoalescer | None
+    enable_logs_reorg_check: bool
 
 
 def address(ep: str):
@@ -1170,15 +1170,13 @@ async def get_init_data(args: Namespace) -> InitData:
         sys.exit(1)
     logging.info("Latest-block cache warmed.")
 
-    # Toggle the userop-logs reorg revalidation. Off by default — one
+    # Userop-logs reorg revalidation toggle. Off by default — one
     # eth_getBlockByNumber per cache hit is too expensive on busy
     # bundlers. With this off, eviction is opportunistic (only when a
     # client poll's tx-by-hash lookup misses), so a reorged-out userop
     # that no one polls stays cached. Turn on for reorg-prone chains
-    # served directly to end users.
-    user_operation_handler.ENABLE_LOGS_REORG_CHECK = (
-        args.enable_logs_reorg_check
-    )
+    # served directly to end users. The boolean is constructor-injected
+    # via UserOperationHandler — no module globals.
     if args.enable_logs_reorg_check:
         logging.info("Userop-logs cache reorg revalidation: ENABLED")
 
@@ -1284,6 +1282,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.logs_fallback_recent_window,
         gas_price_cache,
         logs_coalescer_instance,
+        args.enable_logs_reorg_check,
     )
 
     if args.verbose:

@@ -32,6 +32,12 @@ class UserOperationHandler(ABC):
     logs_number_of_ranges: int
     logs_fallback_recent_window: int
     logs_coalescer: LogsCoalescer | None
+    # When True, every userop-logs cache hit triggers an eth_getBlockByNumber
+    # to confirm the cached block is still on the canonical chain. Off by
+    # default — the per-poll RPC overhead is expensive on busy bundlers.
+    # See cli_manager.py:--enable_logs_reorg_check for the operator-facing
+    # description.
+    enable_logs_reorg_check: bool
 
     async def _find_handle_ops_calldata(
         self,
@@ -399,6 +405,7 @@ class UserOperationHandler(ABC):
                     hex(latest_block),
                     self.logs_fallback_recent_window,
                     self.logs_coalescer,
+                    self.enable_logs_reorg_check,
                 )
                 if res is not None:
                     return res
@@ -417,6 +424,7 @@ class UserOperationHandler(ABC):
                 "latest",
                 self.logs_fallback_recent_window,
                 self.logs_coalescer,
+                self.enable_logs_reorg_check,
             )
 
     def get_user_operation_by_hash_from_local_mempool(
@@ -554,13 +562,6 @@ COALESCED_LOGS_MAX_CONCURRENT_CHUNKS = 8
 # chunk semaphore above).
 COALESCED_LOGS_MAX_HASHES_PER_FILTER = 10
 
-# Whether the userop-logs cache reorg revalidation runs on every cache
-# hit (one eth_getBlockByNumber per poll to confirm the cached block is
-# still canonical). Off by default — on a busy bundler the per-poll RPC
-# overhead outweighs the rare correctness win, and the monitor sweep
-# evicts stale entries on its own cadence. Toggled from cli_manager at
-# startup via --enable_logs_reorg_check.
-ENABLE_LOGS_REORG_CHECK = False
 
 
 def del_user_operation_logs_cache_entry(
@@ -704,6 +705,7 @@ async def get_user_operation_logs_for_block_range(
     to_block_hex: str,
     earliest_fallback_recent_window: int = EARLIEST_FALLBACK_RECENT_WINDOW,
     coalescer: LogsCoalescer | None = None,
+    enable_reorg_check: bool = False,
 ) -> list | None:
     # Both halves are lowercased to match the writer in
     # get_user_operation_logs_for_many_hashes (which derives the userop
@@ -712,7 +714,7 @@ async def get_user_operation_logs_for_block_range(
     cache_key = f"{entrypoint.lower()}:{user_operation_hash.lower()}"
     cached = await user_operation_logs_cache.get(cache_key)
     if cached is not None:
-        if not ENABLE_LOGS_REORG_CHECK:
+        if not enable_reorg_check:
             # Reorg revalidation off (default): trust the cache. Eviction
             # is opportunistic — only del_user_operation_logs_cache_entry
             # (called from get_user_operation_receipt when the cached

@@ -30,6 +30,7 @@ class UserOperationHandlerV6(UserOperationHandler):
         logs_fallback_recent_window: int,
         gas_price_cache: GasPriceCache,
         logs_coalescer: LogsCoalescer | None = None,
+        enable_logs_reorg_check: bool = False,
     ):
         self.ethereum_node_urls = ethereum_node_urls
         self.bundler_address = bundler_address
@@ -48,6 +49,7 @@ class UserOperationHandlerV6(UserOperationHandler):
         self.logs_number_of_ranges = logs_number_of_ranges
         self.logs_fallback_recent_window = logs_fallback_recent_window
         self.logs_coalescer = logs_coalescer
+        self.enable_logs_reorg_check = enable_logs_reorg_check
 
     async def get_user_operation_by_hash(
         self, user_operation_hash: str,

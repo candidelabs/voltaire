@@ -129,6 +129,7 @@ class ExecutionEndpoint(Endpoint):
         logs_fallback_recent_window: int,
         gas_price_cache: GasPriceCache,
         logs_coalescer: LogsCoalescer | None,
+        enable_logs_reorg_check: bool,
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_urls = ethereum_node_urls
@@ -156,6 +157,7 @@ class ExecutionEndpoint(Endpoint):
             logs_fallback_recent_window,
             gas_price_cache,
             logs_coalescer,
+            enable_logs_reorg_check,
         )
 
         self.local_mempool_manager_v9 = LocalMempoolManagerV9(
@@ -226,6 +228,7 @@ class ExecutionEndpoint(Endpoint):
                 logs_fallback_recent_window,
                 gas_price_cache,
                 logs_coalescer,
+                enable_logs_reorg_check,
             )
 
             self.local_mempool_manager_v6 = LocalMempoolManagerV6(
