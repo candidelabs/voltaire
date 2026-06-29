@@ -14,8 +14,9 @@ from voltaire_bundler.user_operation.user_operation_v7v8v9 import (
     UserOperationV7V8V9,
 )
 from voltaire_bundler.gas.gas_manager_v7v8v9 import GasManagerV7V8V9
-from voltaire_bundler.gas.gas_price_cache import GasPriceCache
 from voltaire_bundler.bundle.exceptions import ValidationException
+
+from tests._fixtures import make_gas_manager
 
 
 ENTRYPOINT = "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
@@ -24,20 +25,7 @@ EXPECTED_PREVERIFICATION_GAS = 100_000
 
 
 def _make_gas_manager() -> GasManagerV7V8V9:
-    return GasManagerV7V8V9(
-        ethereum_node_urls=["http://localhost:8545"],
-        chain_id="1337",
-        bundler_address=BUNDLER_ADDRESS,
-        is_legacy_mode=False,
-        max_verification_gas=1_000_000,
-        max_call_data_gas=1_000_000,
-        gas_price_cache=GasPriceCache(
-            ethereum_node_urls=["http://localhost:8545"],
-            chain_id=1337,
-            is_legacy_mode=False,
-            refresh_interval_seconds=1.0,
-        ),
-    )
+    return make_gas_manager(chain_id=1337, bundler_address=BUNDLER_ADDRESS)
 
 
 def _make_user_operation(
