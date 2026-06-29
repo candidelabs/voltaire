@@ -6,13 +6,45 @@ import logging
 import math
 from typing import Any, cast
 
-# Per-userop floor on "old enough to be worth checking for inclusion".
-# Below this age the userop almost certainly hasn't been mined yet, so
-# the coalesced eth_getLogs would return no useful new data. Applied
-# per EP: a monitor set with no userop past this age skips its sweep
-# this tick. Short-circuits on the first match, so even a large monitor
-# set with a few stale entries returns immediately.
-MIN_INCLUSION_CHECK_AGE_S = 2.0
+# Per-userop floor on "old enough to be worth checking for inclusion",
+# tuned per chain to roughly one block time. Below this age a userop
+# almost certainly hasn't been mined yet, so the coalesced eth_getLogs
+# would return no useful new data. Applied per EP: a monitor set with
+# no userop past this age skips its sweep this tick. Short-circuits on
+# the first match, so even a large monitor set with a few stale entries
+# returns immediately.
+#
+# On Ethereum (12 s blocks) a fixed 2 s value left the gate effectively
+# always-true under steady inbound load — almost every monitor set had
+# one userop > 2 s old — so the per-tick eth_getLogs ran as often as if
+# there were no gate. Tuning per chain restores the suppression on slow
+# chains while keeping the gate small on fast ones.
+_MIN_INCLUSION_CHECK_AGE_BY_CHAIN: dict[int, float] = {
+    1: 12.0,            # Ethereum mainnet (12 s blocks)
+    11155111: 12.0,     # Sepolia
+    137: 2.0,           # Polygon
+    80002: 2.0,         # Polygon Amoy
+    10: 2.0,            # Optimism
+    11155420: 2.0,      # OP Sepolia
+    8453: 2.0,          # Base
+    84532: 2.0,         # Base Sepolia
+    480: 2.0,           # World Chain
+    4801: 2.0,          # World Chain Sepolia
+    42161: 0.5,         # Arbitrum One (250 ms blocks)
+    421614: 0.5,        # Arbitrum Sepolia
+    999: 1.0,           # HyperEVM
+    998: 1.0,           # HyperEVM testnet
+    5031: 1.0,          # Somnia
+    50312: 1.0,         # Somnia testnet
+    1337: 1.0,          # local anvil / dev
+}
+_DEFAULT_MIN_INCLUSION_CHECK_AGE_S = 2.0
+
+
+def _min_inclusion_check_age_for_chain(chain_id: int) -> float:
+    return _MIN_INCLUSION_CHECK_AGE_BY_CHAIN.get(
+        chain_id, _DEFAULT_MIN_INCLUSION_CHECK_AGE_S
+    )
 
 from eth_account import Account
 from eth_abi import encode
@@ -155,6 +187,11 @@ class BundlerManager:
         self.bundle_gas_estimation_multiplier = bundle_gas_estimation_multiplier
         self.entrypoint_v9_reentrant = load_bytecode("EntryPointV9Reentrant.json")
         self.gas_price_cache = gas_price_cache
+        # Resolve the per-chain inclusion-check age floor once at startup.
+        # See _MIN_INCLUSION_CHECK_AGE_BY_CHAIN for the table.
+        self._min_inclusion_check_age_s = _min_inclusion_check_age_for_chain(
+            chain_id
+        )
 
     async def send_next_bundle(self) -> None:
         await self.update_send_queue_and_monitor_queue()
@@ -234,16 +271,16 @@ class BundlerManager:
         self.user_operations_to_ban = {}
         await asyncio.gather(*useroperation_banning_ops)
 
-    @staticmethod
     def _monitor_set_has_op_past_age(
+        self,
         monitor_set: dict,
         now: datetime,
-        min_age_s: float = MIN_INCLUSION_CHECK_AGE_S,
     ) -> bool:
         """True if any userop in the monitor set has been waiting long
         enough to be worth checking for inclusion. Returns False when the
         set is empty or every userop is too young — skips the upstream
-        eth_getLogs RPC entirely on that branch.
+        eth_getLogs RPC entirely on that branch. The minimum age is the
+        per-chain ``self._min_inclusion_check_age_s`` resolved at startup.
 
         Entries with last_add_to_mempool_date=None are skipped (not
         treated as "old enough"): they're in an inconsistent state and
@@ -251,6 +288,7 @@ class BundlerManager:
         so triggering a full sweep on their account would be wasted RPC.
         The mismatched-state op will be handled the next time something
         repairs the timestamp (typically a re-add via the mempool)."""
+        min_age_s = self._min_inclusion_check_age_s
         for op in monitor_set.values():
             last_add = op.last_add_to_mempool_date
             if last_add is None:
@@ -265,11 +303,11 @@ class BundlerManager:
         # latency path. The monitor sweep tasks (inclusion check via
         # coalesced eth_getLogs + stale-userop re-add) are gated PER EP
         # by per-userop age: if no userop in that EP's monitor set is
-        # past MIN_INCLUSION_CHECK_AGE_S, skip the sweep this tick — the
-        # logs scan would return nothing useful and the re-add path is
-        # gated by its own 5s threshold anyway. Effect: busy mempools
-        # sweep often, quiet ones don't; sub-second bundle_interval
-        # doesn't translate to one eth_getLogs per tick.
+        # past self._min_inclusion_check_age_s (per-chain), skip the
+        # sweep this tick — the logs scan would return nothing useful
+        # and the re-add path is gated by its own 5 s threshold anyway.
+        # Effect: busy mempools sweep often, quiet ones don't; sub-second
+        # bundle_interval doesn't translate to one eth_getLogs per tick.
         bundle_tasks = [
             self.local_mempool_manager_v9.get_user_operations_to_bundle(
                 self.conditional_rpc is not None
