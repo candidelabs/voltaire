@@ -297,6 +297,39 @@ class BundlerManager:
                 return True
         return False
 
+    def _ep_dispatch_table(self) -> list[tuple[str, Any, dict, Any, list]]:
+        """Per-EP dispatch info: (key, mempool_manager, monitor_dict,
+        entrypoint_address, send_queue). v6 is conditionally included
+        based on --disable_v6. Centralising this list means
+        update_send_queue_and_monitor_queue can iterate it instead of
+        indexing gather() results by hand-counted position — adding a
+        future EP version is a one-line append here, not a re-numbering
+        across two call sites."""
+        eps: list[tuple[str, Any, dict, Any, list]] = [
+            ("v9", self.local_mempool_manager_v9,
+             self.user_operations_to_monitor_v9,
+             self.local_mempool_manager_v9.entrypoint,
+             self.bundles_to_send_v9),
+            ("v8", self.local_mempool_manager_v8,
+             self.user_operations_to_monitor_v8,
+             self.local_mempool_manager_v8.entrypoint,
+             self.bundles_to_send_v8),
+            ("v7", self.local_mempool_manager_v7,
+             self.user_operations_to_monitor_v7,
+             self.local_mempool_manager_v7.entrypoint,
+             self.bundles_to_send_v7),
+        ]
+        if self.local_mempool_manager_v6 is not None:
+            if self.bundles_to_send_v6 is None:
+                self.bundles_to_send_v6 = []
+            eps.append((
+                "v6", self.local_mempool_manager_v6,
+                self.user_operations_to_monitor_v6,
+                self.local_mempool_manager_v6.entrypoint,
+                self.bundles_to_send_v6,
+            ))
+        return eps
+
     async def update_send_queue_and_monitor_queue(self) -> None:
         # The bundle-build tasks (get_user_operations_to_bundle for each
         # EP version) ALWAYS run on every tick — they're the user-facing
@@ -308,95 +341,39 @@ class BundlerManager:
         # and the re-add path is gated by its own 5 s threshold anyway.
         # Effect: busy mempools sweep often, quiet ones don't; sub-second
         # bundle_interval doesn't translate to one eth_getLogs per tick.
-        bundle_tasks = [
-            self.local_mempool_manager_v9.get_user_operations_to_bundle(
-                self.conditional_rpc is not None
-            ),
-            self.local_mempool_manager_v8.get_user_operations_to_bundle(
-                self.conditional_rpc is not None
-            ),
-            self.local_mempool_manager_v7.get_user_operations_to_bundle(
-                self.conditional_rpc is not None
-            ),
-        ]
-        if self.local_mempool_manager_v6 is not None:
-            bundle_tasks.append(
-                self.local_mempool_manager_v6.get_user_operations_to_bundle(
+        now = datetime.now()
+        eps = self._ep_dispatch_table()
+
+        # Keyed coroutine lists so we don't depend on append order for
+        # mapping results back; cast() in the consumer loop becomes
+        # a plain reference.
+        bundle_keys: list[str] = []
+        bundle_coros: list[Any] = []
+        sweep_coros: list[Any] = []
+        for key, mempool, monitor_dict, entrypoint, _send_queue in eps:
+            bundle_keys.append(key)
+            bundle_coros.append(
+                mempool.get_user_operations_to_bundle(
                     self.conditional_rpc is not None
                 )
             )
-
-        sweep_tasks: list = []
-        now = datetime.now()
-        if self._monitor_set_has_op_past_age(
-            self.user_operations_to_monitor_v9, now
-        ):
-            sweep_tasks.append(
-                self.remove_included_and_readd_to_mempool_userops_monitoring(
-                    self.user_operations_to_monitor_v9,
-                    self.local_mempool_manager_v9.entrypoint,
-                    self.local_mempool_manager_v9
+            if self._monitor_set_has_op_past_age(monitor_dict, now):
+                sweep_coros.append(
+                    self.remove_included_and_readd_to_mempool_userops_monitoring(
+                        monitor_dict, entrypoint, mempool,
+                    )
                 )
-            )
-        if self._monitor_set_has_op_past_age(
-            self.user_operations_to_monitor_v8, now
-        ):
-            sweep_tasks.append(
-                self.remove_included_and_readd_to_mempool_userops_monitoring(
-                    self.user_operations_to_monitor_v8,
-                    self.local_mempool_manager_v8.entrypoint,
-                    self.local_mempool_manager_v8
-                )
-            )
-        if self._monitor_set_has_op_past_age(
-            self.user_operations_to_monitor_v7, now
-        ):
-            sweep_tasks.append(
-                self.remove_included_and_readd_to_mempool_userops_monitoring(
-                    self.user_operations_to_monitor_v7,
-                    self.local_mempool_manager_v7.entrypoint,
-                    self.local_mempool_manager_v7
-                )
-            )
-        if (
-            self.local_mempool_manager_v6 is not None
-            and self._monitor_set_has_op_past_age(
-                self.user_operations_to_monitor_v6, now
-            )
-        ):
-            sweep_tasks.append(
-                self.remove_included_and_readd_to_mempool_userops_monitoring(
-                    self.user_operations_to_monitor_v6,
-                    self.local_mempool_manager_v6.entrypoint,
-                    self.local_mempool_manager_v6
-                )
-            )
 
         # Run bundle tasks + (optional) sweep tasks concurrently. The
         # sweep coroutines mutate user_operations_to_monitor_*; the
         # bundle coroutines don't touch those dicts, so this is safe.
-        all_results = await asyncio.gather(*bundle_tasks, *sweep_tasks)
+        all_results = await asyncio.gather(*bundle_coros, *sweep_coros)
+        bundle_by_key = dict(zip(bundle_keys, all_results[:len(bundle_coros)]))
 
-        bundle_results = all_results[:len(bundle_tasks)]
-        user_operations_to_bundle_v9 = cast(dict[str, UserOperationV7V8V9], bundle_results[0])
-        self.bundles_to_send_v9.append(user_operations_to_bundle_v9)
-        self.user_operations_to_monitor_v9 |= copy.deepcopy(user_operations_to_bundle_v9)
-
-        user_operations_to_bundle_v8 = cast(dict[str, UserOperationV7V8V9], bundle_results[1])
-        self.bundles_to_send_v8.append(user_operations_to_bundle_v8)
-        self.user_operations_to_monitor_v8 |= copy.deepcopy(user_operations_to_bundle_v8)
-
-        user_operations_to_bundle_v7 = cast(dict[str, UserOperationV7V8V9], bundle_results[2])
-        self.bundles_to_send_v7.append(user_operations_to_bundle_v7)
-        self.user_operations_to_monitor_v7 |= copy.deepcopy(user_operations_to_bundle_v7)
-
-        if self.local_mempool_manager_v6 is not None:
-            if self.bundles_to_send_v6 is None:
-                self.bundles_to_send_v6 = []
-            user_operations_to_bundle_v6 = cast(dict[str, UserOperationV6], bundle_results[3])
-            self.bundles_to_send_v6.append(user_operations_to_bundle_v6)
-            self.user_operations_to_monitor_v6 |= copy.deepcopy(
-                user_operations_to_bundle_v6)
+        for key, _mempool, monitor_dict, _entrypoint, send_queue in eps:
+            result = bundle_by_key[key]
+            send_queue.append(result)
+            monitor_dict |= copy.deepcopy(result)
 
     def _secret_for_mempool(
         self,
