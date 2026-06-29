@@ -20,8 +20,8 @@ from typing import Any, cast
 # there were no gate. Tuning per chain restores the suppression on slow
 # chains while keeping the gate small on fast ones.
 _MIN_INCLUSION_CHECK_AGE_BY_CHAIN: dict[int, float] = {
-    1: 12.0,            # Ethereum mainnet (12 s blocks)
-    11155111: 12.0,     # Sepolia
+    1: 5.0,             # Ethereum mainnet (12 s blocks)
+    11155111: 5.0,      # Sepolia
     137: 2.0,           # Polygon
     80002: 2.0,         # Polygon Amoy
     10: 2.0,            # Optimism
