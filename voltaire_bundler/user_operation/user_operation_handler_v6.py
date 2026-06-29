@@ -3,6 +3,7 @@ import logging
 from eth_utils import to_checksum_address
 from eth_abi import decode
 from voltaire_bundler.bundle.exceptions import UserOpFoundException
+from voltaire_bundler.user_operation.logs_coalescer import LogsCoalescer
 from voltaire_bundler.user_operation.user_operation_handler import (
     HANDLE_OPS_SELECTOR_V6,
     UserOperationHandler,
@@ -28,6 +29,7 @@ class UserOperationHandlerV6(UserOperationHandler):
         logs_number_of_ranges: int,
         logs_fallback_recent_window: int,
         gas_price_cache: GasPriceCache,
+        logs_coalescer: LogsCoalescer | None = None,
     ):
         self.ethereum_node_urls = ethereum_node_urls
         self.bundler_address = bundler_address
@@ -45,6 +47,7 @@ class UserOperationHandlerV6(UserOperationHandler):
         self.logs_incremental_range = logs_incremental_range
         self.logs_number_of_ranges = logs_number_of_ranges
         self.logs_fallback_recent_window = logs_fallback_recent_window
+        self.logs_coalescer = logs_coalescer
 
     async def get_user_operation_by_hash(
         self, user_operation_hash: str,

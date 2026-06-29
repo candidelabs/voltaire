@@ -8,6 +8,7 @@ from eth_abi import encode, decode
 from voltaire_bundler.bundle.exceptions import UserOpReceiptFoundException
 from voltaire_bundler.mempool.sender_mempool import VerifiedUserOperation
 from voltaire_bundler.custom_types import Address
+from voltaire_bundler.user_operation.logs_coalescer import LogsCoalescer
 from voltaire_bundler.utils.cache import PersistentFIFOCache
 from voltaire_bundler.utils.eth_client_utils import \
         send_rpc_request_to_eth_client
@@ -30,6 +31,7 @@ class UserOperationHandler(ABC):
     logs_incremental_range: int
     logs_number_of_ranges: int
     logs_fallback_recent_window: int
+    logs_coalescer: LogsCoalescer | None
 
     async def _find_handle_ops_calldata(
         self,
@@ -396,6 +398,7 @@ class UserOperationHandler(ABC):
                     hex(earliest_block),
                     hex(latest_block),
                     self.logs_fallback_recent_window,
+                    self.logs_coalescer,
                 )
                 if res is not None:
                     return res
@@ -413,6 +416,7 @@ class UserOperationHandler(ABC):
                 earliest_block_hex,
                 "latest",
                 self.logs_fallback_recent_window,
+                self.logs_coalescer,
             )
 
     def get_user_operation_by_hash_from_local_mempool(
@@ -699,6 +703,7 @@ async def get_user_operation_logs_for_block_range(
     from_block_hex: str,
     to_block_hex: str,
     earliest_fallback_recent_window: int = EARLIEST_FALLBACK_RECENT_WINDOW,
+    coalescer: LogsCoalescer | None = None,
 ) -> list | None:
     # Both halves are lowercased to match the writer in
     # get_user_operation_logs_for_many_hashes (which derives the userop
@@ -738,24 +743,98 @@ async def get_user_operation_logs_for_block_range(
             window_from = hex(
                 max(0, latest - earliest_fallback_recent_window)
             )
-            result = await _eth_getLogs_once(
+            result = await _eth_getLogs_for_one_hash(
                 ethereum_node_eth_get_logs_urls,
                 user_operation_hash, entrypoint,
                 window_from, to_block_hex,
+                coalescer,
             )
             if result is not None:
                 user_operation_logs_cache.set(cache_key, result)
                 return result
 
-    result = await _eth_getLogs_once(
+    result = await _eth_getLogs_for_one_hash(
         ethereum_node_eth_get_logs_urls,
         user_operation_hash, entrypoint,
         from_block_hex, to_block_hex,
+        coalescer,
     )
     if result is not None:
         user_operation_logs_cache.set(cache_key, result)
         return result
     return None
+
+
+async def _eth_getLogs_for_one_hash(
+    ethereum_node_eth_get_logs_urls: list[str],
+    user_operation_hash: str,
+    entrypoint: str,
+    from_block_hex: str,
+    to_block_hex: str,
+    coalescer: LogsCoalescer | None,
+) -> list | None:
+    """Dispatch one eth_getLogs request for a single userOpHash, routing
+    through the coalescer when one is provided AND the bounds resolve to
+    concrete integers. Falls back to the un-batched ``_eth_getLogs_once``
+    when:
+      * no coalescer is configured,
+      * ``from_block_hex == "earliest"`` (the call sites that hit this
+        branch are the wide-fallback scan; coalescing requires a known
+        lower bound), or
+      * the chain head can't be resolved (``latest_block_cache`` returned
+        ``None`` — same as the bulk sweep's unresolved-bounds guard).
+
+    Coalescer-aware path: parse ``[from_int, to_int]`` and hand the
+    request to ``coalescer.request``. The coalescer's own contract
+    matches ``_eth_getLogs_once`` — non-empty list on hit, ``None`` on
+    miss or any failure — so call sites need no other changes."""
+    if coalescer is None or from_block_hex == "earliest":
+        return await _eth_getLogs_once(
+            ethereum_node_eth_get_logs_urls,
+            user_operation_hash, entrypoint,
+            from_block_hex, to_block_hex,
+        )
+
+    try:
+        from_block_int = int(from_block_hex, 16)
+    except (TypeError, ValueError):
+        return await _eth_getLogs_once(
+            ethereum_node_eth_get_logs_urls,
+            user_operation_hash, entrypoint,
+            from_block_hex, to_block_hex,
+        )
+
+    if to_block_hex == "latest":
+        to_block_int = await latest_block_cache.get_or_fetch(
+            ethereum_node_eth_get_logs_urls,
+        )
+        if to_block_int is None:
+            return await _eth_getLogs_once(
+                ethereum_node_eth_get_logs_urls,
+                user_operation_hash, entrypoint,
+                from_block_hex, to_block_hex,
+            )
+    else:
+        try:
+            to_block_int = int(to_block_hex, 16)
+        except (TypeError, ValueError):
+            return await _eth_getLogs_once(
+                ethereum_node_eth_get_logs_urls,
+                user_operation_hash, entrypoint,
+                from_block_hex, to_block_hex,
+            )
+
+    if to_block_int < from_block_int:
+        # Stale latest_block_cache: a backwards-range query would be a
+        # provider error / empty result. Same fast-skip the bulk sweep
+        # uses; the next poll retries once the cache catches up.
+        return None
+
+    return await coalescer.request(
+        ethereum_node_eth_get_logs_urls,
+        user_operation_hash, entrypoint,
+        from_block_int, to_block_int,
+    )
 
 
 async def get_user_operation_logs_for_many_hashes(

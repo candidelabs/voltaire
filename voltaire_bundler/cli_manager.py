@@ -14,6 +14,7 @@ from voltaire_bundler.gas.gas_price_cache import (
     GasPriceCache,
     default_refresh_interval,
 )
+from voltaire_bundler.user_operation.logs_coalescer import LogsCoalescer
 from voltaire_bundler.mempool.mempool_info import DEFAULT_MEMPOOL_INFO
 from voltaire_bundler.user_operation import user_operation_handler
 from voltaire_bundler.utils import latest_block_cache
@@ -120,6 +121,9 @@ class InitData:
     # Warmed synchronously in get_init_data so a bad ethereum node URL is
     # caught at startup. Started as a TaskGroup child in main().
     gas_price_cache: GasPriceCache
+    # Optional batcher for concurrent eth_getLogs cache-miss polls.
+    # ``None`` disables it (one upstream call per cache miss, as before).
+    logs_coalescer: LogsCoalescer | None
 
 
 def address(ep: str):
@@ -669,6 +673,24 @@ def initialize_argument_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
+        "--logs_coalescer_debounce_ms",
+        type=int,
+        help=(
+            "Debounce window (ms) for batching concurrent "
+            "eth_getUserOperationByHash/Receipt cache-miss polls into "
+            "one upstream eth_getLogs call via the topics[1] OR-array. "
+            "Polls arriving within this window fold into a single "
+            "filtered upstream request; each waiter still sees only "
+            "its own log. Set to 0 to disable batching (one upstream "
+            "call per cache miss, original behaviour). Default 50 ms."
+        ),
+        nargs="?",
+        const=50,
+        default=_get_env_or_default(
+            "VOLTAIRE_LOGS_COALESCER_DEBOUNCE_MS", 50, int),
+    )
+
+    parser.add_argument(
         "--enable_logs_reorg_check",
         help=(
             "When set, on every eth_getUserOperationByHash/Receipt cache "
@@ -1160,6 +1182,21 @@ async def get_init_data(args: Namespace) -> InitData:
     if args.enable_logs_reorg_check:
         logging.info("Userop-logs cache reorg revalidation: ENABLED")
 
+    # Construct the LogsCoalescer if batching is enabled. ``None`` here
+    # propagates through to the handler and disables the coalescer code
+    # path entirely (each poll makes its own upstream call, as before).
+    if args.logs_coalescer_debounce_ms > 0:
+        logs_coalescer_instance: LogsCoalescer | None = LogsCoalescer(
+            debounce_ms=args.logs_coalescer_debounce_ms,
+        )
+        logging.info(
+            "Logs coalescer enabled (debounce: %s ms)",
+            args.logs_coalescer_debounce_ms,
+        )
+    else:
+        logs_coalescer_instance = None
+        logging.info("Logs coalescer disabled (debounce_ms=0)")
+
     if not args.disable_p2p:
         if args.p2p_canonical_mempool_id_08 is None:
             if args.chain_id not in DEFAULT_MEMPOOL_INFO[
@@ -1246,6 +1283,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.enable_banning,
         args.logs_fallback_recent_window,
         gas_price_cache,
+        logs_coalescer_instance,
     )
 
     if args.verbose:

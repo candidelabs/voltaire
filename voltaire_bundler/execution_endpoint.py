@@ -29,6 +29,7 @@ from voltaire_bundler.user_operation.user_operation_handler_v7v8v9 import \
 from voltaire_bundler.user_operation.user_operation_handler import \
     fell_user_operation_optional_parameters_for_estimateUserOperationGas
 from voltaire_bundler.gas.gas_price_cache import GasPriceCache
+from voltaire_bundler.user_operation.logs_coalescer import LogsCoalescer
 from voltaire_bundler.utils.cache import PersistentFIFOCache
 from voltaire_bundler.utils.eth_client_utils import get_block_info, send_rpc_request_to_eth_client
 
@@ -127,6 +128,7 @@ class ExecutionEndpoint(Endpoint):
         enable_banning: bool,
         logs_fallback_recent_window: int,
         gas_price_cache: GasPriceCache,
+        logs_coalescer: LogsCoalescer | None,
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_urls = ethereum_node_urls
@@ -153,6 +155,7 @@ class ExecutionEndpoint(Endpoint):
             logs_number_of_ranges,
             logs_fallback_recent_window,
             gas_price_cache,
+            logs_coalescer,
         )
 
         self.local_mempool_manager_v9 = LocalMempoolManagerV9(
@@ -222,6 +225,7 @@ class ExecutionEndpoint(Endpoint):
                 logs_number_of_ranges,
                 logs_fallback_recent_window,
                 gas_price_cache,
+                logs_coalescer,
             )
 
             self.local_mempool_manager_v6 = LocalMempoolManagerV6(
