@@ -33,12 +33,37 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
+from prometheus_client import Counter
+
 from voltaire_bundler.utils.eth_client_utils import \
     send_rpc_request_to_eth_client
 
 
 USER_OPERATION_EVENT_DESCRIPTOR = (
     "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
+)
+
+# Prometheus counters. Operators can compute the savings ratio as
+# 1 - upstream_calls_total / waiters_total: 0.8 means 80% of polls
+# would have been their own RPC and were saved by batching.
+_WAITERS_TOTAL = Counter(
+    "voltaire_logs_coalescer_waiters_total",
+    "Concurrent eth_getLogs cache-miss polls handed to the coalescer.",
+)
+_UPSTREAM_CALLS_TOTAL = Counter(
+    "voltaire_logs_coalescer_upstream_calls_total",
+    "Upstream eth_getLogs calls the coalescer actually issued, "
+    "including chunk splits and per-waiter fallbacks.",
+)
+_BATCHES_TOTAL = Counter(
+    "voltaire_logs_coalescer_batches_total",
+    "Coalesced batches dispatched (one per debounce window per "
+    "(entrypoint, urls) bucket).",
+)
+_FALLBACKS_TOTAL = Counter(
+    "voltaire_logs_coalescer_fallbacks_total",
+    "Times the coalescer fell back to per-waiter calls because the "
+    "batch's union block range exceeded max_range_blocks.",
 )
 
 
@@ -105,6 +130,7 @@ class LogsCoalescer:
         same (entrypoint, urls); the upstream call happens after the
         debounce window or when the batch's hash union saturates the
         max-per-call cap."""
+        _WAITERS_TOTAL.inc()
         loop = asyncio.get_event_loop()
         future: asyncio.Future = loop.create_future()
         waiter = _Waiter(
@@ -116,6 +142,7 @@ class LogsCoalescer:
 
         if self._debounce_ms == 0:
             # Bypass coalescing entirely — immediate single-hash call.
+            _UPSTREAM_CALLS_TOTAL.inc()
             return await self._single_call(
                 tuple(ethereum_node_urls),
                 entrypoint.lower(),
@@ -182,6 +209,7 @@ class LogsCoalescer:
         live = [w for w in batch.waiters if not w.future.done()]
         if not live:
             return
+        _BATCHES_TOTAL.inc()
 
         # Compute the union range across waiters. If it's too wide for one
         # eth_getLogs call (a sticky waiter with a very early validated_at
@@ -189,6 +217,11 @@ class LogsCoalescer:
         from_min = min(w.from_block_int for w in live)
         to_max = max(w.to_block_int for w in live)
         if to_max - from_min > self._max_range_blocks:
+            _FALLBACKS_TOTAL.inc()
+            logging.debug(
+                "logs coalescer: %d waiters → fallback (range %d > %d)",
+                len(live), to_max - from_min, self._max_range_blocks,
+            )
             await self._fallback_per_waiter(batch.urls, batch.entrypoint, live)
             return
 
@@ -199,6 +232,11 @@ class LogsCoalescer:
             all_hashes[i:i + self._max_hashes_per_call]
             for i in range(0, len(all_hashes), self._max_hashes_per_call)
         ]
+        _UPSTREAM_CALLS_TOTAL.inc(len(hash_batches))
+        logging.debug(
+            "logs coalescer: %d waiters / %d unique hashes → %d upstream call(s)",
+            len(live), len(all_hashes), len(hash_batches),
+        )
         semaphore = asyncio.Semaphore(self._max_concurrent_calls)
         sub_results = await asyncio.gather(
             *(self._fetch_chunk(
@@ -279,6 +317,7 @@ class LogsCoalescer:
         """Range too wide for a single coalesced call. Issue independent
         single-hash queries for each waiter, in parallel under the
         concurrency cap. Same as the un-batched per-call path."""
+        _UPSTREAM_CALLS_TOTAL.inc(len(waiters))
         semaphore = asyncio.Semaphore(self._max_concurrent_calls)
 
         async def _one(waiter: _Waiter) -> None:

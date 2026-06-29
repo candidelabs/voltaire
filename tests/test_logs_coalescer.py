@@ -16,7 +16,21 @@ import pytest
 from voltaire_bundler.user_operation.logs_coalescer import (
     LogsCoalescer,
     USER_OPERATION_EVENT_DESCRIPTOR,
+    _BATCHES_TOTAL,
+    _FALLBACKS_TOTAL,
+    _UPSTREAM_CALLS_TOTAL,
+    _WAITERS_TOTAL,
 )
+
+
+def _counter_value(c) -> float:
+    """Read a prometheus Counter's current sample value. Counters expose
+    _value.get() but we go through .collect() for forward-compat."""
+    for metric in c.collect():
+        for sample in metric.samples:
+            if sample.name.endswith("_total"):
+                return sample.value
+    return 0.0
 
 
 ENTRYPOINT = "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
@@ -220,6 +234,60 @@ async def test_late_arrival_after_dispatch_starts_new_batch():
         second = await coalescer.request(URLS, "0xaaa", ENTRYPOINT, 100, 200)
     assert first is not None and second is not None
     assert fake.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_counters_reflect_savings():
+    """Five concurrent distinct-hash polls in one batch → counters
+    advance by waiters=5, batches=1, upstream_calls=1. The savings
+    ratio (1 - upstream/waiters) is what operators care about."""
+    before = {
+        "waiters": _counter_value(_WAITERS_TOTAL),
+        "batches": _counter_value(_BATCHES_TOTAL),
+        "upstream": _counter_value(_UPSTREAM_CALLS_TOTAL),
+        "fallbacks": _counter_value(_FALLBACKS_TOTAL),
+    }
+    coalescer = LogsCoalescer(debounce_ms=30)
+    hashes = [f"0x{i:064x}" for i in range(1, 6)]
+    fake = AsyncMock(return_value=_rpc_result([_log(h) for h in hashes]))
+    with patch(
+        "voltaire_bundler.user_operation.logs_coalescer."
+        "send_rpc_request_to_eth_client",
+        fake,
+    ):
+        await asyncio.gather(*[
+            coalescer.request(URLS, h, ENTRYPOINT, 100, 200) for h in hashes
+        ])
+
+    assert _counter_value(_WAITERS_TOTAL) - before["waiters"] == 5
+    assert _counter_value(_BATCHES_TOTAL) - before["batches"] == 1
+    assert _counter_value(_UPSTREAM_CALLS_TOTAL) - before["upstream"] == 1
+    assert _counter_value(_FALLBACKS_TOTAL) - before["fallbacks"] == 0
+
+
+@pytest.mark.asyncio
+async def test_counters_record_fallback():
+    """Wide-range batch → fallback path increments _FALLBACKS_TOTAL and
+    upstream_calls by len(waiters), not 1."""
+    before = {
+        "fallbacks": _counter_value(_FALLBACKS_TOTAL),
+        "upstream": _counter_value(_UPSTREAM_CALLS_TOTAL),
+    }
+    coalescer = LogsCoalescer(debounce_ms=30, max_range_blocks=1000)
+    fake = AsyncMock(return_value=_rpc_result([]))
+    with patch(
+        "voltaire_bundler.user_operation.logs_coalescer."
+        "send_rpc_request_to_eth_client",
+        fake,
+    ):
+        await asyncio.gather(
+            coalescer.request(URLS, "0xaaa", ENTRYPOINT, 100, 200),
+            coalescer.request(URLS, "0xbbb", ENTRYPOINT, 5_000, 10_000),
+        )
+
+    assert _counter_value(_FALLBACKS_TOTAL) - before["fallbacks"] == 1
+    # Two waiters in fallback → two upstream calls.
+    assert _counter_value(_UPSTREAM_CALLS_TOTAL) - before["upstream"] == 2
 
 
 @pytest.mark.asyncio
