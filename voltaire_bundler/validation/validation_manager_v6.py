@@ -149,8 +149,12 @@ class ValidationManagerV6(ValidationManager):
         ) = ValidationManagerV6.decode_validation_result(validation_result)
         # Simulation just observed the chain head; share it with other
         # paths (eg the userop-logs fast path) to skip a redundant
-        # eth_getBlockByNumber.
-        latest_block_cache.publish(validated_at_block_number)
+        # eth_getBlockByNumber. Only publish when the simulation ran
+        # against the live head — an explicit historical block_number
+        # (eg the p2p re-verify path) would poison the cache with a
+        # stale value.
+        if block_number is None or block_number == "latest":
+            latest_block_cache.publish(validated_at_block_number)
         ValidationManagerV6.verify_sig_and_timestamp(
             return_info.sigFailed,
             return_info.validUntil,

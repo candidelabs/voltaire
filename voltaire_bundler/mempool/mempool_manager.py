@@ -365,23 +365,26 @@ class LocalMempoolManager():
                     ].user_operation
                 )
 
-        # Pre-filter to the gas-cap prefix BEFORE validation. Each userop's
-        # max gas is derived from already-known fields (callGasLimit +
+        # Pre-filter by the gas-cap BEFORE validation. Each userop's max
+        # gas is derived from already-known fields (callGasLimit +
         # verificationGasLimit + ...), no RPC needed. Validation
         # (eth_call + debug_traceCall in safe mode) is the expensive piece —
         # running it for ops past the cap is wasted upstream load. If a
         # validated op later gets dropped (storage conflict, paymaster
         # rejection), the bundle ships slightly smaller; the dropped op is
         # reconsidered on the next tick.
+        #
+        # Skip over-cap ops individually (don't truncate on the first one):
+        # a single oversized op in the middle of fee-order candidates
+        # shouldn't starve later smaller ops that still fit.
         accumulated = 0
-        prefix_end = 0
+        user_operations: list[UserOperation] = []
         for op in candidates:
             op_max = op.get_max_gas_without_pre_verification_gas()
             if accumulated + op_max > max_compined_bundle_user_operations_gas_limit:
-                break
+                continue
             accumulated += op_max
-            prefix_end += 1
-        user_operations = candidates[:prefix_end]
+            user_operations.append(op)
 
         validate_user_operations_ops = [
             self.validate_user_operation_to_bundle(op) for op in user_operations
