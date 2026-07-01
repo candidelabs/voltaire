@@ -247,6 +247,7 @@ class ExecutionEndpoint(Endpoint):
             self.local_mempool_manager_v8,
             self.local_mempool_manager_v9,
             ethereum_node_urls,
+            ethereum_node_eth_get_logs_urls,
             bundle_node_urls,
             bundler_secrets_per_ep,
             chain_id,

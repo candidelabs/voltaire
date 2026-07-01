@@ -109,6 +109,7 @@ class BundlerManager:
         local_mempool_manager_v8: LocalMempoolManagerV8,
         local_mempool_manager_v9: LocalMempoolManagerV9,
         ethereum_node_urls: list[str],
+        ethereum_node_eth_get_logs_urls: list[str],
         bundle_node_urls: list[str],
         bundler_secrets_per_ep: dict[str, tuple[Address, str]],
         chain_id: int,
@@ -125,6 +126,7 @@ class BundlerManager:
         self.local_mempool_manager_v8 = local_mempool_manager_v8
         self.local_mempool_manager_v9 = local_mempool_manager_v9
         self.ethereum_node_urls = ethereum_node_urls
+        self.ethereum_node_eth_get_logs_urls = ethereum_node_eth_get_logs_urls
         self.bundle_node_urls = bundle_node_urls
         self.bundler_secrets_per_ep = bundler_secrets_per_ep
         self.chain_id = chain_id
@@ -693,10 +695,10 @@ class BundlerManager:
         # userop. Scans from the oldest monitored userop's validation block
         # forward; the helper buckets results by topic[1] (userOpHash) and
         # warms the per-userop logs cache for each hit.
-        # Not using ethereum_node_eth_get_logs_urls so we stay on the same
-        # node as validation/bundle traffic, ruling out the case where a
-        # logs-only node is slightly behind and reports the userop as still
-        # pending.
+        # Routed through ethereum_node_eth_get_logs_urls (falls back to
+        # ethereum_node_urls when unset) so a dedicated logs node absorbs
+        # this sweep. A logs node briefly behind head can only produce a
+        # transient "still pending" miss — the next tick re-sweeps.
         if user_operations_to_monitor:
             validated_blocks = [
                 int(op.validated_at_block_hex, 16)
@@ -706,7 +708,7 @@ class BundlerManager:
             if validated_blocks:
                 user_operations_logs_by_hash = (
                     await get_user_operation_logs_for_many_hashes(
-                        self.ethereum_node_urls,
+                        self.ethereum_node_eth_get_logs_urls,
                         list(user_operations_to_monitor.keys()),
                         entrypoint,
                         hex(min(validated_blocks)),
@@ -1167,10 +1169,7 @@ class BundlerManager:
                 "useroperation without validated_at_block_hex")
 
         logs_res = await get_user_operation_logs_for_block_range(
-            # not using the ethereum_node_eth_get_logs_urls as the
-            # block range can't be large and to role out the possibility
-            # that the logs node is slightly behind/out of sync
-            self.ethereum_node_urls,
+            self.ethereum_node_eth_get_logs_urls,
             user_operation.user_operation_hash,
             entrypoint,
             earliest_block,
