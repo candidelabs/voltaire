@@ -268,13 +268,14 @@ class ExecutionEndpoint(Endpoint):
 
     async def execute_cron_job(self, is_debug: bool, bundle_interval: float) -> None:
         if not self.disable_p2p:
-            heartbeat_counter = 0
-            heartbeat_interval = 0.1  # decisecond
-            # Floor at one heartbeat tick (100 ms) so a sub-100 ms
-            # bundle_interval doesn't produce a zero modulus below.
-            deciseconds_per_bundle = max(1, math.floor(
-                bundle_interval / heartbeat_interval
-            ))
+            # The p2p branch has to service gossip at a much finer
+            # cadence than bundling, so we keep the 100 ms heartbeat
+            # sleep for the loop. Bundle scheduling is decoupled from
+            # the heartbeat via a monotonic deadline: heartbeat-count
+            # math truncated the configured float interval to whole
+            # 100 ms buckets (e.g. 150 ms → 100 ms) and accumulated
+            # drift from gossip + bundle work time on top of that.
+            heartbeat_interval = 0.1
 
             p2pClient: Client = Client("p2p_endpoint")
             p2p_file = ("p2p_endpoint.port"
@@ -285,21 +286,27 @@ class ExecutionEndpoint(Endpoint):
 
             await self.send_pooled_user_op_hashes_to_all_peers()
 
+            next_bundle_at = time.monotonic()
             while True:
                 try:
                     await self.update_p2p_gossip(p2pClient)
                     await self.update_p2p_peer_ids_to_user_ops_hashes_queue(p2pClient)
-                    if (not is_debug) and (
-                        heartbeat_counter % deciseconds_per_bundle == 0
-                    ):
+                    if (not is_debug) and time.monotonic() >= next_bundle_at:
                         await self.bundle_manager.send_next_bundle()
+                        # Advance by exactly bundle_interval so cadence
+                        # stays fixed-rate. If work overran so far that
+                        # the deadline is already in the past, snap it
+                        # forward to avoid a catch-up burst.
+                        next_bundle_at += bundle_interval
+                        now = time.monotonic()
+                        if next_bundle_at < now:
+                            next_bundle_at = now + bundle_interval
                 except (ValidationException, ExecutionException) as excp:
                     logging.exception(excp.message)
                 except Exception:
                     # Deliberately catch Exception, not bare `except`, so
                     # asyncio.CancelledError propagates and shutdown works.
                     logging.error(traceback.format_exc())
-                heartbeat_counter = heartbeat_counter + 1
                 await asyncio.sleep(heartbeat_interval)
         elif not is_debug:
             while True:
