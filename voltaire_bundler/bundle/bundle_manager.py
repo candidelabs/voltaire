@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import datetime
 import logging
 import math
-from typing import Any, cast
+from typing import cast
 
 # Per-userop floor on "old enough to be worth checking for inclusion".
 # Below this age the userop almost certainly hasn't been mined yet, so
@@ -337,9 +337,21 @@ class BundlerManager:
         # Run bundle tasks + (optional) sweep tasks concurrently. The
         # sweep coroutines mutate user_operations_to_monitor_*; the
         # bundle coroutines don't touch those dicts, so this is safe.
-        all_results = await asyncio.gather(*bundle_tasks, *sweep_tasks)
-
-        bundle_results = all_results[:len(bundle_tasks)]
+        # Sweeps are auxiliary — isolate their exceptions so a sweep
+        # failure doesn't drop the committed bundle output. Bundle-task
+        # exceptions still propagate (they're the user-facing latency
+        # path and must surface).
+        bundle_results = await asyncio.gather(*bundle_tasks)
+        if sweep_tasks:
+            sweep_results = await asyncio.gather(
+                *sweep_tasks, return_exceptions=True
+            )
+            for res in sweep_results:
+                if isinstance(res, BaseException):
+                    logging.error(
+                        "monitor sweep failed; bundle output unaffected",
+                        exc_info=res,
+                    )
         user_operations_to_bundle_v9 = cast(dict[str, UserOperationV7V8V9], bundle_results[0])
         self.bundles_to_send_v9.append(user_operations_to_bundle_v9)
         self.user_operations_to_monitor_v9 |= copy.deepcopy(user_operations_to_bundle_v9)

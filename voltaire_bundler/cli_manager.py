@@ -382,17 +382,20 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--bundle_interval",
-        type=float,
+        type=positive_float,
         help=(
             "set the bundle interval in seconds for the auto bundle mode - "
-            "set to zero for manual mode - defaults to 2 seconds. Accepts "
+            "must be strictly positive - defaults to 2 seconds. Accepts "
             "fractional values (e.g. 0.5) for high-throughput deployments; "
             "sub-second intervals are floored at one 100 ms heartbeat tick "
-            "when p2p is enabled."
+            "when p2p is enabled. Use --debug to disable auto bundling and "
+            "trigger bundles manually via debug_bundler_sendBundleNow."
         ),
         nargs="?",
         const=1.0,
-        default=_get_env_or_default("VOLTAIRE_BUNDLE_INTERVAL", 2.0, float),
+        default=_get_env_or_default(
+            "VOLTAIRE_BUNDLE_INTERVAL", 2.0, positive_float
+        ),
     )
 
     parser.add_argument(
@@ -1122,9 +1125,11 @@ async def get_init_data(args: Namespace) -> InitData:
     try:
         await gas_price_cache.warm()
     except Exception as exc:
+        # Don't log the raw URLs — they may embed provider API keys.
         logging.critical(
-            "Failed to warm gas-price cache from "
-            f"{ethereum_node_urls_rearranged}: {exc}"
+            f"Failed to warm gas-price cache from configured "
+            f"ethereum_node_url(s) ({len(ethereum_node_urls_rearranged)} "
+            f"endpoint(s)): {exc}"
         )
         sys.exit(1)
     logging.info(
@@ -1141,9 +1146,11 @@ async def get_init_data(args: Namespace) -> InitData:
     try:
         await latest_block_cache.warm(ethereum_node_urls_rearranged)
     except Exception as exc:
+        # Don't log the raw URLs — they may embed provider API keys.
         logging.critical(
-            "Failed to warm latest-block cache from "
-            f"{ethereum_node_urls_rearranged}: {exc}"
+            f"Failed to warm latest-block cache from configured "
+            f"ethereum_node_url(s) ({len(ethereum_node_urls_rearranged)} "
+            f"endpoint(s)): {exc}"
         )
         sys.exit(1)
     logging.info("Latest-block cache warmed.")

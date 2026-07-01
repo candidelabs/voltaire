@@ -829,7 +829,12 @@ async def get_user_operation_logs_for_many_hashes(
         # be several blocks behind real head, tipping a "fits in 1000"
         # decision into a wider node-side range and triggering provider
         # block-range caps.
-        if to_block_int - from_block_int <= COALESCED_LOGS_CHUNK_BLOCKS:
+        # eth_getLogs is inclusive on both ends: the span
+        # [from_block_int, to_block_int] covers (to - from + 1) blocks.
+        # Compare against (chunk_size - 1) so the single-chunk path
+        # enforces the same 1000-block cap as the multi-chunk path
+        # (which uses chunk_end = cursor + chunk_size - 1).
+        if to_block_int - from_block_int <= COALESCED_LOGS_CHUNK_BLOCKS - 1:
             chunks = [(hex(from_block_int), hex(to_block_int))]
         else:
             # Split into parallel chunks of COALESCED_LOGS_CHUNK_BLOCKS each.

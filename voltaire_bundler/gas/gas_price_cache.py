@@ -98,6 +98,14 @@ class GasPriceCache:
         is_legacy_mode: bool,
         refresh_interval_seconds: float,
     ):
+        # Reject non-positive intervals at construction: a zero or
+        # negative interval would make the staleness check trivially
+        # true on every read and turn run()'s sleep into a hot loop.
+        if refresh_interval_seconds <= 0:
+            raise ValueError(
+                "refresh_interval_seconds must be > 0, got "
+                f"{refresh_interval_seconds!r}"
+            )
         self._ethereum_node_urls = ethereum_node_urls
         self._chain_id = chain_id
         self._is_legacy_mode = is_legacy_mode

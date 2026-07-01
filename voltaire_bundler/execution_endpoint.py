@@ -295,7 +295,9 @@ class ExecutionEndpoint(Endpoint):
                         await self.bundle_manager.send_next_bundle()
                 except (ValidationException, ExecutionException) as excp:
                     logging.exception(excp.message)
-                except:
+                except Exception:
+                    # Deliberately catch Exception, not bare `except`, so
+                    # asyncio.CancelledError propagates and shutdown works.
                     logging.error(traceback.format_exc())
                 heartbeat_counter = heartbeat_counter + 1
                 await asyncio.sleep(heartbeat_interval)
@@ -313,7 +315,9 @@ class ExecutionEndpoint(Endpoint):
                     await self.bundle_manager.send_next_bundle()
                 except (ValidationException, ExecutionException) as excp:
                     logging.exception(excp.message)
-                except:
+                except Exception:
+                    # Deliberately catch Exception, not bare `except`, so
+                    # asyncio.CancelledError propagates and shutdown works.
                     logging.error(traceback.format_exc())
 
                 elapsed = time.monotonic() - t0
