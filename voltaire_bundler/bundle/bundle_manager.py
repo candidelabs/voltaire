@@ -706,13 +706,63 @@ class BundlerManager:
                 if op.validated_at_block_hex is not None
             ]
             if validated_blocks:
+                # Resolve "latest" DIRECTLY from ethereum_node_eth_get_logs_urls
+                # instead of going through latest_block_cache. The cache is
+                # publish()-ed by validation paths that talk to
+                # ethereum_node_urls; when validation is busy the cache holds
+                # the eth-node's head, not the logs-node's. If the two nodes
+                # are different providers and the logs node is even one block
+                # behind, we'd query eth_getLogs with toBlock=<ethNodeHead>
+                # against a node that hasn't ingested that block, and most
+                # providers return an empty result (or "unknown block")
+                # rather than blocking. That would make every freshly-
+                # included userop look "still pending" until both nodes
+                # converge — which under load is roughly never — so the
+                # sweep never removes them from the monitor set, the 5 s
+                # gate re-adds them to the mempool, and client resubmits
+                # collide with "already in mempool" while validate_paymaster_deposit
+                # runs out of headroom.
+                #
+                # One extra eth_getBlockByNumber per sweep tick is cheap
+                # (bounded by MIN_INCLUSION_CHECK_AGE_S = 2 s per EP), and
+                # keeps toBlock consistent with the node the eth_getLogs
+                # will actually run against.
+                to_block_hex_for_scan: str
+                try:
+                    head_res = await asyncio.wait_for(
+                        send_rpc_request_to_eth_client(
+                            self.ethereum_node_eth_get_logs_urls,
+                            "eth_getBlockByNumber",
+                            ["latest", False],
+                        ),
+                        timeout=2.0,
+                    )
+                    head_hex = (
+                        head_res.get("result", {}).get("number")
+                        if isinstance(head_res, dict) else None
+                    )
+                    to_block_hex_for_scan = (
+                        head_hex if isinstance(head_hex, str) else "latest"
+                    )
+                except Exception:
+                    # Fall back to "latest" — the helper will resolve it via
+                    # the shared cache. That may be off-node, but skipping
+                    # the sweep entirely on a transient head-fetch failure
+                    # would be worse.
+                    logging.debug(
+                        "logs-node head fetch failed for coalesced sweep; "
+                        "falling back to shared latest_block_cache",
+                        exc_info=True,
+                    )
+                    to_block_hex_for_scan = "latest"
+
                 user_operations_logs_by_hash = (
                     await get_user_operation_logs_for_many_hashes(
                         self.ethereum_node_eth_get_logs_urls,
                         list(user_operations_to_monitor.keys()),
                         entrypoint,
                         hex(min(validated_blocks)),
-                        "latest",
+                        to_block_hex_for_scan,
                     )
                 )
             else:
