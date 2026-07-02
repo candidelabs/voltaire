@@ -105,24 +105,23 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
     # background task so the COUNT(*) work doesn't extend startup.
     PersistentFIFOCache.log_startup_status()
 
-    # Log the bundler EOA per entrypoint so operators can sanity-check
-    # which signer is on the hook for each version's bundles.
-    # ``--disable_v6`` parses v6 but never uses it; flag that here so
-    # nobody mistakes the v6 line for an active signer.
-    logging.info("Bundler addresses per entrypoint:")
-    for label in ("v6", "v7", "v8", "v9"):
-        addr, _ = init_data.bundler_secrets_per_ep[label]
-        suffix = " (unused — --disable_v6)" if (
-            label == "v6" and init_data.disable_v6
-        ) else ""
-        logging.info("  %s: %s%s", label, addr, suffix)
+    # Log the bundler pool so operators can sanity-check which signers
+    # will be rotating across bundles. Pool is shared across entrypoints
+    # — each tick round-robins sub-bundles across the pool.
+    logging.info(
+        "Bundler pool (%d EOA%s):",
+        len(init_data.bundler_pool),
+        "" if len(init_data.bundler_pool) == 1 else "s",
+    )
+    for i, (addr, _) in enumerate(init_data.bundler_pool):
+        logging.info("  [%d] %s", i, addr)
 
     try:
         async with asyncio.TaskGroup() as task_group:
             execution_endpoint: ExecutionEndpoint = ExecutionEndpoint(
                 init_data.ethereum_node_urls,
                 init_data.bundle_node_urls,
-                init_data.bundler_secrets_per_ep,
+                init_data.bundler_pool,
                 init_data.chain_id,
                 init_data.is_unsafe,
                 init_data.is_debug,
@@ -164,13 +163,10 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             if init_data.ethereum_node_urls != init_data.ethereum_node_eth_get_logs_urls:
                 node_urls_to_check += init_data.ethereum_node_eth_get_logs_urls
 
-            # When --disable_v6 is set the v6 EOA is parsed but never used,
-            # so don't burn an eth_getBalance call on it.
-            labels_to_check = ("v7", "v8", "v9") if init_data.disable_v6 \
-                else ("v6", "v7", "v8", "v9")
+            # The pool is shared across entrypoints, so every pool EOA
+            # needs to be funded regardless of --disable_v6.
             bundler_addresses_to_check = sorted({
-                init_data.bundler_secrets_per_ep[label][0]
-                for label in labels_to_check
+                addr for addr, _ in init_data.bundler_pool
             })
             task_group.create_task(
                 run_rpc_http_server(

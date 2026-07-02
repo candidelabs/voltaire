@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import datetime
 import logging
 import math
-from typing import cast
+from typing import Any, cast
 
 # Per-userop floor on "old enough to be worth checking for inclusion".
 # Below this age the userop almost certainly hasn't been mined yet, so
@@ -72,10 +72,12 @@ async def _warm_inclusion_caches(
 class BundlerManager:
     ethereum_node_urls: list[str]
     bundle_node_urls: list[str]
-    # (address, private_key) per entrypoint label ("v6", "v7", "v8", "v9").
-    # Operators may set one EOA for all four (the default) or a distinct EOA
-    # per entrypoint via comma-separated --bundler_secret.
-    bundler_secrets_per_ep: dict[str, tuple[Address, str]]
+    # Ordered pool of (address, private_key) signers. Shared across all
+    # entrypoints. Each tick, sub-bundles are round-robin assigned to
+    # pool members and submitted concurrently. Pool size = 1 preserves
+    # single-EOA behavior via a nonce counter in send_next_bundle.
+    bundler_pool: list[tuple[Address, str]]
+    _pool_cursor: int
     local_mempool_manager_v6: LocalMempoolManagerV6 | None
     local_mempool_manager_v7: LocalMempoolManagerV7
     local_mempool_manager_v8: LocalMempoolManagerV8
@@ -87,6 +89,9 @@ class BundlerManager:
     flashbots_protect_node_urls: list[str] | None
     max_fee_per_gas_percentage_multiplier: int
     max_priority_fee_per_gas_percentage_multiplier: int
+    # Each list holds 0..N sub-bundles produced during
+    # update_send_queue_and_monitor_queue and drained fully by
+    # send_next_bundle in the same tick.
     bundles_to_send_v6: list[dict[str, UserOperationV6]] | None
     bundles_to_send_v7: list[dict[str, UserOperationV7V8V9]]
     bundles_to_send_v8: list[dict[str, UserOperationV7V8V9]]
@@ -111,7 +116,7 @@ class BundlerManager:
         ethereum_node_urls: list[str],
         ethereum_node_eth_get_logs_urls: list[str],
         bundle_node_urls: list[str],
-        bundler_secrets_per_ep: dict[str, tuple[Address, str]],
+        bundler_pool: list[tuple[Address, str]],
         chain_id: int,
         is_legacy_mode: bool,
         conditional_rpc: ConditionalRpc | None,
@@ -128,7 +133,9 @@ class BundlerManager:
         self.ethereum_node_urls = ethereum_node_urls
         self.ethereum_node_eth_get_logs_urls = ethereum_node_eth_get_logs_urls
         self.bundle_node_urls = bundle_node_urls
-        self.bundler_secrets_per_ep = bundler_secrets_per_ep
+        assert len(bundler_pool) > 0, "bundler_pool must have at least one signer"
+        self.bundler_pool = bundler_pool
+        self._pool_cursor = 0
         self.chain_id = chain_id
         self.is_legacy_mode = is_legacy_mode
         self.conditional_rpc = conditional_rpc
@@ -158,83 +165,120 @@ class BundlerManager:
         self.entrypoint_v9_reentrant = load_bytecode("EntryPointV9Reentrant.json")
         self.gas_price_cache = gas_price_cache
 
+    def _next_bundler(self) -> tuple[Address, str]:
+        """Round-robin pick from the pool. Cursor persists across ticks
+        so long-run rotation stays balanced even when per-tick demand is
+        uneven across entrypoints."""
+        signer = self.bundler_pool[self._pool_cursor % len(self.bundler_pool)]
+        self._pool_cursor += 1
+        return signer
+
+    @staticmethod
+    def _highest_verified_at_block(
+        user_operations: dict[str, UserOperationV6 | UserOperationV7V8V9],
+    ) -> int:
+        blocks = [
+            int(op.validated_at_block_hex, 16)
+            for op in user_operations.values()
+            if op.validated_at_block_hex is not None
+        ]
+        return max(blocks) if blocks else 0
+
     async def send_next_bundle(self) -> None:
         await self.update_send_queue_and_monitor_queue()
 
-        if len(self.bundles_to_send_v9) > 0:
-            user_operations_to_send_v9 = self.bundles_to_send_v9.pop(0)
-        else:
-            user_operations_to_send_v9 = {}
-        if len(self.bundles_to_send_v8) > 0:
-            user_operations_to_send_v8 = self.bundles_to_send_v8.pop(0)
-        else:
-            user_operations_to_send_v8 = {}
-        if len(self.bundles_to_send_v7) > 0:
-            user_operations_to_send_v7 = self.bundles_to_send_v7.pop(0)
-        else:
-            user_operations_to_send_v7 = {}
-
-        highest_verified_at_block_v9 = sorted(map(
-            lambda userop: int(userop.validated_at_block_hex, 16)
-            if userop.validated_at_block_hex is not None else 0,
-            user_operations_to_send_v9.values()
-        ))[-1] if user_operations_to_send_v9.values() else 0
-        highest_verified_at_block_v8 = sorted(map(
-            lambda userop: int(userop.validated_at_block_hex, 16)
-            if userop.validated_at_block_hex is not None else 0,
-            user_operations_to_send_v8.values()
-        ))[-1] if user_operations_to_send_v8.values() else 0
-        highest_verified_at_block_v7 = sorted(map(
-            lambda userop: int(userop.validated_at_block_hex, 16)
-            if userop.validated_at_block_hex is not None else 0,
-            user_operations_to_send_v7.values()
-        ))[-1] if user_operations_to_send_v7.values() else 0
-
-        tasks_arr = [
-            self.send_bundle(
-                list(user_operations_to_send_v9.values()),
-                self.local_mempool_manager_v9,
-                highest_verified_at_block_v9
-            ),
-            self.send_bundle(
-                list(user_operations_to_send_v8.values()),
-                self.local_mempool_manager_v8,
-                highest_verified_at_block_v8
-            ),
-            self.send_bundle(
-                list(user_operations_to_send_v7.values()),
-                self.local_mempool_manager_v7,
-                highest_verified_at_block_v7
-            )
-        ]
+        # Drain every sub-bundle produced this tick, in an
+        # EP-interleaved order so pool EOAs get spread across EPs when
+        # demand is uneven. Interleaving matters when the number of
+        # sub-bundles per EP differs: [v9[0], v8[0], v7[0], v6[0],
+        # v9[1], ...] keeps EOA n from always signing the same EP.
+        drained_v9 = self.bundles_to_send_v9
+        drained_v8 = self.bundles_to_send_v8
+        drained_v7 = self.bundles_to_send_v7
+        drained_v6 = self.bundles_to_send_v6 or []
+        self.bundles_to_send_v9 = []
+        self.bundles_to_send_v8 = []
+        self.bundles_to_send_v7 = []
         if self.bundles_to_send_v6 is not None:
-            assert self.local_mempool_manager_v6 is not None
-            if len(self.bundles_to_send_v6) > 0:
-                user_operations_to_send_v6 = self.bundles_to_send_v6.pop(0)
-            else:
-                user_operations_to_send_v6 = {}
-            highest_verified_at_block_v6 = sorted(map(
-                lambda userop: int(userop.validated_at_block_hex, 16)
-                if userop.validated_at_block_hex is not None else 0,
-                user_operations_to_send_v6.values()
-            ))[-1] if user_operations_to_send_v6.values() else 0
+            self.bundles_to_send_v6 = []
 
+        # dict is invariant in its value type, so a single precise
+        # element type would reject the per-EP dict[str, UserOperationVN]
+        # bundles. Fall back to Any-shaped tuples; the downstream
+        # send_bundle receives typed args because we unpack per-EP.
+        interleaved: list[tuple[Any, Any]] = []
+        max_slices = max(
+            len(drained_v9), len(drained_v8),
+            len(drained_v7), len(drained_v6),
+        )
+        for i in range(max_slices):
+            if i < len(drained_v9):
+                interleaved.append((drained_v9[i], self.local_mempool_manager_v9))
+            if i < len(drained_v8):
+                interleaved.append((drained_v8[i], self.local_mempool_manager_v8))
+            if i < len(drained_v7):
+                interleaved.append((drained_v7[i], self.local_mempool_manager_v7))
+            if i < len(drained_v6) and self.local_mempool_manager_v6 is not None:
+                interleaved.append((drained_v6[i], self.local_mempool_manager_v6))
+
+        if not interleaved:
+            # No work this tick; still process any pending bans.
+            await self._flush_pending_bans()
+            return
+
+        # Pool-of-1: several sub-bundles across EPs may end up assigned
+        # to the same EOA. eth_getTransactionCount(latest) returns the
+        # same nonce for each concurrent bundle -> collision. Fetch the
+        # base nonce once here and hand each bundle a distinct
+        # (base + i) override. For any pool size >= 2 the slot
+        # allocation in update_send_queue_and_monitor_queue caps total
+        # sub-bundles at pool_size, so each EOA signs at most one
+        # bundle per tick and no override is needed.
+        pool_size = len(self.bundler_pool)
+        nonce_by_signer: dict[Address, int] = {}
+        if pool_size == 1:
+            signer_addr, _ = self.bundler_pool[0]
+            base_nonce_res = await send_rpc_request_to_eth_client(
+                self.ethereum_node_urls,
+                "eth_getTransactionCount",
+                [signer_addr, "latest"], None, "result"
+            )
+            base_nonce = base_nonce_res["result"]
+            nonce_by_signer[signer_addr] = int(base_nonce, 16) if isinstance(
+                base_nonce, str
+            ) else int(base_nonce)
+
+        tasks_arr = []
+        for user_operations_to_send, mempool_manager in interleaved:
+            bundler_address, bundler_private_key = self._next_bundler()
+            nonce_override: int | None = None
+            if pool_size == 1:
+                nonce_override = nonce_by_signer[bundler_address]
+                nonce_by_signer[bundler_address] += 1
+            highest = self._highest_verified_at_block(user_operations_to_send)
             tasks_arr.append(
                 self.send_bundle(
-                    list(user_operations_to_send_v6.values()),
-                    self.local_mempool_manager_v6,
-                    highest_verified_at_block_v6
+                    list(user_operations_to_send.values()),
+                    mempool_manager,
+                    highest,
+                    bundler_address,
+                    bundler_private_key,
+                    nonce_override,
                 )
             )
         await asyncio.gather(*tasks_arr)
 
+        await self._flush_pending_bans()
+
+    async def _flush_pending_bans(self) -> None:
         useroperation_banning_ops = []
         for user_operation, reason, entrypoint in self.user_operations_to_ban.values():
             useroperation_banning_ops.append(
                 self.handle_useroperation_banning(user_operation, reason, entrypoint)
             )
         self.user_operations_to_ban = {}
-        await asyncio.gather(*useroperation_banning_ops)
+        if useroperation_banning_ops:
+            await asyncio.gather(*useroperation_banning_ops)
 
     @staticmethod
     def _monitor_set_has_op_past_age(
@@ -261,6 +305,66 @@ class BundlerManager:
                 return True
         return False
 
+    def _allocate_pool_slots(self) -> dict[str, int]:
+        """Return the sub-bundle budget for each EP this tick, where
+        keys are ("v9", "v8", "v7", "v6"). The total across EPs is <=
+        pool_size, so each EOA is used at most once per tick when the
+        pool has more than one signer.
+
+        Allocation rule: if every EP's demand fits inside pool_size, give
+        each EP exactly what it wants. Otherwise scale each demanding
+        EP's share proportionally with a min of 1 slot per demanding EP;
+        floor-truncation remainder goes to the EPs with the highest
+        unmet demand. Pool-of-1 gives every demanding EP one slot (up
+        to 4 total — the nonce counter in send_next_bundle keeps txns
+        distinct)."""
+        managers: list[tuple[str, object]] = [
+            ("v9", self.local_mempool_manager_v9),
+            ("v8", self.local_mempool_manager_v8),
+            ("v7", self.local_mempool_manager_v7),
+        ]
+        if self.local_mempool_manager_v6 is not None:
+            managers.append(("v6", self.local_mempool_manager_v6))
+
+        single_cap = 500_000_000 if self.chain_id in (5031, 50312) else 15_000_000
+        pool_size = len(self.bundler_pool)
+
+        raw_needed: dict[str, int] = {}
+        for label, mgr in managers:
+            demand = mgr.pending_gas_demand()  # type: ignore[attr-defined]
+            if demand > 0:
+                raw_needed[label] = max(1, math.ceil(demand / single_cap))
+
+        slots: dict[str, int] = {label: 0 for label, _ in managers}
+        if not raw_needed:
+            return slots
+
+        # Pool-of-1: nonce-counter path handles up to 4 concurrent
+        # bundles from the single EOA, one per EP with demand.
+        if pool_size == 1:
+            for label, needed in raw_needed.items():
+                slots[label] = min(needed, 1)
+            return slots
+
+        total_needed = sum(raw_needed.values())
+
+        if total_needed <= pool_size:
+            for label, needed in raw_needed.items():
+                slots[label] = needed
+            return slots
+
+        # Reserve one slot per demanding EP, then split the remainder
+        # proportionally to unmet demand.
+        remaining = pool_size - len(raw_needed)
+        for label, needed in raw_needed.items():
+            slots[label] = 1 + math.floor(remaining * needed / total_needed)
+        leftover = pool_size - sum(slots.values())
+        if leftover > 0:
+            ordered = sorted(raw_needed, key=lambda k: raw_needed[k], reverse=True)
+            for label in ordered[:leftover]:
+                slots[label] += 1
+        return slots
+
     async def update_send_queue_and_monitor_queue(self) -> None:
         # The bundle-build tasks (get_user_operations_to_bundle for each
         # EP version) ALWAYS run on every tick — they're the user-facing
@@ -272,21 +376,22 @@ class BundlerManager:
         # gated by its own 5s threshold anyway. Effect: busy mempools
         # sweep often, quiet ones don't; sub-second bundle_interval
         # doesn't translate to one eth_getLogs per tick.
+        slots = self._allocate_pool_slots()
         bundle_tasks = [
             self.local_mempool_manager_v9.get_user_operations_to_bundle(
-                self.conditional_rpc is not None
+                self.conditional_rpc is not None, slots["v9"]
             ),
             self.local_mempool_manager_v8.get_user_operations_to_bundle(
-                self.conditional_rpc is not None
+                self.conditional_rpc is not None, slots["v8"]
             ),
             self.local_mempool_manager_v7.get_user_operations_to_bundle(
-                self.conditional_rpc is not None
+                self.conditional_rpc is not None, slots["v7"]
             ),
         ]
         if self.local_mempool_manager_v6 is not None:
             bundle_tasks.append(
                 self.local_mempool_manager_v6.get_user_operations_to_bundle(
-                    self.conditional_rpc is not None
+                    self.conditional_rpc is not None, slots["v6"]
                 )
             )
 
@@ -354,57 +459,45 @@ class BundlerManager:
                         "monitor sweep failed; bundle output unaffected",
                         exc_info=res,
                     )
-        user_operations_to_bundle_v9 = cast(dict[str, UserOperationV7V8V9], bundle_results[0])
-        self.bundles_to_send_v9.append(user_operations_to_bundle_v9)
-        self.user_operations_to_monitor_v9 |= copy.deepcopy(user_operations_to_bundle_v9)
+        sub_bundles_v9 = cast(list[dict[str, UserOperationV7V8V9]], bundle_results[0])
+        self.bundles_to_send_v9.extend(sub_bundles_v9)
+        for sb_v9 in sub_bundles_v9:
+            self.user_operations_to_monitor_v9 |= copy.deepcopy(sb_v9)
 
-        user_operations_to_bundle_v8 = cast(dict[str, UserOperationV7V8V9], bundle_results[1])
-        self.bundles_to_send_v8.append(user_operations_to_bundle_v8)
-        self.user_operations_to_monitor_v8 |= copy.deepcopy(user_operations_to_bundle_v8)
+        sub_bundles_v8 = cast(list[dict[str, UserOperationV7V8V9]], bundle_results[1])
+        self.bundles_to_send_v8.extend(sub_bundles_v8)
+        for sb_v8 in sub_bundles_v8:
+            self.user_operations_to_monitor_v8 |= copy.deepcopy(sb_v8)
 
-        user_operations_to_bundle_v7 = cast(dict[str, UserOperationV7V8V9], bundle_results[2])
-        self.bundles_to_send_v7.append(user_operations_to_bundle_v7)
-        self.user_operations_to_monitor_v7 |= copy.deepcopy(user_operations_to_bundle_v7)
+        sub_bundles_v7 = cast(list[dict[str, UserOperationV7V8V9]], bundle_results[2])
+        self.bundles_to_send_v7.extend(sub_bundles_v7)
+        for sb_v7 in sub_bundles_v7:
+            self.user_operations_to_monitor_v7 |= copy.deepcopy(sb_v7)
 
         if self.local_mempool_manager_v6 is not None:
             if self.bundles_to_send_v6 is None:
                 self.bundles_to_send_v6 = []
-            user_operations_to_bundle_v6 = cast(dict[str, UserOperationV6], bundle_results[3])
-            self.bundles_to_send_v6.append(user_operations_to_bundle_v6)
-            self.user_operations_to_monitor_v6 |= copy.deepcopy(
-                user_operations_to_bundle_v6)
-
-    def _secret_for_mempool(
-        self,
-        mempool_manager: (
-            LocalMempoolManagerV9
-            | LocalMempoolManagerV8
-            | LocalMempoolManagerV7
-            | LocalMempoolManagerV6
-        ),
-    ) -> tuple[Address, str]:
-        if isinstance(mempool_manager, LocalMempoolManagerV9):
-            return self.bundler_secrets_per_ep["v9"]
-        if isinstance(mempool_manager, LocalMempoolManagerV8):
-            return self.bundler_secrets_per_ep["v8"]
-        if isinstance(mempool_manager, LocalMempoolManagerV7):
-            return self.bundler_secrets_per_ep["v7"]
-        return self.bundler_secrets_per_ep["v6"]
+            sub_bundles_v6 = cast(list[dict[str, UserOperationV6]], bundle_results[3])
+            self.bundles_to_send_v6.extend(sub_bundles_v6)
+            for sb_v6 in sub_bundles_v6:
+                self.user_operations_to_monitor_v6 |= copy.deepcopy(sb_v6)
 
     async def send_bundle(
         self,
         user_operations: list[UserOperationV7V8V9] | list[UserOperationV6],
-        mempool_manager: LocalMempoolManagerV8 | LocalMempoolManagerV7 | LocalMempoolManagerV6,
-        highest_verified_at_block: int
+        mempool_manager: LocalMempoolManagerV9 | LocalMempoolManagerV8 | LocalMempoolManagerV7 | LocalMempoolManagerV6,
+        highest_verified_at_block: int,
+        bundler_address: Address,
+        bundler_private_key: str,
+        nonce_override: int | None = None,
     ) -> None:
         entrypoint = mempool_manager.entrypoint
         num_of_user_operations = len(user_operations)
         if num_of_user_operations == 0:
             return
-        bundler_address, bundler_private_key = self._secret_for_mempool(
-            mempool_manager)
         logging.info(
-            f"Attempting to send bundle with {num_of_user_operations} user operations."
+            f"Attempting to send bundle with {num_of_user_operations} "
+            f"user operations from {bundler_address}."
         )
 
         call_data_and_call_gas_limit_op = self.create_bundle_calldata_and_estimate_gas(
@@ -414,11 +507,21 @@ class BundlerManager:
             highest_verified_at_block
         )
 
-        nonce_op = send_rpc_request_to_eth_client(
-            self.ethereum_node_urls,
-            "eth_getTransactionCount",
-            [bundler_address, "latest"], None, "result"
-        )
+        # nonce_override is set only in the pool-of-1 path in
+        # send_next_bundle, where multiple concurrent bundles share
+        # one signer and each gets a distinct (base + i) nonce.
+        if nonce_override is None:
+            nonce_op = send_rpc_request_to_eth_client(
+                self.ethereum_node_urls,
+                "eth_getTransactionCount",
+                [bundler_address, "latest"], None, "result"
+            )
+        else:
+            _override_hex = hex(nonce_override)
+
+            async def _override_nonce_op() -> dict:
+                return {"result": _override_hex}
+            nonce_op = _override_nonce_op()
 
         # Gas-price values come from the background-refreshed cache so each
         # bundle round drops two RPCs (eth_gasPrice + eth_maxPriorityFeePerGas)
@@ -622,8 +725,15 @@ class BundlerManager:
                             f"{self.gas_price_percentage_multiplier}%"
                         )
 
+                        # Replacement txn MUST come from the same EOA
+                        # + nonce as the original attempt.
                         await self.send_bundle(
-                            user_operations, mempool_manager, highest_verified_at_block
+                            user_operations,
+                            mempool_manager,
+                            highest_verified_at_block,
+                            bundler_address,
+                            bundler_private_key,
+                            nonce_override,
                         )
                     else:
                         logging.error(

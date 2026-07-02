@@ -98,7 +98,7 @@ class ExecutionEndpoint(Endpoint):
         self,
         ethereum_node_urls: list[str],
         bundle_node_urls: list[str],
-        bundler_secrets_per_ep: dict[str, tuple[Address, str]],
+        bundler_pool: list[tuple[Address, str]],
         chain_id: int,
         is_unsafe: bool,
         is_debug: bool,
@@ -132,19 +132,16 @@ class ExecutionEndpoint(Endpoint):
         self.ethereum_node_urls = ethereum_node_urls
         self.chain_id = chain_id
 
-        bundler_address_v6, _ = bundler_secrets_per_ep["v6"]
-        bundler_address_v7, _ = bundler_secrets_per_ep["v7"]
-        bundler_address_v8, _ = bundler_secrets_per_ep["v8"]
-        bundler_address_v9, _ = bundler_secrets_per_ep["v9"]
+        # The pool is shared across entrypoints. Simulation eth_calls
+        # need a ``from`` address that's balance-overridden to a sentinel,
+        # so the choice of EOA doesn't affect correctness — use pool[0]
+        # everywhere for determinism.
+        simulation_from = bundler_pool[0][0]
 
-        # The shared v7/v8/v9 user-operation handler only uses ``bundler_address``
-        # as the ``from`` for simulation eth_calls — the balance is state-
-        # overridden to a sentinel value, so any of the three EOAs works.
-        # Pass the v7 address to keep behavior deterministic.
         self.user_operation_handler_v7v8v9 = UserOperationHandlerV7V8V9(
             chain_id,
             ethereum_node_urls,
-            bundler_address_v7,
+            simulation_from,
             is_legacy_mode,
             ethereum_node_eth_get_logs_urls,
             max_verification_gas,
@@ -158,7 +155,7 @@ class ExecutionEndpoint(Endpoint):
         self.local_mempool_manager_v9 = LocalMempoolManagerV9(
             self.user_operation_handler_v7v8v9,
             ethereum_node_urls,
-            bundler_address_v9,
+            simulation_from,
             chain_id,
             is_unsafe,
             enforce_gas_price_tolerance,
@@ -175,7 +172,7 @@ class ExecutionEndpoint(Endpoint):
         self.local_mempool_manager_v8 = LocalMempoolManagerV8(
             self.user_operation_handler_v7v8v9,
             ethereum_node_urls,
-            bundler_address_v8,
+            simulation_from,
             chain_id,
             is_unsafe,
             enforce_gas_price_tolerance,
@@ -192,7 +189,7 @@ class ExecutionEndpoint(Endpoint):
         self.local_mempool_manager_v7 = LocalMempoolManagerV7(
             self.user_operation_handler_v7v8v9,
             ethereum_node_urls,
-            bundler_address_v7,
+            simulation_from,
             chain_id,
             is_unsafe,
             enforce_gas_price_tolerance,
@@ -213,7 +210,7 @@ class ExecutionEndpoint(Endpoint):
             self.user_operation_handler_v6 = UserOperationHandlerV6(
                 chain_id,
                 ethereum_node_urls,
-                bundler_address_v6,
+                simulation_from,
                 is_legacy_mode,
                 ethereum_node_eth_get_logs_urls,
                 max_verification_gas,
@@ -227,7 +224,7 @@ class ExecutionEndpoint(Endpoint):
             self.local_mempool_manager_v6 = LocalMempoolManagerV6(
                 self.user_operation_handler_v6,
                 ethereum_node_urls,
-                bundler_address_v6,
+                simulation_from,
                 chain_id,
                 is_unsafe,
                 enforce_gas_price_tolerance,
@@ -249,7 +246,7 @@ class ExecutionEndpoint(Endpoint):
             ethereum_node_urls,
             ethereum_node_eth_get_logs_urls,
             bundle_node_urls,
-            bundler_secrets_per_ep,
+            bundler_pool,
             chain_id,
             is_legacy_mode,
             conditional_rpc,

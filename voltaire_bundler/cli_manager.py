@@ -50,10 +50,11 @@ class InitData:
     rpc_port: int
     ethereum_node_urls: list[str]
     bundle_node_urls: list[str]
-    # (address, private_key) tuples keyed by entrypoint label
-    # ("v6", "v7", "v8", "v9"). When the operator passes a single
-    # --bundler_secret all four entries share the same EOA.
-    bundler_secrets_per_ep: dict[str, tuple[Address, str]]
+    # Ordered pool of (address, private_key) signers. Shared across all
+    # entrypoints — round-robin per bundle, so any pool size >= 1 works
+    # and multiple bundles per tick can land concurrently. A pool of 1
+    # preserves today's single-EOA behavior via a nonce counter.
+    bundler_pool: list[tuple[Address, str]]
     chain_id: int
     is_debug: bool
     is_unsafe: bool
@@ -206,10 +207,11 @@ def initialize_argument_parser() -> ArgumentParser:
         "--bundler_secret",
         type=str,
         help=(
-            "Bundler private key. Pass a single secret to use one EOA for all "
-            "entrypoints, or four comma-separated secrets (in v0.6,v0.7,v0.8,v0.9 "
-            "order) to use a distinct EOA per entrypoint. When --disable_v6 is "
-            "set the v0.6 slot is still required but its EOA is unused."
+            "Bundler private key(s). Pass one secret for a single-EOA bundler, "
+            "or N comma-separated secrets to form a pool of N signers shared "
+            "across all entrypoints. Each tick, sub-bundles are round-robin "
+            "assigned across the pool and submitted concurrently, so a larger "
+            "pool raises the throughput ceiling. All pool EOAs must be funded."
         ),
         nargs="?",
         default=_get_env_or_default("VOLTAIRE_BUNDLER_SECRET", None, str),
@@ -839,52 +841,40 @@ def init_logging(args: Namespace):
     logging.getLogger("Voltaire")
 
 
-ENTRYPOINT_LABELS = ("v6", "v7", "v8", "v9")
-
-
 async def init_bundler_address_and_secret(
     args: Namespace, ethereum_node_url: str
-) -> dict[str, tuple[Address, str]]:
+) -> list[tuple[Address, str]]:
     if args.keystore_file_path is not None:
-        # Keystore is single-EOA only: the same EOA is reused for every
-        # entrypoint.
+        # Keystore is single-EOA only: pool of size 1.
         bundler_address, bundler_pk = import_bundler_account(
             args.keystore_file_password, args.keystore_file_path
         )
-        per_ep_secrets = {
-            label: (bundler_address, bundler_pk) for label in ENTRYPOINT_LABELS
-        }
+        bundler_pool: list[tuple[Address, str]] = [(bundler_address, bundler_pk)]
     else:
         raw_secrets = [s.strip() for s in args.bundler_secret.split(",")]
         if any(s == "" for s in raw_secrets):
             logging.critical(
-                "--bundler_secret contains an empty entry; provide either one "
-                "secret or four non-empty comma-separated secrets (one per "
-                "entrypoint in v0.6,v0.7,v0.8,v0.9 order)."
+                "--bundler_secret contains an empty entry; provide one or more "
+                "non-empty comma-separated secrets."
             )
             sys.exit(1)
-        if len(raw_secrets) == 1:
-            pk = raw_secrets[0]
-            addr = public_address_from_private_key(pk)
-            per_ep_secrets = {label: (addr, pk) for label in ENTRYPOINT_LABELS}
-        elif len(raw_secrets) == 4:
-            per_ep_secrets = {}
-            for label, pk in zip(ENTRYPOINT_LABELS, raw_secrets):
-                addr = public_address_from_private_key(pk)
-                per_ep_secrets[label] = (addr, pk)
-        else:
+        bundler_pool = [
+            (public_address_from_private_key(pk), pk) for pk in raw_secrets
+        ]
+        # Reject duplicate keys in the pool: two slots pointing at the same
+        # EOA would collide on nonces if both are assigned bundles in the
+        # same tick.
+        addrs = [addr for addr, _ in bundler_pool]
+        if len(set(addrs)) != len(addrs):
             logging.critical(
-                "--bundler_secret must be either one secret or four "
-                "comma-separated secrets (one per entrypoint in "
-                "v0.6,v0.7,v0.8,v0.9 order); got "
-                f"{len(raw_secrets)}."
+                "--bundler_secret contains duplicate entries; each pool "
+                "signer must be a distinct EOA."
             )
             sys.exit(1)
 
-    # Verify each unique EOA address is actually an EOA (no contract code,
-    # no EIP-7702 delegation). De-duplicate first so the single-secret case
-    # only spends one RPC round-trip.
-    unique_addresses = {addr for addr, _ in per_ep_secrets.values()}
+    # Verify each pool EOA address is actually an EOA (no contract code,
+    # no EIP-7702 delegation).
+    unique_addresses = {addr for addr, _ in bundler_pool}
     for bundler_address in unique_addresses:
         try:
             bundler_code_res = await send_rpc_request_to_eth_client_no_retry(
@@ -916,7 +906,7 @@ async def init_bundler_address_and_secret(
             )
             sys.exit(1)
 
-    return per_ep_secrets
+    return bundler_pool
 
 
 def check_if_valid_rpc_url_and_port(rpc_url, rpc_port) -> None:
@@ -1036,7 +1026,7 @@ async def get_init_data(args: Namespace) -> InitData:
         )
         sys.exit(1)
 
-    bundler_secrets_per_ep = await init_bundler_address_and_secret(
+    bundler_pool = await init_bundler_address_and_secret(
         args, ethereum_node_urls_rearranged[0])
 
     if args.bundle_node_url is None:
@@ -1205,7 +1195,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.rpc_port,
         ethereum_node_urls,
         bundle_node_urls,
-        bundler_secrets_per_ep,
+        bundler_pool,
         args.chain_id,
         args.debug,
         args.unsafe,
