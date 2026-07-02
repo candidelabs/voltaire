@@ -833,9 +833,19 @@ class LocalMempoolManager():
             user_op_max_cost = user_operation.get_max_cost()
 
         remaining_deposit -= user_op_max_cost
+        # Only count in-flight userops that draw from the SAME paymaster's
+        # deposit. Summing every mempool userop's max_cost regardless of
+        # paymaster (previous behaviour) tips the check negative as soon
+        # as any userops queue up, so unrelated senders — or a userop with
+        # no paymaster at all — can starve a well-funded paymaster.
         for sender_address in list(self.senders_to_senders_mempools):
             sender = self.senders_to_senders_mempools[sender_address]
             for verified_user_operation in sender.user_operation_hashs_to_verified_user_operation.values():
+                if (
+                    verified_user_operation.user_operation.paymaster_address_lowercase
+                    != paymaster
+                ):
+                    continue
                 user_op_max_cost = verified_user_operation.user_operation.get_max_cost()
                 remaining_deposit -= user_op_max_cost
                 if remaining_deposit < 0:
