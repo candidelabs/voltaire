@@ -208,7 +208,18 @@ class LocalMempoolManager():
                     user_operation, self.enforce_gas_price_tolerance
                 )
             )
-            user_operation.validated_at_block_hex = verified_at_block_hash
+            # NOTE: validated_at_block_hex was previously set to
+            # verified_at_block_hash here — a 66-char block *hash*, but the
+            # field is consumed as a block *number* hex string by the
+            # coalesced monitor sweep (int(x, 16)). That produced ~2^256
+            # values, and if all monitored userops came in via p2p, min()
+            # would pick a "block number" astronomically past the chain
+            # head, tripping the to_block_int < from_block_int guard in
+            # get_user_operation_logs_for_many_hashes and skipping the
+            # sweep entirely — so p2p userops could only exit the monitor
+            # set by hitting the 20-attempt cap. The correct block-number
+            # hex is available as validated_at_block_number from
+            # validate_user_operation below; assign it after that returns.
         except ValidationException:
             return "No"
 
@@ -257,6 +268,12 @@ class LocalMempoolManager():
                 return "No"
             else:
                 self.seen_user_operation_hashs.add(user_operation_hash)
+
+            # Stamp the block-number hex (NOT the hash) so the coalesced
+            # monitor sweep can compute a sane min() fromBlock. The regular
+            # add_user_operation path sets this from the same value; keep
+            # both paths in sync.
+            user_operation.validated_at_block_hex = validated_at_block_number
 
         except ValidationException:
             try:
