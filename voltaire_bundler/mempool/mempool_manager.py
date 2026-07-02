@@ -373,33 +373,44 @@ class LocalMempoolManager():
             return []
         senders_lowercase = [x.lower() for x in self.senders_to_senders_mempools.keys()]
         single_cap = self._single_bundle_gas_cap()
+        # Validation (eth_call + debug_traceCall in safe mode) is the
+        # expensive piece. Cap candidates at the total gas we could pack
+        # this tick — the sum of at most ``max_sub_bundles`` full
+        # bundles — so we don't spend RPCs on ops that couldn't ship
+        # even if every one of them validated cleanly. Individually
+        # over-cap ops are also skipped (they'd never fit any bundle).
+        validation_budget = max_sub_bundles * single_cap
 
         # Collect candidate userops (one per sender, head of queue) in
         # sender-mempool insertion order. Dict iteration — no RPC.
-        candidates: list = []
+        # Accumulate to ``validation_budget``, skipping individually
+        # over-cap ops rather than stopping on the first one so a
+        # single oversized userop in the middle doesn't starve later
+        # smaller ones.
+        candidates: list[UserOperation] = []
+        accumulated = 0
         for sender_address in list(self.senders_to_senders_mempools):
+            if accumulated >= validation_budget:
+                break
             sender_mempool = self.senders_to_senders_mempools[sender_address]
-            if len(sender_mempool.user_operation_hashs_to_verified_user_operation) > 0:
-                user_operation_hash = next(
-                    iter(sender_mempool.user_operation_hashs_to_verified_user_operation)
-                )
-                candidates.append(
-                    sender_mempool.user_operation_hashs_to_verified_user_operation[
-                        user_operation_hash
-                    ].user_operation
-                )
-
-        # Skip individually over-cap ops before validation. Validation
-        # (eth_call + debug_traceCall in safe mode) is the expensive
-        # piece — no point spending it on an op that can't fit any
-        # sub-bundle. It stays in the mempool.
-        user_operations: list[UserOperation] = [
-            op for op in candidates
-            if op.get_max_gas_without_pre_verification_gas() <= single_cap
-        ]
+            if len(sender_mempool.user_operation_hashs_to_verified_user_operation) == 0:
+                continue
+            user_operation_hash = next(
+                iter(sender_mempool.user_operation_hashs_to_verified_user_operation)
+            )
+            op = sender_mempool.user_operation_hashs_to_verified_user_operation[
+                user_operation_hash
+            ].user_operation
+            op_max = op.get_max_gas_without_pre_verification_gas()
+            if op_max > single_cap:
+                continue
+            if accumulated + op_max > validation_budget:
+                continue
+            candidates.append(op)
+            accumulated += op_max
 
         validate_user_operations_ops = [
-            self.validate_user_operation_to_bundle(op) for op in user_operations
+            self.validate_user_operation_to_bundle(op) for op in candidates
         ]
         validation_results = await asyncio.gather(*validate_user_operations_ops)
 
@@ -412,14 +423,49 @@ class LocalMempoolManager():
             )
         new_code_hash_results = await asyncio.gather(*new_code_hash_ops)
 
-        # Validated ops in insertion order — this is the packing input.
-        packable_ops: list[UserOperation] = []
+        # FIFO-pack validated ops into up to ``max_sub_bundles`` slices,
+        # each capped at ``single_cap``. Remove packed ops from the
+        # sender mempool inline as they land in a slice so we don't
+        # walk the packed set again. Ops that don't fit stay in place
+        # for the next tick.
+        sub_bundles: list[dict[str, UserOperation]] = []
+        current: dict[str, UserOperation] = {}
+        current_gas = 0
+
+        def _flush_current() -> bool:
+            """Append ``current`` to ``sub_bundles`` (if non-empty) and
+            reset. Returns True if there is room for another slice."""
+            nonlocal current, current_gas
+            if current:
+                sub_bundles.append(current)
+            current = {}
+            current_gas = 0
+            return len(sub_bundles) < max_sub_bundles
+
+        def _record_packed(op: UserOperation) -> None:
+            """Add op to the current slice and evict it from the sender
+            mempool. Inlined here so we only walk packed ops once."""
+            nonlocal current_gas
+            current[op.user_operation_hash] = op
+            current_gas += op.get_max_gas_without_pre_verification_gas()
+            sender_mempool = self.senders_to_senders_mempools.get(op.sender_address)
+            if sender_mempool is None:
+                return
+            sender_mempool.user_operation_hashs_to_verified_user_operation.pop(
+                op.user_operation_hash, None
+            )
+            self._remove_hash_from_entities_ops_hashes_in_mempool(
+                op.user_operation_hash
+            )
+            if len(sender_mempool.user_operation_hashs_to_verified_user_operation) == 0:
+                self.senders_to_senders_mempools.pop(op.sender_address, None)
+
         for (
             user_operation,
             (is_valid, associated_addresses, storage_map),
             new_code_hash
         ) in zip(
-            user_operations,
+            candidates,
             validation_results,
             new_code_hash_results
         ):
@@ -466,49 +512,16 @@ class LocalMempoolManager():
                     )
                 continue
 
-            packable_ops.append(user_operation)
-
-        # FIFO pack into up to ``max_sub_bundles`` sub-bundles, each
-        # capped at single_cap. Ops that don't fit stay in the mempool
-        # (not removed) — they get reconsidered on the next tick.
-        sub_bundles: list[dict[str, UserOperation]] = []
-        current: dict[str, UserOperation] = {}
-        current_gas = 0
-        for op in packable_ops:
-            op_max = op.get_max_gas_without_pre_verification_gas()
+            op_max = user_operation.get_max_gas_without_pre_verification_gas()
             if current_gas + op_max > single_cap:
-                if current:
-                    sub_bundles.append(current)
-                if len(sub_bundles) >= max_sub_bundles:
-                    # Out of pool slots for this EP this tick. Remaining
-                    # ops stay in the mempool.
-                    current = {}
-                    current_gas = 0
+                if not _flush_current():
+                    # Out of slices — remaining ops stay in the mempool.
                     break
-                current = {}
-                current_gas = 0
-            current[op.user_operation_hash] = op
-            current_gas += op_max
+            _record_packed(user_operation)
+
+        # Trailing partial slice.
         if current and len(sub_bundles) < max_sub_bundles:
             sub_bundles.append(current)
-
-        # Remove packed ops from the sender mempools. Ops deferred by
-        # the sub-bundle cap were never added to any sub-bundle, so they
-        # stay in place.
-        for sub_bundle in sub_bundles:
-            for user_operation_hash, user_operation in sub_bundle.items():
-                sender_address = user_operation.sender_address
-                sender_mempool = self.senders_to_senders_mempools.get(sender_address)
-                if sender_mempool is None:
-                    continue
-                sender_mempool.user_operation_hashs_to_verified_user_operation.pop(
-                    user_operation_hash, None
-                )
-                self._remove_hash_from_entities_ops_hashes_in_mempool(
-                    user_operation_hash
-                )
-                if len(sender_mempool.user_operation_hashs_to_verified_user_operation) == 0:
-                    self.senders_to_senders_mempools.pop(sender_address, None)
 
         return sub_bundles
 

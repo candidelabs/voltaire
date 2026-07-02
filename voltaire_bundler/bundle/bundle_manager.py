@@ -2,6 +2,7 @@ import asyncio
 import copy
 from collections import defaultdict
 from datetime import datetime
+from itertools import zip_longest
 import logging
 import math
 from typing import Any, cast
@@ -192,34 +193,37 @@ class BundlerManager:
         # demand is uneven. Interleaving matters when the number of
         # sub-bundles per EP differs: [v9[0], v8[0], v7[0], v6[0],
         # v9[1], ...] keeps EOA n from always signing the same EP.
-        drained_v9 = self.bundles_to_send_v9
-        drained_v8 = self.bundles_to_send_v8
-        drained_v7 = self.bundles_to_send_v7
-        drained_v6 = self.bundles_to_send_v6 or []
+        # Drain per-EP sub-bundle queues in one pass. Round-robin
+        # interleave so pool EOAs get spread across EPs when demand is
+        # uneven: sub-bundle i of every EP ships before sub-bundle
+        # i+1 of any EP. zip_longest yields (v9_i, v8_i, v7_i, v6_i)
+        # for each layer i, with None filling gaps when EPs have
+        # different slice counts this tick.
+        # dict is invariant in its value type, so we type the tuple
+        # elements as Any; send_bundle's signature receives typed args
+        # via unpacking.
+        per_ep: list[tuple[list[dict], object]] = [
+            (self.bundles_to_send_v9, self.local_mempool_manager_v9),
+            (self.bundles_to_send_v8, self.local_mempool_manager_v8),
+            (self.bundles_to_send_v7, self.local_mempool_manager_v7),
+        ]
+        if self.local_mempool_manager_v6 is not None:
+            per_ep.append(
+                (self.bundles_to_send_v6 or [], self.local_mempool_manager_v6)
+            )
+        # Reset queues before iterating — we've captured references.
         self.bundles_to_send_v9 = []
         self.bundles_to_send_v8 = []
         self.bundles_to_send_v7 = []
         if self.bundles_to_send_v6 is not None:
             self.bundles_to_send_v6 = []
 
-        # dict is invariant in its value type, so a single precise
-        # element type would reject the per-EP dict[str, UserOperationVN]
-        # bundles. Fall back to Any-shaped tuples; the downstream
-        # send_bundle receives typed args because we unpack per-EP.
-        interleaved: list[tuple[Any, Any]] = []
-        max_slices = max(
-            len(drained_v9), len(drained_v8),
-            len(drained_v7), len(drained_v6),
-        )
-        for i in range(max_slices):
-            if i < len(drained_v9):
-                interleaved.append((drained_v9[i], self.local_mempool_manager_v9))
-            if i < len(drained_v8):
-                interleaved.append((drained_v8[i], self.local_mempool_manager_v8))
-            if i < len(drained_v7):
-                interleaved.append((drained_v7[i], self.local_mempool_manager_v7))
-            if i < len(drained_v6) and self.local_mempool_manager_v6 is not None:
-                interleaved.append((drained_v6[i], self.local_mempool_manager_v6))
+        interleaved: list[tuple[Any, Any]] = [
+            (sub_bundle, mempool)
+            for layer in zip_longest(*(lst for lst, _ in per_ep), fillvalue=None)
+            for sub_bundle, (_, mempool) in zip(layer, per_ep)
+            if sub_bundle is not None
+        ]
 
         if not interleaved:
             # No work this tick; still process any pending bans.
@@ -311,14 +315,18 @@ class BundlerManager:
         pool_size, so each EOA is used at most once per tick when the
         pool has more than one signer.
 
-        Allocation rule: if every EP's demand fits inside pool_size, give
-        each EP exactly what it wants. Otherwise scale each demanding
-        EP's share proportionally with a min of 1 slot per demanding EP;
-        floor-truncation remainder goes to the EPs with the highest
-        unmet demand. Pool-of-1 gives every demanding EP one slot (up
-        to 4 total — the nonce counter in send_next_bundle keeps txns
-        distinct)."""
-        managers: list[tuple[str, object]] = [
+        Allocation rules:
+        - Pool-of-1: nonce counter in send_next_bundle keeps concurrent
+          txns distinct — give every demanding EP one slot (up to 4).
+        - pool_size >= number of demanding EPs: guarantee one slot per
+          demanding EP, then split the remainder proportionally to
+          unmet demand; the leftover from floor-truncation goes to the
+          top-demand EPs.
+        - pool_size < number of demanding EPs: cannot honour min-1 per
+          EP; assign one slot to each of the top pool_size EPs by
+          demand and starve the rest this tick. Demand shifts over
+          subsequent ticks tend to give the starved EPs turns."""
+        managers: list[tuple[str, LocalMempoolManagerV9 | LocalMempoolManagerV8 | LocalMempoolManagerV7 | LocalMempoolManagerV6]] = [
             ("v9", self.local_mempool_manager_v9),
             ("v8", self.local_mempool_manager_v8),
             ("v7", self.local_mempool_manager_v7),
@@ -326,35 +334,43 @@ class BundlerManager:
         if self.local_mempool_manager_v6 is not None:
             managers.append(("v6", self.local_mempool_manager_v6))
 
-        single_cap = 500_000_000 if self.chain_id in (5031, 50312) else 15_000_000
+        single_cap = self.local_mempool_manager_v9._single_bundle_gas_cap()
         pool_size = len(self.bundler_pool)
 
         raw_needed: dict[str, int] = {}
         for label, mgr in managers:
-            demand = mgr.pending_gas_demand()  # type: ignore[attr-defined]
+            demand = mgr.pending_gas_demand()
             if demand > 0:
-                raw_needed[label] = max(1, math.ceil(demand / single_cap))
+                # ceil of a positive int over a positive int is always >= 1;
+                # kept explicit here so readers don't have to derive it.
+                raw_needed[label] = math.ceil(demand / single_cap)
 
         slots: dict[str, int] = {label: 0 for label, _ in managers}
         if not raw_needed:
             return slots
 
-        # Pool-of-1: nonce-counter path handles up to 4 concurrent
-        # bundles from the single EOA, one per EP with demand.
         if pool_size == 1:
-            for label, needed in raw_needed.items():
-                slots[label] = min(needed, 1)
+            for label in raw_needed:
+                slots[label] = 1
             return slots
 
         total_needed = sum(raw_needed.values())
-
         if total_needed <= pool_size:
             for label, needed in raw_needed.items():
                 slots[label] = needed
             return slots
 
-        # Reserve one slot per demanding EP, then split the remainder
-        # proportionally to unmet demand.
+        # More demanding EPs than pool slots: top-demand EPs win this
+        # tick, others wait. Avoids the min-1 formula going negative
+        # when pool_size < len(raw_needed).
+        if pool_size < len(raw_needed):
+            top = sorted(raw_needed, key=lambda k: raw_needed[k], reverse=True)
+            for label in top[:pool_size]:
+                slots[label] = 1
+            return slots
+
+        # pool_size >= len(raw_needed): reserve one slot per demanding
+        # EP, then split the remainder proportionally.
         remaining = pool_size - len(raw_needed)
         for label, needed in raw_needed.items():
             slots[label] = 1 + math.floor(remaining * needed / total_needed)
@@ -459,28 +475,37 @@ class BundlerManager:
                         "monitor sweep failed; bundle output unaffected",
                         exc_info=res,
                     )
+        # Merge all sub-bundles for an EP into one dict before
+        # deepcopy-ing into the monitor set — a single deepcopy per EP,
+        # not one per sub-bundle. Empty-input case skips the copy.
+        def _merge(sub_bundles: list[dict]) -> dict:
+            merged: dict = {}
+            for sb in sub_bundles:
+                merged.update(sb)
+            return merged
+
         sub_bundles_v9 = cast(list[dict[str, UserOperationV7V8V9]], bundle_results[0])
         self.bundles_to_send_v9.extend(sub_bundles_v9)
-        for sb_v9 in sub_bundles_v9:
-            self.user_operations_to_monitor_v9 |= copy.deepcopy(sb_v9)
+        if sub_bundles_v9:
+            self.user_operations_to_monitor_v9 |= copy.deepcopy(_merge(sub_bundles_v9))
 
         sub_bundles_v8 = cast(list[dict[str, UserOperationV7V8V9]], bundle_results[1])
         self.bundles_to_send_v8.extend(sub_bundles_v8)
-        for sb_v8 in sub_bundles_v8:
-            self.user_operations_to_monitor_v8 |= copy.deepcopy(sb_v8)
+        if sub_bundles_v8:
+            self.user_operations_to_monitor_v8 |= copy.deepcopy(_merge(sub_bundles_v8))
 
         sub_bundles_v7 = cast(list[dict[str, UserOperationV7V8V9]], bundle_results[2])
         self.bundles_to_send_v7.extend(sub_bundles_v7)
-        for sb_v7 in sub_bundles_v7:
-            self.user_operations_to_monitor_v7 |= copy.deepcopy(sb_v7)
+        if sub_bundles_v7:
+            self.user_operations_to_monitor_v7 |= copy.deepcopy(_merge(sub_bundles_v7))
 
         if self.local_mempool_manager_v6 is not None:
             if self.bundles_to_send_v6 is None:
                 self.bundles_to_send_v6 = []
             sub_bundles_v6 = cast(list[dict[str, UserOperationV6]], bundle_results[3])
             self.bundles_to_send_v6.extend(sub_bundles_v6)
-            for sb_v6 in sub_bundles_v6:
-                self.user_operations_to_monitor_v6 |= copy.deepcopy(sb_v6)
+            if sub_bundles_v6:
+                self.user_operations_to_monitor_v6 |= copy.deepcopy(_merge(sub_bundles_v6))
 
     async def send_bundle(
         self,
@@ -507,37 +532,41 @@ class BundlerManager:
             highest_verified_at_block
         )
 
-        # nonce_override is set only in the pool-of-1 path in
-        # send_next_bundle, where multiple concurrent bundles share
-        # one signer and each gets a distinct (base + i) nonce.
-        if nonce_override is None:
-            nonce_op = send_rpc_request_to_eth_client(
-                self.ethereum_node_urls,
-                "eth_getTransactionCount",
-                [bundler_address, "latest"], None, "result"
-            )
-        else:
-            _override_hex = hex(nonce_override)
-
-            async def _override_nonce_op() -> dict:
-                return {"result": _override_hex}
-            nonce_op = _override_nonce_op()
-
         # Gas-price values come from the background-refreshed cache so each
         # bundle round drops two RPCs (eth_gasPrice + eth_maxPriorityFeePerGas)
         # off the upstream node. Snapshot is fetched in parallel with the
-        # bundle gas estimate + nonce so a stale-fallback refresh, if it
-        # happens, doesn't add wall-clock latency.
+        # bundle gas estimate (and, when we need to query it, the nonce)
+        # so a stale-fallback refresh doesn't add wall-clock latency.
+        #
+        # ``nonce_override`` is set only in the pool-of-1 path in
+        # send_next_bundle, where multiple concurrent bundles share one
+        # signer and each gets a distinct (base + i) nonce. When set,
+        # skip the eth_getTransactionCount round-trip entirely.
         try:
-            (
-                call_data_tuple,
-                nonce_result,
-                gas_price_snapshot,
-            ) = await asyncio.gather(
-                call_data_and_call_gas_limit_op,
-                nonce_op,
-                self.gas_price_cache.get_snapshot(),
-            )
+            if nonce_override is None:
+                (
+                    call_data_tuple,
+                    nonce_result,
+                    gas_price_snapshot,
+                ) = await asyncio.gather(
+                    call_data_and_call_gas_limit_op,
+                    send_rpc_request_to_eth_client(
+                        self.ethereum_node_urls,
+                        "eth_getTransactionCount",
+                        [bundler_address, "latest"], None, "result"
+                    ),
+                    self.gas_price_cache.get_snapshot(),
+                )
+                nonce = nonce_result["result"]
+            else:
+                (
+                    call_data_tuple,
+                    gas_price_snapshot,
+                ) = await asyncio.gather(
+                    call_data_and_call_gas_limit_op,
+                    self.gas_price_cache.get_snapshot(),
+                )
+                nonce = hex(nonce_override)
         except ExecutionException as err:
             logging.error(f"Sending bundle failed with erro: {err.message}")
             return
@@ -569,8 +598,6 @@ class BundlerManager:
             gas_estimation_hex * multiplier
         )
         gas_estimation_hex = hex(gas_estimation_int)
-
-        nonce = nonce_result["result"]
 
         block_max_fee_per_gas_dec = gas_price_snapshot.max_fee_per_gas
         block_max_fee_per_gas_dec_mod = math.ceil(
