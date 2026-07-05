@@ -833,6 +833,16 @@ class LocalMempoolManager():
             user_op_max_cost = user_operation.get_max_cost()
 
         remaining_deposit -= user_op_max_cost
+        # Reject up front when the candidate alone already exceeds the
+        # on-chain deposit. Without this, the check only fires inside
+        # the loop over existing mempool userops — so an underfunded op
+        # slips through whenever no in-flight op happens to use this
+        # paymaster (the common case for a fresh or unpopular paymaster).
+        if remaining_deposit < 0:
+            raise ValidationException(
+                ValidationExceptionCode.PaymasterDepositTooLow,
+                "paymaster deposit too low for all mempool UserOps",
+            )
         # Only count in-flight userops that draw from the SAME paymaster's
         # deposit. Summing every mempool userop's max_cost regardless of
         # paymaster (previous behaviour) tips the check negative as soon
