@@ -12,7 +12,7 @@ import aiohttp
 
 from voltaire_bundler.gas.gas_price_cache import (
     GasPriceCache,
-    default_refresh_interval,
+    DEFAULT_REFRESH_INTERVAL_SECONDS,
 )
 from voltaire_bundler.mempool.mempool_info import DEFAULT_MEMPOOL_INFO
 from voltaire_bundler.user_operation import user_operation_handler
@@ -403,10 +403,11 @@ def initialize_argument_parser() -> ArgumentParser:
         type=positive_float,
         help=(
             "seconds between background refreshes of the cached "
-            "eth_gasPrice / eth_maxPriorityFeePerGas values. Defaults to a "
-            "per-chain value roughly matching the chain's block time "
-            "(e.g. 10s on Ethereum mainnet, 2s on L2s, 1s on Arbitrum / "
-            "HyperEVM / Somnia)."
+            "eth_gasPrice / eth_maxPriorityFeePerGas values. Defaults to "
+            "1s across every chain; the background loop is idle-aware "
+            "and skips refreshes when the cache hasn't been read in "
+            "3 * interval seconds, so a shorter interval on a quiet "
+            "bundler costs nothing."
         ),
         nargs="?",
         default=_get_env_or_default(
@@ -1109,12 +1110,13 @@ async def get_init_data(args: Namespace) -> InitData:
             ethereum_node_urls_rearranged[0], args.disable_v6)
 
     # Warm the gas-price cache synchronously so a misconfigured eth node
-    # URL fails at startup instead of on the first userop. The CLI override
-    # takes precedence over the per-chain default; both are positive floats.
+    # URL fails at startup instead of on the first userop. The CLI
+    # override takes precedence over the built-in default; both are
+    # positive floats.
     gas_price_refresh_interval = (
         args.gas_price_refresh_interval
         if args.gas_price_refresh_interval is not None
-        else default_refresh_interval(args.chain_id)
+        else DEFAULT_REFRESH_INTERVAL_SECONDS
     )
     gas_price_cache = GasPriceCache(
         ethereum_node_urls_rearranged,

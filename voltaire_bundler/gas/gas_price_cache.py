@@ -28,41 +28,21 @@ from voltaire_bundler.utils.eth_client_utils import \
     send_rpc_request_to_eth_client
 
 
-# Per-chain refresh cadence (seconds). Picked to track each chain's typical
-# block time: gas price doesn't change between blocks, so refreshing faster
-# than the block rate is wasted work; refreshing slower means the cache lags
-# real conditions during fee spikes and risks rejecting legitimate userops
-# (or accepting underpriced ones that then fail bundle inclusion).
-_REFRESH_INTERVAL_BY_CHAIN: dict[int, float] = {
-    1: 10.0,            # Ethereum mainnet (12s blocks)
-    11155111: 10.0,     # Sepolia
-    137: 2.0,           # Polygon
-    80002: 2.0,         # Polygon Amoy
-    10: 2.0,            # Optimism
-    11155420: 2.0,      # OP Sepolia
-    8453: 2.0,          # Base
-    84532: 2.0,         # Base Sepolia
-    480: 2.0,           # World Chain
-    4801: 2.0,          # World Chain Sepolia
-    42161: 1.0,         # Arbitrum One (250ms blocks)
-    421614: 1.0,        # Arbitrum Sepolia
-    999: 1.0,           # HyperEVM
-    998: 1.0,           # HyperEVM testnet
-    5031: 1.0,          # Somnia
-    50312: 1.0,         # Somnia testnet
-    1337: 1.0,          # local anvil / dev
-}
-_DEFAULT_REFRESH_INTERVAL_SECONDS = 5.0
+# Uniform 1-second refresh cadence across every chain. Rationale: with
+# the idle-aware skip in run(), background RPC load already scales with
+# consumer demand rather than running as a flat baseline — a quiet
+# bundler makes zero refresh calls regardless of interval. Picking 1 s
+# gives the tightest staleness bound (3 * interval = 3 s) so the sync
+# fallback after any idle stretch fires against a fresh snapshot, and
+# fast L2s (Arbitrum, HyperEVM, Somnia) already ran at this cadence
+# before. Operators who want a slower cadence for a specific chain can
+# still override via --gas_price_refresh_interval or
+# VOLTAIRE_GAS_PRICE_REFRESH_INTERVAL.
+DEFAULT_REFRESH_INTERVAL_SECONDS = 1.0
 
 # Chains where ``eth_maxPriorityFeePerGas`` is not available. ``--legacy_mode``
 # also disables the call (handled at construction time).
 _CHAINS_WITHOUT_PRIORITY_FEE: frozenset[int] = frozenset({999, 998})
-
-
-def default_refresh_interval(chain_id: int) -> float:
-    return _REFRESH_INTERVAL_BY_CHAIN.get(
-        chain_id, _DEFAULT_REFRESH_INTERVAL_SECONDS
-    )
 
 
 @dataclass(frozen=True)
