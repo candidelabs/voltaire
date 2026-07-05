@@ -118,6 +118,12 @@ class GasPriceCache:
         # produce N concurrent RPC calls.
         self._lock = asyncio.Lock()
         self._stop = asyncio.Event()
+        # Monotonic clock timestamp of the most recent get_snapshot()
+        # call. Used by run() to skip the background refresh during
+        # idle periods (no consumer reading the cache). 0.0 = never
+        # read yet, treated as "idle" so a freshly-started bundler
+        # with no traffic doesn't burn RPCs.
+        self._last_read_at_monotonic: float = 0.0
 
     # ------------------------------------------------------------------ read
     async def get_snapshot(self) -> GasPriceSnapshot:
@@ -125,6 +131,12 @@ class GasPriceCache:
         happened in the last ``3 * interval`` seconds, perform a synchronous
         one-shot fetch first so consumers never see arbitrarily stale data.
         """
+        # Record the read timestamp BEFORE any await so run()'s idle
+        # check reflects consumer intent — a caller that's about to
+        # block on the lock still counts as "someone is reading" and
+        # keeps the background refresh loop active on the next tick.
+        self._last_read_at_monotonic = time.monotonic()
+
         snap = self._snapshot
         if snap is not None and not self._is_stale(snap):
             return snap
@@ -134,9 +146,14 @@ class GasPriceCache:
             # while we were waiting.
             snap = self._snapshot
             if snap is None or self._is_stale(snap):
-                logging.warning(
-                    "GasPriceCache stale (background loop dead or starved); "
-                    "performing synchronous fallback fetch."
+                # Not necessarily an error state — this also fires after
+                # an idle-triggered skip in run() when traffic resumes.
+                # Info-level: operators can still see it, but it doesn't
+                # look like a background-loop failure the way a warning
+                # would.
+                logging.info(
+                    "GasPriceCache: snapshot stale or absent; "
+                    "fetching synchronously."
                 )
                 await self._refresh()
                 snap = self._snapshot
@@ -158,7 +175,16 @@ class GasPriceCache:
 
     async def run(self) -> None:
         """Background refresh loop. Designed to be a child of the main
-        TaskGroup — cancellation propagates naturally."""
+        TaskGroup — cancellation propagates naturally.
+
+        Idle-aware: skips the refresh RPC when no consumer has read
+        the snapshot in the last ``3 * interval`` seconds. This aligns
+        with the staleness bound used by ``get_snapshot`` — the next
+        reader after an idle stretch will find the snapshot stale and
+        trigger the synchronous fallback, which repopulates the cache
+        and resets the idle timer. Net effect: background RPC load
+        scales with consumer demand instead of running as a flat
+        baseline on quiet chains."""
         while not self._stop.is_set():
             try:
                 # Sleep ``interval`` seconds, or wake early on stop.
@@ -168,6 +194,20 @@ class GasPriceCache:
                 return  # stop was set
             except asyncio.TimeoutError:
                 pass
+            # Idle skip: if the snapshot hasn't been read in
+            # ``3 * interval`` seconds, don't refresh. The synchronous
+            # fallback in get_snapshot handles the transition back to
+            # active without any coordination — it fires on the first
+            # read whose snapshot is stale, and updates
+            # _last_read_at_monotonic before returning, so the next
+            # tick sees a recent read and refreshes normally.
+            #
+            # 0.0 means "never read" (initial state after warm() +
+            # start of run()) — treated as idle so a bundler with no
+            # traffic yet doesn't burn RPCs on empty background ticks.
+            idle_for = time.monotonic() - self._last_read_at_monotonic
+            if idle_for > 3 * self._interval:
+                continue
             try:
                 # Hold the same lock as the synchronous-fallback path so
                 # the two refreshes can't race: without it, a slow
