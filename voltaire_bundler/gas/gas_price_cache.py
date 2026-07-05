@@ -35,9 +35,18 @@ from voltaire_bundler.utils.eth_client_utils import \
 # gives the tightest staleness bound (3 * interval = 3 s) so the sync
 # fallback after any idle stretch fires against a fresh snapshot, and
 # fast L2s (Arbitrum, HyperEVM, Somnia) already ran at this cadence
-# before. Operators who want a slower cadence for a specific chain can
-# still override via --gas_price_refresh_interval or
-# VOLTAIRE_GAS_PRICE_REFRESH_INTERVAL.
+# before.
+#
+# Tradeoff on busy, slow-block chains: under continuous reads (a
+# bundler serving traffic) the loop refreshes every interval regardless
+# of block time. On mainnet that's ~10x more eth_gasPrice /
+# eth_maxPriorityFeePerGas calls per active second than the previous
+# 10 s cadence, and 9 of 10 return the same value (gas can't change
+# faster than a 12 s block). Operators on metered eth-node providers,
+# or those running high-throughput mainnet bundlers, should raise this
+# via --gas_price_refresh_interval or
+# VOLTAIRE_GAS_PRICE_REFRESH_INTERVAL; both accept a positive float and
+# take precedence over this default.
 DEFAULT_REFRESH_INTERVAL_SECONDS = 1.0
 
 # Chains where ``eth_maxPriorityFeePerGas`` is not available. ``--legacy_mode``
@@ -162,9 +171,16 @@ class GasPriceCache:
         with the staleness bound used by ``get_snapshot`` — the next
         reader after an idle stretch will find the snapshot stale and
         trigger the synchronous fallback, which repopulates the cache
-        and resets the idle timer. Net effect: background RPC load
-        scales with consumer demand instead of running as a flat
-        baseline on quiet chains."""
+        and resets the idle timer.
+
+        Under continuous reads (a bundler actively serving traffic)
+        the idle branch never fires, so refresh happens every
+        ``interval`` regardless of the chain's block time. On busy
+        mainnet at the flat 1 s default this means ~1 refresh/sec
+        even though gas can't change faster than a 12 s block; raise
+        ``--gas_price_refresh_interval`` /
+        ``VOLTAIRE_GAS_PRICE_REFRESH_INTERVAL`` if that RPC volume
+        is a problem."""
         while not self._stop.is_set():
             try:
                 # Sleep ``interval`` seconds, or wake early on stop.
