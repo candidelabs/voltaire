@@ -1124,18 +1124,28 @@ async def get_init_data(args: Namespace) -> InitData:
     )
     try:
         await gas_price_cache.warm()
+        logging.info(
+            "Gas-price cache warmed (refresh interval: "
+            f"{gas_price_refresh_interval}s)."
+        )
     except Exception as exc:
+        # Soft-fail — a transient node hiccup at container start (DNS,
+        # TLS handshake, first-connect latency past our 2 s timeout,
+        # or the RPC endpoint not yet routable inside the orchestrator
+        # network) shouldn't hard-exit the bundler. GasPriceCache.get_snapshot
+        # falls back to a synchronous fetch under a lock when no fresh
+        # snapshot is available, so the first bundle round will surface
+        # a genuinely bad node URL if one exists. Warn loudly so
+        # operators still notice.
+        #
         # Don't log the raw URLs — they may embed provider API keys.
-        logging.critical(
+        logging.warning(
             f"Failed to warm gas-price cache from configured "
             f"ethereum_node_url(s) ({len(ethereum_node_urls_rearranged)} "
-            f"endpoint(s)): {exc}"
+            f"endpoint(s)): {exc}. Continuing — the cache will fetch "
+            f"lazily on first read (refresh interval: "
+            f"{gas_price_refresh_interval}s)."
         )
-        sys.exit(1)
-    logging.info(
-        "Gas-price cache warmed (refresh interval: "
-        f"{gas_price_refresh_interval}s)."
-    )
 
     # Warm the chain-head cache for the same reason as gas_price_cache:
     # the coalesced eth_getLogs sweep in bundle_manager pins toBlock to
@@ -1145,15 +1155,23 @@ async def get_init_data(args: Namespace) -> InitData:
     # operator's first request.
     try:
         await latest_block_cache.warm(ethereum_node_urls_rearranged)
+        logging.info("Latest-block cache warmed.")
     except Exception as exc:
+        # Soft-fail — same rationale as the gas-price cache above.
+        # latest_block_cache.get_or_fetch() falls back to a real
+        # eth_getBlockByNumber("latest") when the cache is empty or
+        # stale, so the sweep will pick up a fresh head lazily. The
+        # only downside is that the very first cron tick might scan a
+        # slightly wider range if the fetch also fails then — bounded
+        # by the sweep's own chunking, not fatal.
+        #
         # Don't log the raw URLs — they may embed provider API keys.
-        logging.critical(
+        logging.warning(
             f"Failed to warm latest-block cache from configured "
             f"ethereum_node_url(s) ({len(ethereum_node_urls_rearranged)} "
-            f"endpoint(s)): {exc}"
+            f"endpoint(s)): {exc}. Continuing — cache will fetch lazily "
+            f"on first read."
         )
-        sys.exit(1)
-    logging.info("Latest-block cache warmed.")
 
     # Toggle the userop-logs reorg revalidation. Off by default — one
     # eth_getBlockByNumber per cache hit is too expensive on busy
