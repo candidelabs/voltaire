@@ -785,13 +785,27 @@ async def get_user_operation_logs_for_many_hashes(
     wanted = {h.lower() for h in user_operation_hashes}
 
     # Resolve "latest" to a concrete block so the chunking below has a
-    # known upper bound. On failure, fall back to a single unchunked
-    # request — the helper is best-effort and the caller treats all
-    # misses as "still pending".
+    # known upper bound.
     if to_block_hex == "latest":
         latest_block = await latest_block_cache.get_or_fetch(
             ethereum_node_eth_get_logs_urls,
         )
+        if latest_block is None:
+            # Cache is empty (warm() was soft-failed or has never run)
+            # AND its own lazy eth_getBlockByNumber fallback also
+            # failed. Do NOT fall through to a single unchunked
+            # request with toBlock="latest" — from_block_hex is
+            # min(validated_blocks), which on a busy bundler can be
+            # thousands of blocks behind head, and providers reject
+            # or truncate that call by their block-range cap. The
+            # sweep is best-effort (its docstring above says so);
+            # the caller treats all misses as "still pending" and
+            # the next tick will retry once a head is known.
+            logging.debug(
+                "coalesced eth_getLogs skipped: could not resolve "
+                "'latest' from latest_block_cache; next tick will retry"
+            )
+            return {}
         to_block_int = latest_block
     else:
         try:
