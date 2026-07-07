@@ -670,7 +670,16 @@ class BundlerManager:
             transaction_hash = result["result"]
             logging.info(
                 "Bundle was sent with transaction hash : " + transaction_hash)
-            self.gas_price_percentage_multiplier = 100
+            # NOTE: do not reset gas_price_percentage_multiplier here.
+            # eth_sendRawTransaction returning a hash only means the node
+            # accepted the tx into its mempool — the previous bundle from
+            # this EOA is likely still pending at whatever price got us
+            # here, and resetting to 100% would force the next round to
+            # re-climb via ~15 recursive underpriced-replacement retries
+            # before it can replace the pending tx. The multiplier is
+            # reset instead when the monitor sweep confirms the userop
+            # landed on chain (or gives up on it), i.e. when we know the
+            # nonce actually advanced.
 
             self.update_monitor_status_transation_hash(
                 user_operations,
@@ -822,6 +831,12 @@ class BundlerManager:
                 )
                 unconditional_remove.append(
                     user_operation.user_operation_hash)
+                # The previous bundle landed → the bundler EOA's nonce has
+                # advanced, so any leftover multiplier accumulated while we
+                # waited for this inclusion no longer applies to the next
+                # tx. Drop back to 100% so the next send starts from the
+                # network's base gas price instead of overpaying.
+                self.gas_price_percentage_multiplier = 100
                 # Preemptively warm the tx-by-hash and tx-receipt caches in
                 # the background so the next client poll for this userop
                 # finds them hot instead of paying two more RPC round trips.
@@ -845,6 +860,12 @@ class BundlerManager:
                 )
                 unconditional_remove.append(
                     user_operation.user_operation_hash)
+                # We're giving up on this userop, so any multiplier that
+                # accumulated while chasing its pending tx is stale — leaving
+                # it high would either overpay the next unrelated userop or
+                # trip the <=600 cap on the very first retry and drop
+                # without climbing. Reset for the next round.
+                self.gas_price_percentage_multiplier = 100
             elif time_diff_sec > 5:
                 logging.info(
                     f"user operation: {user_operation.user_operation_hash} "
