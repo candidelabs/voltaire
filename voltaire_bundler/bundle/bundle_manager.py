@@ -97,7 +97,11 @@ class BundlerManager:
     user_operations_to_monitor_v9: dict[str, UserOperationV7V8V9]
     user_operations_to_ban: dict[
         str, tuple[UserOperationV6 | UserOperationV7V8V9, str, Address]]
-    gas_price_percentage_multiplier: int
+    # Scoped per bundler EOA, not per EP label: two EPs configured with the
+    # same bundler_secret share a nonce space and therefore share the
+    # underpriced-replacement climb; two EPs on distinct EOAs must not have
+    # one's inclusion reset the other's in-flight multiplier.
+    gas_price_percentage_multiplier: dict[Address, int]
     bundle_gas_estimation_multiplier: float
     entrypoint_v9_reentrant: str
     gas_price_cache: GasPriceCache
@@ -152,7 +156,10 @@ class BundlerManager:
         self.user_operations_to_monitor_v7 = {}
         self.user_operations_to_monitor_v6 = {}
 
-        self.gas_price_percentage_multiplier = 100
+        # Keyed by bundler EOA. Entries are added the first time an EOA's
+        # multiplier is bumped; before that, reads fall back to 100 via
+        # dict.get(addr, 100).
+        self.gas_price_percentage_multiplier = {}
         self.user_operations_to_ban = {}
         self.bundle_gas_estimation_multiplier = bundle_gas_estimation_multiplier
         self.entrypoint_v9_reentrant = load_bytecode("EntryPointV9Reentrant.json")
@@ -469,11 +476,15 @@ class BundlerManager:
 
         nonce = nonce_result["result"]
 
+        gas_price_percentage_multiplier = (
+            self.gas_price_percentage_multiplier.get(bundler_address, 100)
+        )
+
         block_max_fee_per_gas_dec = gas_price_snapshot.max_fee_per_gas
         block_max_fee_per_gas_dec_mod = math.ceil(
             block_max_fee_per_gas_dec
             * (self.max_fee_per_gas_percentage_multiplier / 100)
-            * (self.gas_price_percentage_multiplier / 100)
+            * (gas_price_percentage_multiplier / 100)
         )
         block_max_fee_per_gas_hex = hex(block_max_fee_per_gas_dec_mod)
 
@@ -492,7 +503,7 @@ class BundlerManager:
             block_max_priority_fee_per_gas_dec_mod = math.ceil(
                 block_max_priority_fee_per_gas_dec
                 * (self.max_priority_fee_per_gas_percentage_multiplier / 100)
-                * (self.gas_price_percentage_multiplier / 100)
+                * (gas_price_percentage_multiplier / 100)
             )
 
             # max priority fee per gas should be atleast 1
@@ -613,13 +624,16 @@ class BundlerManager:
                     # retry sending useroperations with higher gas price
                     # if the gas_price_percentage_multiplier reached 600,
                     # drop all user_operations
-                    if self.gas_price_percentage_multiplier <= 600:
-                        self.gas_price_percentage_multiplier += 30
+                    if gas_price_percentage_multiplier <= 600:
+                        gas_price_percentage_multiplier += 30
+                        self.gas_price_percentage_multiplier[
+                            bundler_address
+                        ] = gas_price_percentage_multiplier
                         logging.warning(
                             str(result["error"]["message"]) +
                             " increasing bundle gas price by 30% "
                             "- gas_price_percentage_multiplier now is "
-                            f"{self.gas_price_percentage_multiplier}%"
+                            f"{gas_price_percentage_multiplier}%"
                         )
 
                         await self.send_bundle(
@@ -801,6 +815,9 @@ class BundlerManager:
         # dedupe before scheduling warmups to avoid redundant RPC round
         # trips for the same transaction.
         seen_warmup_tx_hashes: set[str] = set()
+        # Every userop in this monitor set belongs to the same EP → same
+        # bundler EOA, so resolve once and scope multiplier resets to it.
+        bundler_address = self._secret_for_mempool(local_mempool)[0]
         for user_operation in list(user_operations_to_monitor.values()):
             user_operation_log = user_operations_logs_by_hash.get(
                 user_operation.user_operation_hash
@@ -831,12 +848,12 @@ class BundlerManager:
                 )
                 unconditional_remove.append(
                     user_operation.user_operation_hash)
-                # The previous bundle landed → the bundler EOA's nonce has
-                # advanced, so any leftover multiplier accumulated while we
-                # waited for this inclusion no longer applies to the next
-                # tx. Drop back to 100% so the next send starts from the
-                # network's base gas price instead of overpaying.
-                self.gas_price_percentage_multiplier = 100
+                # This EP's bundler EOA landed a tx → its nonce advanced, so
+                # any leftover multiplier accumulated while we waited for
+                # this inclusion no longer applies. Reset only THIS EOA's
+                # entry; other EPs may still be climbing under different
+                # bundler_secrets.
+                self.gas_price_percentage_multiplier[bundler_address] = 100
                 # Preemptively warm the tx-by-hash and tx-receipt caches in
                 # the background so the next client poll for this userop
                 # finds them hot instead of paying two more RPC round trips.
@@ -862,10 +879,10 @@ class BundlerManager:
                     user_operation.user_operation_hash)
                 # We're giving up on this userop, so any multiplier that
                 # accumulated while chasing its pending tx is stale — leaving
-                # it high would either overpay the next unrelated userop or
-                # trip the <=600 cap on the very first retry and drop
-                # without climbing. Reset for the next round.
-                self.gas_price_percentage_multiplier = 100
+                # it high would either overpay the next unrelated userop on
+                # this EOA or trip the <=600 cap on the very first retry and
+                # drop without climbing. Reset only this EOA's entry.
+                self.gas_price_percentage_multiplier[bundler_address] = 100
             elif time_diff_sec > 5:
                 logging.info(
                     f"user operation: {user_operation.user_operation_hash} "
