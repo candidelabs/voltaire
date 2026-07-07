@@ -183,7 +183,7 @@ contract EntryPointSimulationsModV9 is EntryPoint, IEntryPointSimulations {
             factoryInfo,
             paymasterInfo,
             aggregatorInfo
-        ), block.number, block.timestamp, blockhash(block.number));
+        ), arbBlockNumber, block.timestamp, bytes32(0));
     }
 
     /// @inheritdoc IEntryPointSimulations
