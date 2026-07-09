@@ -12,7 +12,7 @@ from voltaire_bundler.mempool.mempool_info import DEFAULT_MEMPOOL_INFO
 from voltaire_bundler.metrics.metrics import run_metrics_server
 from voltaire_bundler.p2p_boot import p2p_boot
 from voltaire_bundler.rpc.health import periodic_health_check_cron_job
-from voltaire_bundler.utils import rpc_profiler
+from voltaire_bundler.utils import adaptive_limiter, rpc_profiler
 from voltaire_bundler.utils.cache import (
     PersistentFIFOCache,
     PostgresConfig,
@@ -28,6 +28,13 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
     init_data = await parse_args(cmd_args)
     if loop is None:
         loop = asyncio.get_running_loop()
+
+    # Configure the AIMD adaptive concurrency limiter first — the very
+    # first RPC (health check on startup) already goes through it. The
+    # kill switch holds every method's cap at its initial seed value.
+    adaptive_limiter.configure(
+        disabled=init_data.rpc_disable_adaptive_concurrency,
+    )
 
     # Turn on the outbound-RPC profiler if the operator passed
     # --rpc_profile_path. Kept off by default so untouched deployments

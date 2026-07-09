@@ -128,6 +128,9 @@ class InitData:
     rpc_profile_summary_interval: float
     rpc_profile_max_mb: int
     rpc_profile_backup_count: int
+    # When True, per-method concurrency caps stay at their initial seed
+    # value instead of adapting via AIMD.
+    rpc_disable_adaptive_concurrency: bool
 
 
 def address(ep: str):
@@ -543,6 +546,27 @@ def initialize_argument_parser() -> ArgumentParser:
             "how many rotated RPC-profiler files to keep on disk"
         ),
         default=_get_env_or_default("VOLTAIRE_RPC_PROFILE_BACKUP_COUNT", 4, unsigned_int),
+    )
+
+    # Kill switch for the AIMD adaptive concurrency limiter. When set,
+    # every method's concurrency cap stays at its initial seed value and
+    # AIMD no longer mutates it. Use this if the adaptive path is causing
+    # trouble in production without needing to redeploy the previous
+    # binary.
+    parser.add_argument(
+        "--rpc_disable_adaptive_concurrency",
+        type=str_to_bool,
+        help=(
+            "disable the AIMD-driven adaptive concurrency limiter and "
+            "hold every per-method cap at its initial seed value"
+        ),
+        nargs="?",
+        const=True,
+        default=_get_env_or_default(
+            "VOLTAIRE_RPC_DISABLE_ADAPTIVE_CONCURRENCY",
+            False,
+            lambda v: v.lower() == "true",
+        ),
     )
 
     parser.add_argument(
@@ -1343,6 +1367,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.rpc_profile_summary_interval,
         args.rpc_profile_max_mb,
         args.rpc_profile_backup_count,
+        args.rpc_disable_adaptive_concurrency,
     )
 
     if args.verbose:

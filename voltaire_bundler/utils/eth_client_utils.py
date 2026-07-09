@@ -11,55 +11,15 @@ from aiohttp import ClientSession, ClientTimeout, TCPConnector
 from eth_account import Account, messages
 from eth_utils import keccak
 
-from voltaire_bundler.utils import rpc_profiler
+from voltaire_bundler.utils import adaptive_limiter, rpc_profiler
 
 
 _session: ClientSession | None = None
 
-
-# --- per-method outbound concurrency cap ---------------------------------
-# Caller-side backpressure: cap concurrent in-flight requests per RPC
-# method so a thundering herd against the upstream node can't keep
-# escalating. Excess callers wait inside the semaphore.
-#
-# Limits sized conservatively — the right value is "what the node can
-# serve at acceptable tail latency", which is provider-dependent. Tune
-# upward if the node serves a method comfortably under load, downward
-# if tails grow with concurrency.
-_METHOD_CONCURRENCY_LIMITS: dict[str, int] = {
-    "eth_call": 32,
-    "eth_getLogs": 16,
-    "eth_getBlockByNumber": 8,
-    "eth_getTransactionReceipt": 32,
-    "eth_getTransactionByHash": 32,
-    "eth_getTransactionCount": 16,
-    "eth_sendRawTransaction": 8,
-    "debug_traceCall": 16,
-    "eth_gasPrice": 4,
-    "eth_maxPriorityFeePerGas": 4,
-    "eth_getProof": 16,
-    "eth_getCode": 8,
-    "eth_getBalance": 4,
-    "trace_transaction": 8,
-}
-_DEFAULT_METHOD_CONCURRENCY_LIMIT = 16
-_method_semaphores: dict[str, asyncio.Semaphore] = {}
-
-
-def _get_method_semaphore(method: str) -> asyncio.Semaphore:
-    """Return the per-method semaphore, creating it on first use.
-
-    Lazy creation so the Semaphore binds to whichever event loop is
-    actually running this call. Safe to call from any async context."""
-    sem = _method_semaphores.get(method)
-    if sem is None:
-        limit = _METHOD_CONCURRENCY_LIMITS.get(
-            method, _DEFAULT_METHOD_CONCURRENCY_LIMIT
-        )
-        sem = asyncio.Semaphore(limit)
-        _method_semaphores[method] = sem
-    return sem
-# --------------------------------------------------------------------------
+# Per-method concurrency is enforced by an AIMD-driven adaptive limiter
+# (see ``adaptive_limiter``). Seed caps and per-method minimums are
+# defined in that module. Callers get the limiter via
+# ``adaptive_limiter.get_method_limiter(method)``.
 
 
 def get_eth_client_session() -> ClientSession:
@@ -143,13 +103,13 @@ async def send_rpc_request_to_eth_client(
             rpc_profiler.record_retry(method, chosen_node_url)
         try:
             session = get_eth_client_session()
-            # Per-method semaphore caps concurrent in-flight requests for
-            # this RPC method so the bundler can't pile thousands of
-            # eth_calls onto an upstream node that can serve only tens at
-            # a time. Held only around session.post — released before the
-            # retry sleep on failure so a busy slot doesn't block retries.
+            # AIMD limiter caps concurrent in-flight requests for this
+            # method and adjusts that cap based on observed latency. Held
+            # only around session.post — released before the retry sleep
+            # on failure so a busy slot doesn't block retries.
             t_queued = time.monotonic()
-            async with _get_method_semaphore(method):
+            limiter = adaptive_limiter.get_method_limiter(method)
+            async with limiter as _slot:
                 rpc_profiler.record_semaphore_wait(
                     method, time.monotonic() - t_queued
                 )
@@ -167,6 +127,9 @@ async def send_rpc_request_to_eth_client(
                         resp = await response.read()
                         _rpc_ctx.set_bytes(len(resp))
                         _rpc_ctx.set_status(response.status)
+                        # Feed HTTP status into the limiter so a non-2xx
+                        # is treated as a failure signal for AIMD.
+                        _slot.set_status(response.status)
                         if response.status != 200:
                             logging.warning(
                                 f"Attempt No. {i+1}: non-200 status {response.status} "
@@ -248,10 +211,11 @@ async def send_rpc_request_to_eth_client_no_retry(
         "connection": "keep-alive"
     }
     session = get_eth_client_session()
-    # Same per-method cap as the retry path. No-retry callers share the
+    # Same AIMD limiter as the retry path. No-retry callers share the
     # upstream capacity with everyone else.
     t_queued = time.monotonic()
-    async with _get_method_semaphore(method):
+    limiter = adaptive_limiter.get_method_limiter(method)
+    async with limiter as _slot:
         rpc_profiler.record_semaphore_wait(
             method, time.monotonic() - t_queued
         )
@@ -269,6 +233,7 @@ async def send_rpc_request_to_eth_client_no_retry(
                 resp = await response.read()
                 _rpc_ctx.set_bytes(len(resp))
                 _rpc_ctx.set_status(response.status)
+                _slot.set_status(response.status)
                 if response.status != 200:
                     logging.warning(
                         f"Non-200 status {response.status} from {ethereum_node_url} "

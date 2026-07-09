@@ -115,6 +115,31 @@ def record_semaphore_wait(method: str, wait_seconds: float) -> None:
     _sem_wait_var.set(wait_seconds)
 
 
+def record_cap_change(
+    method: str,
+    from_cap: int,
+    to_cap: int,
+    reason: str,
+    baseline_ms: float | None = None,
+    recent_ms: float | None = None,
+) -> None:
+    """Emit a ``cap_change`` JSONL row when the adaptive limiter grows
+    or shrinks its concurrency cap for a method. No-op when profiling
+    is disabled — the limiter still adapts, just without persistent
+    telemetry."""
+    if not _enabled:
+        return
+    _write_row({
+        "type": "cap_change",
+        "method": method,
+        "from": from_cap,
+        "to": to_cap,
+        "reason": reason,
+        "baseline_ms": baseline_ms,
+        "recent_ms": recent_ms,
+    })
+
+
 def _percentiles(samples: list[float], ps: tuple[float, ...]) -> dict[str, float]:
     if not samples:
         return {f"p{int(p * 100)}": 0.0 for p in ps}
@@ -242,6 +267,15 @@ def _flush_summary(pool_state_by_node: dict[str, tuple[int, int]]) -> None:
     global _window_started_at
     now = time.monotonic()
     window_sec = max(now - _window_started_at, 1e-9)
+    # Snapshot the adaptive limiter state once for the whole flush.
+    # Import lazily to avoid a hard dependency in case the module is
+    # ever used without the limiter (e.g. isolated tests).
+    limiter_snap: dict[str, dict[str, Any]] = {}
+    try:
+        from voltaire_bundler.utils import adaptive_limiter
+        limiter_snap = adaptive_limiter.snapshot_all()
+    except Exception:
+        limiter_snap = {}
     # Collect every node we saw activity for OR every node with a live
     # pool entry — either can be non-empty on its own.
     nodes = set(_window_latency_all_by_node.keys()) | set(pool_state_by_node.keys())
@@ -253,13 +287,23 @@ def _flush_summary(pool_state_by_node: dict[str, tuple[int, int]]) -> None:
                 continue
             m_lats = _window_latency[(n, method)]
             m_pcts = _percentiles(m_lats, (0.5, 0.99))
-            by_method[method] = {
+            row_m: dict[str, Any] = {
                 "calls": count,
                 "p50_ms": round(m_pcts["p50"] * 1000, 2),
                 "p99_ms": round(m_pcts["p99"] * 1000, 2),
                 "errors": _window_errors.get((n, method), 0),
                 "retries": _window_retries.get((n, method), 0),
             }
+            m_snap = limiter_snap.get(method)
+            if m_snap is not None:
+                row_m["cap"] = m_snap["cap"]
+                row_m["in_flight"] = m_snap["in_flight"]
+                if m_snap.get("baseline_p50_ms") is not None:
+                    row_m["baseline_p50_ms"] = round(
+                        m_snap["baseline_p50_ms"], 2
+                    )
+                row_m["adaptive"] = m_snap.get("adaptive", True)
+            by_method[method] = row_m
         pool_idle, pool_acquired = pool_state_by_node.get(node, (0, 0))
         pcts = _percentiles(lats, (0.5, 0.9, 0.95, 0.99))
         row = {
