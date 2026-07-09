@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 import traceback
 from typing import Any
 from eth_abi import encode
@@ -9,6 +10,8 @@ from aiohttp import ClientSession, ClientTimeout, TCPConnector
 
 from eth_account import Account, messages
 from eth_utils import keccak
+
+from voltaire_bundler.utils import rpc_profiler
 
 
 _session: ClientSession | None = None
@@ -136,6 +139,8 @@ async def send_rpc_request_to_eth_client(
         if nodes_len > 1 and i > 0:
             logging.info(f'retrying with node no: {node_index + 1}.')
         chosen_node_url = nodes_urls[node_index]  # iterate through nodes
+        if i > 0:
+            rpc_profiler.record_retry(method, chosen_node_url)
         try:
             session = get_eth_client_session()
             # Per-method semaphore caps concurrent in-flight requests for
@@ -143,19 +148,31 @@ async def send_rpc_request_to_eth_client(
             # eth_calls onto an upstream node that can serve only tens at
             # a time. Held only around session.post — released before the
             # retry sleep on failure so a busy slot doesn't block retries.
+            t_queued = time.monotonic()
             async with _get_method_semaphore(method):
-                async with session.post(
-                    chosen_node_url,
-                    json=json_request,
-                    headers=headers
-                ) as response:
-                    resp = await response.read()
-                    if response.status != 200:
-                        logging.warning(
-                            f"Attempt No. {i+1}: non-200 status {response.status} "
-                            f"from {chosen_node_url} for {method}: {resp[:200]!r}"
+                rpc_profiler.record_semaphore_wait(
+                    method, time.monotonic() - t_queued
+                )
+                async with rpc_profiler.RpcCallContext(
+                    method, chosen_node_url, attempt=i + 1
+                ) as _rpc_ctx:
+                    async with session.post(
+                        chosen_node_url,
+                        json=json_request,
+                        headers=headers
+                    ) as response:
+                        _rpc_ctx.set_content_length(
+                            response.headers.get("Content-Length")
                         )
-                    json_result = json.loads(resp)
+                        resp = await response.read()
+                        _rpc_ctx.set_bytes(len(resp))
+                        _rpc_ctx.set_status(response.status)
+                        if response.status != 200:
+                            logging.warning(
+                                f"Attempt No. {i+1}: non-200 status {response.status} "
+                                f"from {chosen_node_url} for {method}: {resp[:200]!r}"
+                            )
+                        json_result = json.loads(resp)
         except json.decoder.JSONDecodeError:
             logging.error(
                 f"Attempt No. {i+1} to call node rpc failed."
@@ -233,14 +250,25 @@ async def send_rpc_request_to_eth_client_no_retry(
     session = get_eth_client_session()
     # Same per-method cap as the retry path. No-retry callers share the
     # upstream capacity with everyone else.
+    t_queued = time.monotonic()
     async with _get_method_semaphore(method):
-        async with session.post(
+        rpc_profiler.record_semaphore_wait(
+            method, time.monotonic() - t_queued
+        )
+        async with rpc_profiler.RpcCallContext(
+            method, ethereum_node_url
+        ) as _rpc_ctx, session.post(
             ethereum_node_url,
             json=json_request,
             headers=headers
         ) as response:
+            _rpc_ctx.set_content_length(
+                response.headers.get("Content-Length")
+            )
             try:
                 resp = await response.read()
+                _rpc_ctx.set_bytes(len(resp))
+                _rpc_ctx.set_status(response.status)
                 if response.status != 200:
                     logging.warning(
                         f"Non-200 status {response.status} from {ethereum_node_url} "

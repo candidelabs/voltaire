@@ -120,6 +120,14 @@ class InitData:
     # Warmed synchronously in get_init_data so a bad ethereum node URL is
     # caught at startup. Started as a TaskGroup child in main().
     gas_price_cache: GasPriceCache
+    # Outbound-RPC profiler settings. ``rpc_profile_path`` being None
+    # keeps the profiler off; a non-None path enables it and the other
+    # knobs take effect.
+    rpc_profile_path: str | None
+    rpc_profile_slow_ms: int
+    rpc_profile_summary_interval: float
+    rpc_profile_max_mb: int
+    rpc_profile_backup_count: int
 
 
 def address(ep: str):
@@ -478,6 +486,63 @@ def initialize_argument_parser() -> ArgumentParser:
         nargs="?",
         const=True,
         default=_get_env_or_default("VOLTAIRE_METRICS", False, lambda v: v.lower() == "true"),
+    )
+
+    # RPC-profiler flags. Opt-in: absent --rpc_profile_path leaves the
+    # profiler off entirely, so untouched deployments pay no cost. Passing
+    # the flag with no value writes to ./rpc_profile.jsonl in the current
+    # working directory; passing a path overrides that.
+    parser.add_argument(
+        "--rpc_profile_path",
+        type=str,
+        help=(
+            "enable outbound RPC profiler; write JSONL rows (slow_call + "
+            "summary) to this path. Pass without a value to use "
+            "./rpc_profile.jsonl."
+        ),
+        nargs="?",
+        const="./rpc_profile.jsonl",
+        default=_get_env_or_default("VOLTAIRE_RPC_PROFILE_PATH", None, str),
+    )
+
+    parser.add_argument(
+        "--rpc_profile_slow_ms",
+        type=unsigned_int,
+        help=(
+            "emit a slow_call JSONL row for any outbound RPC exceeding "
+            "this latency (milliseconds); only applies when the profiler "
+            "is enabled"
+        ),
+        default=_get_env_or_default("VOLTAIRE_RPC_PROFILE_SLOW_MS", 500, unsigned_int),
+    )
+
+    parser.add_argument(
+        "--rpc_profile_summary_interval",
+        type=float,
+        help=(
+            "seconds between periodic summary rows written by the RPC "
+            "profiler sampler; 0 disables the sampler (slow_call rows "
+            "still recorded)"
+        ),
+        default=_get_env_or_default("VOLTAIRE_RPC_PROFILE_SUMMARY_INTERVAL", 5.0, float),
+    )
+
+    parser.add_argument(
+        "--rpc_profile_max_mb",
+        type=unsigned_int,
+        help=(
+            "rotation size (MiB) for the RPC profiler JSONL file"
+        ),
+        default=_get_env_or_default("VOLTAIRE_RPC_PROFILE_MAX_MB", 128, unsigned_int),
+    )
+
+    parser.add_argument(
+        "--rpc_profile_backup_count",
+        type=unsigned_int,
+        help=(
+            "how many rotated RPC-profiler files to keep on disk"
+        ),
+        default=_get_env_or_default("VOLTAIRE_RPC_PROFILE_BACKUP_COUNT", 4, unsigned_int),
     )
 
     parser.add_argument(
@@ -1273,6 +1338,11 @@ async def get_init_data(args: Namespace) -> InitData:
         args.enable_banning,
         args.logs_fallback_recent_window,
         gas_price_cache,
+        args.rpc_profile_path,
+        args.rpc_profile_slow_ms,
+        args.rpc_profile_summary_interval,
+        args.rpc_profile_max_mb,
+        args.rpc_profile_backup_count,
     )
 
     if args.verbose:

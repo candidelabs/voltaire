@@ -12,10 +12,12 @@ from voltaire_bundler.mempool.mempool_info import DEFAULT_MEMPOOL_INFO
 from voltaire_bundler.metrics.metrics import run_metrics_server
 from voltaire_bundler.p2p_boot import p2p_boot
 from voltaire_bundler.rpc.health import periodic_health_check_cron_job
+from voltaire_bundler.utils import rpc_profiler
 from voltaire_bundler.utils.cache import (
     PersistentFIFOCache,
     PostgresConfig,
 )
+from voltaire_bundler.utils.eth_client_utils import get_eth_client_session
 from voltaire_bundler.utils.SignalHaltError import immediate_exit
 
 from .cli_manager import parse_args
@@ -26,6 +28,19 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
     init_data = await parse_args(cmd_args)
     if loop is None:
         loop = asyncio.get_running_loop()
+
+    # Turn on the outbound-RPC profiler if the operator passed
+    # --rpc_profile_path. Kept off by default so untouched deployments
+    # pay no cost. Configured before the first RPC fires so the very
+    # first eth_getBalance / eth_chainId startup calls are captured.
+    if init_data.rpc_profile_path:
+        rpc_profiler.configure(
+            path=init_data.rpc_profile_path,
+            slow_ms=init_data.rpc_profile_slow_ms,
+            sampler_interval_s=init_data.rpc_profile_summary_interval,
+            max_bytes=init_data.rpc_profile_max_mb * 1024 * 1024,
+            backup_count=init_data.rpc_profile_backup_count,
+        )
     if sys.platform == "win32":
         if os.path.exists("p2p_endpoint.port"):
             os.remove("p2p_endpoint.port")
@@ -188,6 +203,20 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             if init_data.is_metrics:
                 run_metrics_server(
                     host=init_data.rpc_url,
+                )
+            # Background sampler that writes the periodic ``summary``
+            # JSONL rows. Skipped when the profiler is off or the operator
+            # set --rpc_profile_summary_interval=0 (slow_call rows still
+            # get written on their own).
+            if (
+                rpc_profiler.is_enabled()
+                and init_data.rpc_profile_summary_interval > 0
+            ):
+                task_group.create_task(
+                    rpc_profiler.start_pool_sampler(
+                        get_eth_client_session,
+                        init_data.ethereum_node_urls,
+                    )
                 )
             if init_data.health_check_interval > 0:
                 try:
