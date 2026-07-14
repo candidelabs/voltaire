@@ -557,8 +557,8 @@ def initialize_argument_parser() -> ArgumentParser:
         "--rpc_disable_adaptive_concurrency",
         type=str_to_bool,
         help=(
-            "disable the AIMD-driven adaptive concurrency limiter and "
-            "hold every per-method cap at its initial seed value"
+            "disable the failure-driven adaptive concurrency limiter and "
+            "hold every per-method cap fixed at its ceiling"
         ),
         nargs="?",
         const=True,

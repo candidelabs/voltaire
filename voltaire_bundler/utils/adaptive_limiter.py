@@ -1,53 +1,54 @@
 """Per-method adaptive concurrency limiter for outbound RPC calls.
 
-Replaces the previous fixed asyncio.Semaphore. Behaves like a resizable
-semaphore whose limit is driven by AIMD (additive-increase, multiplicative-
-decrease) on observed call latency, so the bundler stays roughly at the
-sweet spot for whatever upstream node it happens to be pointed at.
+Behaves like a resizable semaphore whose limit reacts ONLY to hard failure
+signals from the upstream node — errors, timeouts, and non-2xx responses —
+never to latency. Latency-based control proved fragile (it misread ordinary
+jitter on a fast node as congestion and throttled the bundler into
+multi-second self-inflicted queues); failures are unambiguous, so the
+limiter now moves on those alone.
 
-Algorithm summary (per method, rolling last WINDOW_SIZE completions):
-  - baseline_p50_ms: rolling minimum of observed window p50s (the "fast"
-    latency the node can serve at low load).
-  - recent_p50_ms:   median of the current window.
-  - saturation:      whether in_flight was at (cap - 1) or higher when
-                     the call completed.
+Algorithm (per method):
+  - Each method starts at, and never exceeds, a fixed CEILING (its seed cap
+    in ``_METHOD_INITIAL_CAPS``). In the healthy case the cap simply sits at
+    the ceiling and behaves like a plain fixed semaphore.
+  - Multiplicative Decrease — on an error / timeout / non-2xx the cap is
+    halved (down to the method's floor). A burst of failures backs off fast.
+  - Additive Increase — after RECOVER_STEP_SUCCESSES consecutive clean
+    completions the cap grows by 1, back toward the ceiling. Any failure
+    resets the success streak, so a flapping provider keeps the cap low
+    (hysteresis) instead of oscillating.
+  - Cancellations are NEUTRAL: a caller-side cancellation (e.g. a bundle
+    round moving on) is not a node-health signal and never moves the cap.
 
-  Additive Increase — grow the cap by 1 when the queue is under pressure
-  (saturation) AND recent p50 is still within GROWTH_TOL of baseline.
-  Multiplicative Decrease — halve the cap (down to the method's floor)
-  when recent p50 climbs to SHRINK_TRIGGER * baseline, OR when the call
-  itself errored / was cancelled.
+Per-method floors (``_METHOD_MIN_CAPS``) keep a few methods above the global
+minimum even under sustained upstream distress — the write path
+(eth_sendRawTransaction) and bundle-inclusion polling in particular.
 
-Per-method floors (``_METHOD_MIN_CAPS``) exist because a few methods must
-not be starved even under upstream distress — the write path
-(eth_sendRawTransaction) and bundle-inclusion polling in particular. The
-floor is a SHRINK limit, not a starting point; grow is unaffected.
-
-Kill switch: ``configure(disabled=True)`` swaps every limiter for a
-fixed-cap variant that never mutates. Same acquire/release surface; no
-downstream code changes required to fall back.
+Kill switch: ``configure(disabled=True)`` freezes every cap at its ceiling
+(pure fixed semaphore). Same acquire/release surface; no downstream code
+changes required to fall back.
 """
 from __future__ import annotations
 
 import asyncio
-import collections
-import time
 from types import TracebackType
 from typing import Any, Callable
 
 # --- algorithm constants ---------------------------------------------------
-GROWTH_TOL: float = 1.5
-SHRINK_TRIGGER: float = 3.0
-BASELINE_UPWARD_TRIGGER: float = 2.0
-BASELINE_UPWARD_WINDOWS: int = 4
 GLOBAL_MIN_CAP: int = 2
 MAX_CAP: int = 256
-WINDOW_SIZE: int = 32
-MIN_SAMPLES: int = 8
 
-# Seed caps used when a new limiter is created. These are STARTING values;
-# AIMD moves them from there. Kept generous on the way up because we want
-# the algorithm to explore, not to sit right at the seed.
+# Consecutive successful completions required to recover the cap by one step
+# after a backoff. Provides hysteresis: recovery is deliberately slower than
+# backoff so a provider that is intermittently failing settles at a low cap
+# rather than sawtoothing. Any failure resets the streak to zero.
+RECOVER_STEP_SUCCESSES: int = 16
+
+# Seed caps. These are the normal operating point AND the recovery ceiling —
+# the cap never grows above its method's value here. Sized to what a typical
+# provider sustains comfortably; the limiter only ever moves BELOW these
+# under failure, then climbs back. Tune per deployment if a node wants more
+# or less headroom.
 _METHOD_INITIAL_CAPS: dict[str, int] = {
     "eth_call": 32,
     "eth_getLogs": 16,
@@ -66,7 +67,7 @@ _METHOD_INITIAL_CAPS: dict[str, int] = {
 }
 _DEFAULT_INITIAL_CAP: int = 16
 
-# Per-method shrink floors. See module docstring for rationale on why some
+# Per-method backoff floors. See module docstring for rationale on why some
 # methods have explicit floors above the global minimum.
 _METHOD_MIN_CAPS: dict[str, int] = {
     "eth_sendRawTransaction": 4,
@@ -135,14 +136,7 @@ def reset_for_tests() -> None:
 _cap_change_sink: Callable[..., None] | None = None
 
 
-def _emit_cap_change(
-    method: str,
-    old: int,
-    new: int,
-    reason: str,
-    baseline_ms: float | None,
-    recent_ms: float | None,
-) -> None:
+def _emit_cap_change(method: str, old: int, new: int, reason: str) -> None:
     global _cap_change_sink
     if _cap_change_sink is None:
         try:
@@ -157,8 +151,6 @@ def _emit_cap_change(
             from_cap=old,
             to_cap=new,
             reason=reason,
-            baseline_ms=baseline_ms,
-            recent_ms=recent_ms,
         )
     except Exception:
         # Never let telemetry break the RPC hot path.
@@ -166,23 +158,21 @@ def _emit_cap_change(
 
 
 # --- limiter implementations ----------------------------------------------
-class _FixedLimiter:
-    """Static-cap fallback used when the kill switch is on. Presents the
-    same async context-manager surface as AdaptiveLimiter so the RPC
-    wrapper doesn't branch."""
+class _FixedSlot:
+    """Per-acquire handle for the fixed limiter. No-op status hook; releases
+    the underlying semaphore on exit. Fresh per call, so nothing is shared
+    across concurrent callers."""
 
-    __slots__ = ("method", "cap", "min_cap", "_sem", "_t_start")
+    __slots__ = ("_sem",)
 
-    def __init__(self, method: str, cap: int, min_cap: int) -> None:
-        self.method = method
-        self.cap = cap
-        self.min_cap = min_cap
-        self._sem = asyncio.Semaphore(cap)
-        self._t_start = 0.0
+    def __init__(self, sem: asyncio.Semaphore) -> None:
+        self._sem = sem
 
-    async def __aenter__(self) -> "_FixedLimiter":
+    def set_status(self, status: int) -> None:
+        pass
+
+    async def __aenter__(self) -> "_FixedSlot":
         await self._sem.acquire()
-        self._t_start = time.monotonic()
         return self
 
     async def __aexit__(
@@ -193,49 +183,95 @@ class _FixedLimiter:
     ) -> None:
         self._sem.release()
 
-    # Same surface as AdaptiveLimiter — no-ops on the fixed variant.
-    def set_status(self, status: int) -> None:
-        pass
+
+class _FixedLimiter:
+    """Static-cap fallback used when the kill switch is on. Presents the
+    same ``slot()`` surface as AdaptiveLimiter so the RPC wrapper doesn't
+    branch."""
+
+    __slots__ = ("method", "cap", "min_cap", "_sem")
+
+    def __init__(self, method: str, cap: int, min_cap: int) -> None:
+        self.method = method
+        self.cap = cap
+        self.min_cap = min_cap
+        self._sem = asyncio.Semaphore(cap)
+
+    def slot(self) -> "_FixedSlot":
+        return _FixedSlot(self._sem)
 
     def snapshot(self) -> dict[str, Any]:
         return {
             "cap": self.cap,
             "in_flight": self.cap - getattr(self._sem, "_value", 0),
-            "baseline_p50_ms": None,
             "adaptive": False,
         }
 
 
-def _median(values: collections.deque[float]) -> float:
-    if not values:
-        return 0.0
-    ordered = sorted(values)
-    n = len(ordered)
-    mid = n // 2
-    if n % 2:
-        return ordered[mid]
-    return (ordered[mid - 1] + ordered[mid]) / 2.0
+class _Slot:
+    """Per-acquire handle for one AdaptiveLimiter call.
+
+    The limiter is a process-wide singleton per method, shared by every
+    concurrent call, so per-call state (this call's HTTP status) MUST live
+    here rather than on the limiter. On exit it classifies the outcome —
+    success, failure (error / timeout / non-2xx), or neutral cancellation —
+    and releases accordingly. Changing the cap never affects in-flight
+    callers; only the next entry gate is affected."""
+
+    __slots__ = ("_limiter", "_status")
+
+    def __init__(self, limiter: "AdaptiveLimiter") -> None:
+        self._limiter = limiter
+        self._status = 0
+
+    def set_status(self, status: int) -> None:
+        """Called by the RPC wrapper after reading the HTTP status. Any
+        non-2xx marks the call as a failure for backoff purposes."""
+        self._status = status
+
+    async def __aenter__(self) -> "_Slot":
+        await self._limiter._acquire()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        if exc_type is not None:
+            if issubclass(exc_type, asyncio.CancelledError):
+                # Caller-side cancellation, not a node-health signal.
+                await self._limiter._release_neutral()
+            elif issubclass(exc_type, (asyncio.TimeoutError, TimeoutError)):
+                await self._limiter._release_error(reason="timeout")
+            else:
+                await self._limiter._release_error(reason="exception")
+            return
+        if self._status and (self._status < 200 or self._status >= 300):
+            await self._limiter._release_error(reason="non_2xx")
+            return
+        await self._limiter._release_success()
 
 
 class AdaptiveLimiter:
-    """AIMD-driven concurrency gate for one RPC method.
+    """Failure-driven concurrency gate for one RPC method.
 
-    Use as an async context manager::
+    Acquire one slot per call via ``slot()``::
 
-        async with get_method_limiter("eth_call") as slot:
+        async with get_method_limiter("eth_call").slot() as slot:
             resp = await session.post(...)
-            slot.set_status(resp.status)   # 0/2xx → success, else error
+            slot.set_status(resp.status)   # 0/2xx → success, else failure
             body = await resp.read()
 
-    The context manager decides on __aexit__ whether the call was
-    successful, failed by status, or raised — and releases accordingly.
-    Growing/shrinking the cap never affects in-flight callers; only the
-    next entry gate is affected."""
+    The returned slot is a fresh per-call object; on exit it classifies the
+    outcome and releases. The cap halves on failure and recovers slowly
+    toward its ceiling on sustained success — it never grows past the seed
+    ceiling and never reacts to latency. See the module docstring."""
 
     __slots__ = (
-        "method", "cap", "min_cap", "in_flight",
-        "_cond", "_window", "baseline_p50_ms", "_baseline_stale_windows",
-        "_t_start", "_status", "_disabled",
+        "method", "cap", "ceiling", "min_cap", "in_flight",
+        "_cond", "_success_streak", "_disabled",
     )
 
     def __init__(
@@ -247,53 +283,26 @@ class AdaptiveLimiter:
     ) -> None:
         self.method = method
         self.min_cap = max(GLOBAL_MIN_CAP, min_cap)
-        self.cap = max(self.min_cap, min(MAX_CAP, initial_cap))
+        self.ceiling = max(self.min_cap, min(MAX_CAP, initial_cap))
+        self.cap = self.ceiling
         self.in_flight = 0
         self._cond = asyncio.Condition()
-        self._window: collections.deque[float] = collections.deque(
-            maxlen=WINDOW_SIZE
-        )
-        self.baseline_p50_ms: float | None = None
-        self._baseline_stale_windows = 0
-        self._t_start = 0.0
-        self._status = 0
+        self._success_streak = 0
         self._disabled = disabled
 
     # --- API used by the RPC wrapper --------------------------------------
-    def set_status(self, status: int) -> None:
-        """Called by the RPC wrapper after reading the HTTP status. Any
-        non-2xx marks the call as failed for AIMD purposes."""
-        self._status = status
+    def slot(self) -> "_Slot":
+        """Return a fresh per-call acquire handle. Use as an async context
+        manager; see the class docstring."""
+        return _Slot(self)
 
     def snapshot(self) -> dict[str, Any]:
         return {
             "cap": self.cap,
+            "ceiling": self.ceiling,
             "in_flight": self.in_flight,
-            "baseline_p50_ms": self.baseline_p50_ms,
             "adaptive": not self._disabled,
         }
-
-    # --- async context manager --------------------------------------------
-    async def __aenter__(self) -> "AdaptiveLimiter":
-        await self._acquire()
-        self._t_start = time.monotonic()
-        self._status = 0
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> None:
-        elapsed_ms = (time.monotonic() - self._t_start) * 1000.0
-        if exc_type is not None:
-            await self._release_error(reason="exception")
-            return
-        if self._status and (self._status < 200 or self._status >= 300):
-            await self._release_error(reason="non_2xx")
-            return
-        await self._release_success(elapsed_ms)
 
     # --- core primitives --------------------------------------------------
     async def _acquire(self) -> None:
@@ -302,14 +311,28 @@ class AdaptiveLimiter:
                 await self._cond.wait()
             self.in_flight += 1
 
-    async def _release_success(self, elapsed_ms: float) -> None:
+    async def _release_success(self) -> None:
         async with self._cond:
-            saturated = self.in_flight >= self.cap
             self.in_flight -= 1
-            if not self._disabled:
-                self._record(elapsed_ms)
-                self._maybe_adjust(saturated)
-            self._cond.notify()
+            if self._disabled:
+                self._cond.notify()
+                return
+            self._success_streak += 1
+            old = self.cap
+            if (
+                self._success_streak >= RECOVER_STEP_SUCCESSES
+                and self.cap < self.ceiling
+            ):
+                # Additive increase toward the ceiling.
+                self.cap += 1
+                self._success_streak = 0
+            if old != self.cap:
+                _emit_cap_change(self.method, old, self.cap, reason="recover")
+                # Two slots are now free: the one this call vacated plus the
+                # one recovery just added.
+                self._cond.notify(2)
+            else:
+                self._cond.notify()
 
     async def _release_error(self, reason: str) -> None:
         async with self._cond:
@@ -317,79 +340,35 @@ class AdaptiveLimiter:
             if self._disabled:
                 self._cond.notify()
                 return
+            self._success_streak = 0
             old = self.cap
             self.cap = max(self.min_cap, self.cap // 2)
             if old != self.cap:
                 _emit_cap_change(
-                    self.method, old, self.cap,
-                    reason=f"error:{reason}",
-                    baseline_ms=self.baseline_p50_ms,
-                    recent_ms=_median(self._window) if self._window else None,
+                    self.method, old, self.cap, reason=f"error:{reason}"
                 )
-                # Cap shrank — wake at most enough waiters to fit under
-                # the new cap. notify_all is fine; extra wakes just
-                # re-enter the wait loop.
+                # Cap shrank — notify_all is fine; waiters that no longer fit
+                # under the new cap just re-enter the wait loop.
                 self._cond.notify_all()
             else:
                 self._cond.notify()
 
-    # --- state maintenance -------------------------------------------------
-    def _record(self, elapsed_ms: float) -> None:
-        self._window.append(elapsed_ms)
-
-    def _maybe_adjust(self, saturated: bool) -> None:
-        if len(self._window) < MIN_SAMPLES:
-            return
-        recent = _median(self._window)
-        # First good sample, or new low — re-baseline and return without
-        # touching the cap. Prevents growing on the same tick we just
-        # discovered a faster baseline.
-        if self.baseline_p50_ms is None or recent < self.baseline_p50_ms:
-            self.baseline_p50_ms = recent
-            self._baseline_stale_windows = 0
-            return
-
-        assert self.baseline_p50_ms is not None
-        if recent > self.baseline_p50_ms * BASELINE_UPWARD_TRIGGER:
-            self._baseline_stale_windows += 1
-            if self._baseline_stale_windows >= BASELINE_UPWARD_WINDOWS:
-                # Sustained slowdown — accommodate the new normal so the
-                # cap doesn't shrink forever if the node's actual serving
-                # speed dropped for reasons unrelated to our load.
-                self.baseline_p50_ms *= 1.1
-                self._baseline_stale_windows = 0
-        else:
-            self._baseline_stale_windows = 0
-
-        old = self.cap
-        if saturated and recent <= self.baseline_p50_ms * GROWTH_TOL:
-            self.cap = min(MAX_CAP, self.cap + 1)
-        elif recent >= self.baseline_p50_ms * SHRINK_TRIGGER:
-            self.cap = max(self.min_cap, self.cap // 2)
-
-        if old != self.cap:
-            _emit_cap_change(
-                self.method, old, self.cap,
-                reason=("grow" if self.cap > old else "shrink"),
-                baseline_ms=self.baseline_p50_ms,
-                recent_ms=recent,
-            )
-            if self.cap > old:
-                # New slot available — one waiter may proceed.
-                self._cond.notify()
+    async def _release_neutral(self) -> None:
+        """Release without moving the cap or the success streak. Used for
+        cancellations, which carry no information about node health."""
+        async with self._cond:
+            self.in_flight -= 1
+            self._cond.notify()
 
 
 __all__ = [
     "AdaptiveLimiter",
     "configure",
-    "get_method_limiter",
     "is_disabled",
+    "get_method_limiter",
     "reset_for_tests",
     "snapshot_all",
-    "GROWTH_TOL",
-    "SHRINK_TRIGGER",
+    "RECOVER_STEP_SUCCESSES",
     "GLOBAL_MIN_CAP",
     "MAX_CAP",
-    "WINDOW_SIZE",
-    "MIN_SAMPLES",
 ]

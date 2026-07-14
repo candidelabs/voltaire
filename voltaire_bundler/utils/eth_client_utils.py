@@ -16,10 +16,11 @@ from voltaire_bundler.utils import adaptive_limiter, rpc_profiler
 
 _session: ClientSession | None = None
 
-# Per-method concurrency is enforced by an AIMD-driven adaptive limiter
-# (see ``adaptive_limiter``). Seed caps and per-method minimums are
-# defined in that module. Callers get the limiter via
-# ``adaptive_limiter.get_method_limiter(method)``.
+# Per-method concurrency is enforced by a failure-driven adaptive limiter
+# (see ``adaptive_limiter``): the cap sits at a fixed per-method ceiling,
+# halves on errors/timeouts/non-2xx, and recovers slowly on sustained
+# success. Ceilings and per-method floors are defined in that module.
+# Callers get the limiter via ``adaptive_limiter.get_method_limiter(method)``.
 
 
 def get_eth_client_session() -> ClientSession:
@@ -103,13 +104,13 @@ async def send_rpc_request_to_eth_client(
             rpc_profiler.record_retry(method, chosen_node_url)
         try:
             session = get_eth_client_session()
-            # AIMD limiter caps concurrent in-flight requests for this
-            # method and adjusts that cap based on observed latency. Held
-            # only around session.post — released before the retry sleep
-            # on failure so a busy slot doesn't block retries.
+            # Adaptive limiter caps concurrent in-flight requests for this
+            # method and backs the cap off on failures. Held only around
+            # session.post — released before the retry sleep on failure so
+            # a busy slot doesn't block retries.
             t_queued = time.monotonic()
             limiter = adaptive_limiter.get_method_limiter(method)
-            async with limiter as _slot:
+            async with limiter.slot() as _slot:
                 rpc_profiler.record_semaphore_wait(
                     method, time.monotonic() - t_queued
                 )
@@ -128,7 +129,7 @@ async def send_rpc_request_to_eth_client(
                         _rpc_ctx.set_bytes(len(resp))
                         _rpc_ctx.set_status(response.status)
                         # Feed HTTP status into the limiter so a non-2xx
-                        # is treated as a failure signal for AIMD.
+                        # is treated as a failure (backoff) signal.
                         _slot.set_status(response.status)
                         if response.status != 200:
                             logging.warning(
@@ -211,11 +212,11 @@ async def send_rpc_request_to_eth_client_no_retry(
         "connection": "keep-alive"
     }
     session = get_eth_client_session()
-    # Same AIMD limiter as the retry path. No-retry callers share the
+    # Same adaptive limiter as the retry path. No-retry callers share the
     # upstream capacity with everyone else.
     t_queued = time.monotonic()
     limiter = adaptive_limiter.get_method_limiter(method)
-    async with limiter as _slot:
+    async with limiter.slot() as _slot:
         rpc_profiler.record_semaphore_wait(
             method, time.monotonic() - t_queued
         )

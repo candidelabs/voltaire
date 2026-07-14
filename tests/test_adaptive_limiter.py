@@ -1,9 +1,10 @@
-"""Unit tests for the AIMD adaptive limiter.
+"""Unit tests for the failure-driven adaptive limiter.
 
-Most tests drive the algorithm through its private acquire/release
-primitives so latency and saturation are deterministic (no real sleeps,
-no gather-and-hope). Two integration-flavored tests at the bottom use
-the public async context manager to check acquire/release semantics.
+The limiter reacts only to hard failures (errors / timeouts / non-2xx),
+never to latency. Most tests drive the algorithm through its private
+acquire/release primitives so outcomes are deterministic (no real sleeps).
+A few integration-flavored tests use the public per-call slot to check
+acquire/release and outcome classification.
 """
 from __future__ import annotations
 
@@ -23,29 +24,27 @@ def _reset():
     al.configure(disabled=False)
 
 
-async def _drive_burst(
-    lim: al.AdaptiveLimiter, n: int, elapsed_ms: float
-) -> None:
-    """Record ``n`` completions at ``elapsed_ms``. Each batch fills the
-    limiter to cap before releasing, so the first release per batch sees
-    ``in_flight >= cap`` (saturated → eligible for grow). Batches are
-    replayed until ``n`` total completions are recorded, so callers can
-    ask for arbitrarily many samples without deadlocking when ``n`` >
-    cap."""
+async def _drive_successes(lim: al.AdaptiveLimiter, n: int) -> None:
+    """Record ``n`` successful completions, saturating each batch to the
+    current cap so releases exercise the real notify path. Replays batches
+    until ``n`` total are recorded, so callers can ask for arbitrarily many
+    without deadlocking when ``n`` > cap."""
     remaining = n
     while remaining > 0:
         batch = min(remaining, lim.cap)
         for _ in range(batch):
             await lim._acquire()
         for _ in range(batch):
-            await lim._release_success(elapsed_ms)
+            await lim._release_success()
         remaining -= batch
 
 
-async def _drive_errors(lim: al.AdaptiveLimiter, n: int) -> None:
+async def _drive_errors(
+    lim: al.AdaptiveLimiter, n: int, reason: str = "test"
+) -> None:
     for _ in range(n):
         await lim._acquire()
-        await lim._release_error(reason="test")
+        await lim._release_error(reason=reason)
 
 
 # --- API --------------------------------------------------------------
@@ -55,71 +54,22 @@ async def test_snapshot_after_creation_matches_initial_config():
     lim = al.get_method_limiter("eth_call")
     snap = lim.snapshot()
     assert snap["cap"] == al._METHOD_INITIAL_CAPS["eth_call"]
+    assert snap["ceiling"] == al._METHOD_INITIAL_CAPS["eth_call"]
     assert snap["in_flight"] == 0
-    assert snap["baseline_p50_ms"] is None
     assert snap["adaptive"] is True
 
 
-# --- Grow -------------------------------------------------------------
-
 @pytest.mark.asyncio
-async def test_grow_when_saturated_and_stable():
-    """Cap must additively increase when the queue is saturated AND
-    recent p50 stays within GROWTH_TOL of baseline."""
-    lim = al.AdaptiveLimiter("eth_call", initial_cap=8, min_cap=4)
-    start_cap = lim.cap
-
-    # Six bursts sized to whatever the current cap is: each saturates the
-    # limiter and provides stable latency, so AIMD should grow the cap.
-    for _ in range(6):
-        await _drive_burst(lim, lim.cap, elapsed_ms=50.0)
-
-    assert lim.cap > start_cap, (
-        f"cap did not grow: start={start_cap} end={lim.cap}"
-    )
-
-
-@pytest.mark.asyncio
-async def test_no_grow_when_not_saturated():
-    """Cap must NOT grow when in_flight stays below cap - even if latency
-    is fine. Grow only where there is demand."""
+async def test_cap_starts_at_ceiling():
     lim = al.AdaptiveLimiter("eth_call", initial_cap=32, min_cap=4)
-    start_cap = lim.cap
-
-    # 100 sequential completions — never saturates (in_flight == 1).
-    for _ in range(100):
-        await _drive_burst(lim, 1, elapsed_ms=50.0)
-
-    assert lim.cap == start_cap
+    assert lim.cap == lim.ceiling == 32
 
 
-# --- Shrink -----------------------------------------------------------
+# --- Backoff on failure ----------------------------------------------
 
 @pytest.mark.asyncio
-async def test_shrink_on_latency_climb():
-    """Once baseline is established, a run of calls at SHRINK_TRIGGER *
-    baseline must halve the cap."""
-    lim = al.AdaptiveLimiter("eth_call", initial_cap=32, min_cap=4)
-
-    # Establish a baseline of ~50ms with enough completions to fill the
-    # window.
-    await _drive_burst(lim, al.WINDOW_SIZE + 4, elapsed_ms=50.0)
-    baseline_before = lim.baseline_p50_ms
-    assert baseline_before is not None
-    start_cap = lim.cap
-
-    slow_latency = baseline_before * al.SHRINK_TRIGGER * 1.1
-    await _drive_burst(lim, al.WINDOW_SIZE + 4, elapsed_ms=slow_latency)
-
-    assert lim.cap < start_cap
-    # At least one halving happened.
-    assert lim.cap <= max(lim.min_cap, start_cap // 2)
-
-
-@pytest.mark.asyncio
-async def test_error_forces_shrink_bounded_by_floor():
-    """Errors halve the cap regardless of the ratio check, but never
-    below the method's floor."""
+async def test_errors_halve_cap_down_to_floor():
+    """Errors halve the cap, never below the method's floor."""
     lim = al.AdaptiveLimiter(
         "eth_sendRawTransaction", initial_cap=32, min_cap=4
     )
@@ -128,72 +78,135 @@ async def test_error_forces_shrink_bounded_by_floor():
 
 
 @pytest.mark.asyncio
-async def test_non_2xx_status_treated_as_error_via_context():
-    """Non-2xx status set via the context manager should halve the cap."""
+async def test_single_error_halves_once():
+    lim = al.AdaptiveLimiter("eth_call", initial_cap=32, min_cap=4)
+    await _drive_errors(lim, 1)
+    assert lim.cap == 16
+
+
+@pytest.mark.asyncio
+async def test_non_2xx_status_treated_as_failure_via_context():
+    """A non-2xx status set on the slot must halve the cap."""
     lim = al.AdaptiveLimiter("eth_call", initial_cap=16, min_cap=2)
     start_cap = lim.cap
-    async with lim as slot:
+    async with lim.slot() as slot:
         slot.set_status(502)
     assert lim.cap == max(lim.min_cap, start_cap // 2)
+
+
+@pytest.mark.asyncio
+async def test_timeout_treated_as_failure():
+    """A timeout raised through the slot halves the cap."""
+    lim = al.AdaptiveLimiter("eth_call", initial_cap=16, min_cap=2)
+    start_cap = lim.cap
+    slot = lim.slot()
+    await slot.__aenter__()
+    await slot.__aexit__(
+        asyncio.TimeoutError, asyncio.TimeoutError(), None
+    )
+    assert lim.cap == max(lim.min_cap, start_cap // 2)
+    assert lim.in_flight == 0
+
+
+# --- Cancellation is neutral -----------------------------------------
+
+@pytest.mark.asyncio
+async def test_cancellation_does_not_move_cap():
+    """A caller-side cancellation is not a node-health signal and must
+    leave the cap untouched (and leak no permit)."""
+    lim = al.AdaptiveLimiter("eth_call", initial_cap=16, min_cap=2)
+    start_cap = lim.cap
+    slot = lim.slot()
+    await slot.__aenter__()
+    await slot.__aexit__(
+        asyncio.CancelledError, asyncio.CancelledError(), None
+    )
+    assert lim.cap == start_cap
+    assert lim.in_flight == 0
+
+
+# --- Recovery ---------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_success_does_not_grow_above_ceiling():
+    lim = al.AdaptiveLimiter("eth_call", initial_cap=8, min_cap=2)
+    await _drive_successes(lim, al.RECOVER_STEP_SUCCESSES * 5)
+    assert lim.cap == lim.ceiling == 8
+
+
+@pytest.mark.asyncio
+async def test_recovers_one_step_per_success_window():
+    lim = al.AdaptiveLimiter("eth_call", initial_cap=32, min_cap=4)
+    await _drive_errors(lim, 10)              # collapse to the floor
+    backed_off = lim.cap
+    assert backed_off == 4
+
+    # Just under a full recovery window: no step yet.
+    await _drive_successes(lim, al.RECOVER_STEP_SUCCESSES - 1)
+    assert lim.cap == backed_off
+
+    # One more success completes the window → exactly one step.
+    await _drive_successes(lim, 1)
+    assert lim.cap == backed_off + 1
+
+
+@pytest.mark.asyncio
+async def test_sustained_success_recovers_all_the_way_to_ceiling():
+    lim = al.AdaptiveLimiter("eth_call", initial_cap=32, min_cap=4)
+    await _drive_errors(lim, 10)
+    assert lim.cap == 4
+    await _drive_successes(lim, al.RECOVER_STEP_SUCCESSES * 40)
+    assert lim.cap == lim.ceiling == 32
+
+
+@pytest.mark.asyncio
+async def test_failure_resets_recovery_progress():
+    """Hysteresis: a failure zeroes the success streak, so partial
+    progress toward the next recovery step is lost."""
+    lim = al.AdaptiveLimiter("eth_call", initial_cap=32, min_cap=4)
+    await _drive_errors(lim, 10)
+    assert lim.cap == 4
+
+    # Almost a full window of successes, then one failure.
+    await _drive_successes(lim, al.RECOVER_STEP_SUCCESSES - 1)
+    assert lim.cap == 4
+    await _drive_errors(lim, 1)               # already at floor: cap stays 4
+    assert lim.cap == 4
+
+    # Streak was reset, so a fresh near-full window still doesn't step up.
+    await _drive_successes(lim, al.RECOVER_STEP_SUCCESSES - 1)
+    assert lim.cap == 4
+    # Completing the window now does.
+    await _drive_successes(lim, 1)
+    assert lim.cap == 5
 
 
 # --- Bounds -----------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_cap_never_exceeds_max_cap():
-    lim = al.AdaptiveLimiter(
-        "eth_call", initial_cap=al.MAX_CAP - 2, min_cap=2
-    )
-    for _ in range(200):
-        await _drive_burst(lim, lim.cap, elapsed_ms=10.0)
-    assert lim.cap <= al.MAX_CAP
+async def test_cap_never_exceeds_ceiling_under_load():
+    lim = al.AdaptiveLimiter("eth_call", initial_cap=64, min_cap=2)
+    await _drive_successes(lim, 5000)
+    assert lim.cap <= 64
 
 
 @pytest.mark.asyncio
 async def test_per_method_min_beats_global_min_after_errors():
-    """After 100 errors on eth_sendRawTransaction, cap sits at 4 (its
-    floor), not 2 (GLOBAL_MIN_CAP)."""
     lim = al.get_method_limiter("eth_sendRawTransaction")
     await _drive_errors(lim, 100)
     assert lim.cap == 4
     assert al.GLOBAL_MIN_CAP == 2
 
 
-# --- Baseline drift --------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_baseline_drifts_up_on_sustained_slowdown():
-    lim = al.AdaptiveLimiter("eth_call", initial_cap=32, min_cap=4)
-
-    # Fast baseline first.
-    await _drive_burst(lim, al.WINDOW_SIZE + 4, elapsed_ms=50.0)
-    baseline0 = lim.baseline_p50_ms
-    assert baseline0 is not None
-
-    # Sustained moderate slowdown: recent > baseline * upward_trigger
-    # but < shrink trigger. The baseline should drift up after a few
-    # windows.
-    slow = baseline0 * (al.BASELINE_UPWARD_TRIGGER + 0.1)
-    await _drive_burst(
-        lim, al.WINDOW_SIZE * (al.BASELINE_UPWARD_WINDOWS + 1),
-        elapsed_ms=slow,
-    )
-
-    assert lim.baseline_p50_ms is not None
-    assert lim.baseline_p50_ms > baseline0
-
-
 # --- Kill switch ------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_kill_switch_keeps_cap_fixed():
-    al.configure(disabled=True)
     lim = al.AdaptiveLimiter(
         "eth_call", initial_cap=8, min_cap=4, disabled=True
     )
     start_cap = lim.cap
-    # Everything that would normally move the cap.
-    await _drive_burst(lim, lim.cap, elapsed_ms=5000.0)
+    await _drive_successes(lim, 200)
     await _drive_errors(lim, 50)
     assert lim.cap == start_cap
 
@@ -207,7 +220,7 @@ async def test_saturation_blocks_further_acquires():
     release = asyncio.Event()
 
     async def hold_slot() -> None:
-        async with lim:
+        async with lim.slot():
             await release.wait()
 
     holders = [asyncio.create_task(hold_slot()) for _ in range(2)]
@@ -218,7 +231,7 @@ async def test_saturation_blocks_further_acquires():
     assert lim.in_flight == 2
 
     async def third_caller() -> None:
-        async with lim:
+        async with lim.slot():
             pass
 
     third = asyncio.create_task(third_caller())
@@ -236,7 +249,7 @@ async def test_cancellation_does_not_leak_permits():
     holder_release = asyncio.Event()
 
     async def hold_slot() -> None:
-        async with lim:
+        async with lim.slot():
             await holder_release.wait()
 
     holder = asyncio.create_task(hold_slot())
@@ -247,29 +260,23 @@ async def test_cancellation_does_not_leak_permits():
     assert lim.in_flight == 1
 
     async def waiter() -> None:
-        async with lim:
+        async with lim.slot():
             pass
 
     waiter_task = asyncio.create_task(waiter())
     await asyncio.sleep(0.02)
     waiter_task.cancel()
-    # asyncio.Condition.wait() has subtle notify-vs-cancel semantics on
-    # 3.11+ — don't over-assert on how the exception surfaces. What we
-    # care about is that the task ends and no permit leaks.
     try:
         await waiter_task
     except asyncio.CancelledError:
         pass
     assert waiter_task.done()
 
-    # Release the holder; waiter never held a slot (or if it did briefly
-    # from a notify-before-cancel race, __aexit__ released it), so
-    # in_flight drops to 0 cleanly with no permit leak.
     holder_release.set()
     await holder
     assert lim.in_flight == 0
 
     # New callers should proceed normally.
-    async with lim:
+    async with lim.slot():
         pass
     assert lim.in_flight == 0
