@@ -1071,7 +1071,6 @@ PANIC_REASONS = {
 }
 
 
-@cache
 def decode_revert_bytes(revert_data: bytes) -> str:
     """Best-effort decode of raw revert data (Error(string), Panic(uint256),
     or an unrecognized selector) into a human-readable message."""
