@@ -13,7 +13,8 @@ from voltaire_bundler.gas.gas_price_cache import GasPriceCache
 from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.models import FailedOp, FailedOpWithRevert
 from voltaire_bundler.user_operation.user_operation_handler import \
-    decode_failed_op_event, decode_failed_op_with_revert_event
+    decode_failed_op_event, decode_failed_op_with_revert_event, \
+    decode_revert_bytes
 from voltaire_bundler.utils.load_bytecode import load_bytecode
 from ..user_operation.user_operation_v7v8v9 import UserOperationV7V8V9
 from ..user_operation.user_operation_v7v8v9 import pack_user_operation_with_signature
@@ -165,7 +166,7 @@ class GasManagerV7V8V9(GasManager):
                 error_message = failed_op_params_res[0]
                 raise ExecutionException(
                     ExecutionExceptionCode.UserOperationReverted,
-                    str(bytes([b for b in error_message if b != 0]))  # remove zero bytes from error message
+                    decode_revert_bytes(bytes(error_message)),
                 )
 
         raise ValueError(
@@ -289,9 +290,10 @@ class GasManagerV7V8V9(GasManager):
                 error_params
             )
 
+            decoded_inner = decode_revert_bytes(bytes(inner))
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
-                reason + str(bytes([b for b in inner if b != 0]))
+                f"{reason}: {decoded_inner}" if reason else decoded_inner,
             )
 
         elif error_selector == FailedOp.SELECTOR:
@@ -313,9 +315,10 @@ class GasManagerV7V8V9(GasManager):
                 reason[0],
             )
         else:
+            revert_bytes = bytes.fromhex(error_selector[2:] + error_params)
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
-                error_params,
+                decode_revert_bytes(revert_bytes),
             )
         error_params_decoded = list(decode(
                 error_params_api, bytes.fromhex(error_params)))

@@ -1057,6 +1057,43 @@ async def get_transaction_by_hash(
         return None
 
 
+PANIC_REASONS = {
+    0x00: "generic panic",
+    0x01: "assertion failed",
+    0x11: "arithmetic overflow/underflow",
+    0x12: "division or modulo by zero",
+    0x21: "invalid enum value",
+    0x22: "storage byte array incorrectly encoded",
+    0x31: "pop() called on empty array",
+    0x32: "array index out of bounds",
+    0x41: "out of memory / too large allocation",
+    0x51: "call to a zero-initialized variable of internal function type",
+}
+
+
+@cache
+def decode_revert_bytes(revert_data: bytes) -> str:
+    """Best-effort decode of raw revert data (Error(string), Panic(uint256),
+    or an unrecognized selector) into a human-readable message."""
+    if len(revert_data) == 0:
+        return "no revert data"
+
+    selector, params = revert_data[:4], revert_data[4:]
+    try:
+        if selector == bytes.fromhex("08c379a0"):  # Error(string)
+            reason: str = decode(["string"], params)[0]
+            return reason
+        elif selector == bytes.fromhex("4e487b71"):  # Panic(uint256)
+            code: int = decode(["uint256"], params)[0]
+            return (
+                f"panic: {PANIC_REASONS.get(code, 'unknown panic code')} "
+                f"(0x{code:02x})"
+            )
+    except Exception:
+        pass
+    return f"unknown revert (selector 0x{selector.hex()}): 0x{revert_data.hex()}"
+
+
 @cache
 def decode_failed_op_event(solidity_error_params: str) -> tuple[int, str]:
     FAILED_OP_PARAMS_API = ["uint256", "string"]
