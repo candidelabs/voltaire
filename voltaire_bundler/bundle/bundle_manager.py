@@ -433,8 +433,26 @@ class BundlerManager:
         Re-adding lets them ride the next bundle round; if the userop
         has since become invalid, add_user_operation surfaces that as a
         ValidationException which is logged (not raised) here.
+
+        Bounded by the same 20-attempt budget as the monitor sweep
+        (number_of_add_to_mempool_attempts increments on every
+        add_user_operation call). Without the bound, a persistently
+        failing send would cycle the op mempool -> bundle -> re-add
+        forever, permanently occupying the sender's same-nonce slot and
+        (at 4 cycling ops) the sender's whole MAX_MEMPOOL_USEROPS_PER_
+        SENDER allowance — denying every new userop from that account.
         """
         for op in user_operations:
+            if op.number_of_add_to_mempool_attempts > 20:
+                logging.error(
+                    "userop %s exceeded the re-add budget (%d attempts) "
+                    "after send failure (%s) — dropping it so the "
+                    "sender's mempool slot frees up.",
+                    op.user_operation_hash,
+                    op.number_of_add_to_mempool_attempts,
+                    reason,
+                )
+                continue
             try:
                 await mempool_manager.add_user_operation(op)
             except (ValidationException, ExecutionException, ValueError) as exp:
