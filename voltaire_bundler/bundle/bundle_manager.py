@@ -42,6 +42,19 @@ from voltaire_bundler.utils.load_bytecode import load_bytecode
 
 from ..mempool.reputation_manager import ReputationManager
 
+# Relative fee bump applied when replacing our own pending bundle tx.
+# Geth's txpool requires BOTH maxFeePerGas and maxPriorityFeePerGas of a
+# replacement to be >= +10% of the pending tx (Nethermind/Erigon have
+# equivalent rules); 15% keeps a margin above that so rounding or a
+# non-default node config can't reject the bump.
+REPLACEMENT_FEE_BUMP_PERCENT = 15
+
+# Upper bound on same-nonce replacement retries within one send_bundle
+# call chain. Each retry escalates fees geometrically (+15% over the
+# previous attempt), so 15 attempts spans a ~8x fee range — enough for
+# any realistic repricing; beyond it something else is wrong.
+MAX_REPLACEMENT_ATTEMPTS = 15
+
 
 async def _warm_inclusion_caches(
     ethereum_node_urls: list[str],
@@ -97,11 +110,18 @@ class BundlerManager:
     user_operations_to_monitor_v9: dict[str, UserOperationV7V8V9]
     user_operations_to_ban: dict[
         str, tuple[UserOperationV6 | UserOperationV7V8V9, str, Address]]
-    # Scoped per bundler EOA, not per EP label: two EPs configured with the
-    # same bundler_secret share a nonce space and therefore share the
-    # underpriced-replacement climb; two EPs on distinct EOAs must not have
-    # one's inclusion reset the other's in-flight multiplier.
-    gas_price_percentage_multiplier: dict[Address, int]
+    # Fee floor for the bundle tx currently pending from each bundler EOA:
+    # (nonce, max_fee_per_gas, max_priority_fee_per_gas) of the most recent
+    # send attempt at that nonce. A later attempt at the SAME nonce is a
+    # replacement and must outbid these values by REPLACEMENT_FEE_BUMP_PERCENT
+    # to satisfy the txpool's price-bump rule — escalating relative to the
+    # pending tx (not the live gas oracle) is what makes the climb monotonic
+    # even when the oracle falls after a spike. Scoped per bundler EOA, not
+    # per EP label: two EPs configured with the same bundler_secret share a
+    # nonce space and therefore share the replacement climb; two EPs on
+    # distinct EOAs must not have one's inclusion reset the other's floor.
+    # Entries self-heal when the observed nonce advances past the stored one.
+    pending_tx_fees: dict[Address, tuple[int, int, int]]
     bundle_gas_estimation_multiplier: float
     entrypoint_v9_reentrant: str
     gas_price_cache: GasPriceCache
@@ -156,10 +176,9 @@ class BundlerManager:
         self.user_operations_to_monitor_v7 = {}
         self.user_operations_to_monitor_v6 = {}
 
-        # Keyed by bundler EOA. Entries are added the first time an EOA's
-        # multiplier is bumped; before that, reads fall back to 100 via
-        # dict.get(addr, 100).
-        self.gas_price_percentage_multiplier = {}
+        # Keyed by bundler EOA. Entries are recorded on every send attempt
+        # and dropped once the EOA's nonce advances past the stored one.
+        self.pending_tx_fees = {}
         self.user_operations_to_ban = {}
         self.bundle_gas_estimation_multiplier = bundle_gas_estimation_multiplier
         self.entrypoint_v9_reentrant = load_bytecode("EntryPointV9Reentrant.json")
@@ -402,7 +421,8 @@ class BundlerManager:
         self,
         user_operations: list[UserOperationV7V8V9] | list[UserOperationV6],
         mempool_manager: LocalMempoolManagerV8 | LocalMempoolManagerV7 | LocalMempoolManagerV6,
-        highest_verified_at_block: int
+        highest_verified_at_block: int,
+        replacement_attempt: int = 0,
     ) -> None:
         entrypoint = mempool_manager.entrypoint
         num_of_user_operations = len(user_operations)
@@ -475,14 +495,11 @@ class BundlerManager:
         gas_estimation_hex = hex(gas_estimation_int)
 
         nonce = nonce_result["result"]
-
-        gas_price_percentage_multiplier = (
-            self.gas_price_percentage_multiplier.get(bundler_address, 100)
-        )
+        nonce_int = int(nonce, 16)
 
         block_max_fee_per_gas_dec = gas_price_snapshot.max_fee_per_gas
 
-        block_max_priority_fee_per_gas_hex = "0x0"
+        block_max_priority_fee_per_gas_dec_mod = 0
         # skip eth_maxPriorityFeePerGas in legacy mode and on HyperEVM —
         # the cache also skips fetching it in these cases, so the snapshot
         # value is None.
@@ -497,15 +514,11 @@ class BundlerManager:
             block_max_priority_fee_per_gas_dec_mod = math.ceil(
                 block_max_priority_fee_per_gas_dec
                 * (self.max_priority_fee_per_gas_percentage_multiplier / 100)
-                * (gas_price_percentage_multiplier / 100)
             )
 
             # max priority fee per gas should be atleast 1
             if block_max_priority_fee_per_gas_dec_mod <= 0:
                 block_max_priority_fee_per_gas_dec_mod = 1
-
-            block_max_priority_fee_per_gas_hex = hex(
-                    block_max_priority_fee_per_gas_dec_mod)
 
             # EIP-1559 fee cap with real base-fee headroom.
             #
@@ -530,17 +543,50 @@ class BundlerManager:
             block_max_fee_per_gas_dec_mod = math.ceil(
                 2 * estimated_base_fee
                 * (self.max_fee_per_gas_percentage_multiplier / 100)
-                * (gas_price_percentage_multiplier / 100)
             ) + block_max_priority_fee_per_gas_dec_mod
-            block_max_fee_per_gas_hex = hex(block_max_fee_per_gas_dec_mod)
         else:
             # Legacy / no-priority-fee chains: gasPrice-based cap, as before.
             block_max_fee_per_gas_dec_mod = math.ceil(
                 block_max_fee_per_gas_dec
                 * (self.max_fee_per_gas_percentage_multiplier / 100)
-                * (gas_price_percentage_multiplier / 100)
             )
-            block_max_fee_per_gas_hex = hex(block_max_fee_per_gas_dec_mod)
+
+        # Same-nonce replacement: the tx pending from this EOA sets a fee
+        # floor. Escalate RELATIVE TO THE PENDING TX, not the gas oracle —
+        # the txpool compares a replacement against the pending tx's fees,
+        # and after a fee spike subsides the oracle can sit far below them,
+        # in which case no oracle-derived price would ever be accepted (the
+        # failure mode behind bundles stuck on Sepolia/mainnet despite
+        # repeated "fee increases"). A strictly geometric climb over the
+        # floor guarantees every retry clears the pool's +10% bump rule.
+        pending = self.pending_tx_fees.get(bundler_address)
+        if pending is not None:
+            pending_nonce, pending_max_fee, pending_priority_fee = pending
+            if pending_nonce == nonce_int:
+                bump = (100 + REPLACEMENT_FEE_BUMP_PERCENT) / 100
+                block_max_fee_per_gas_dec_mod = max(
+                    block_max_fee_per_gas_dec_mod,
+                    math.ceil(pending_max_fee * bump),
+                )
+                if block_max_priority_fee_per_gas_dec_mod > 0:
+                    block_max_priority_fee_per_gas_dec_mod = max(
+                        block_max_priority_fee_per_gas_dec_mod,
+                        math.ceil(pending_priority_fee * bump),
+                    )
+            elif nonce_int > pending_nonce:
+                # Our previous tx landed (nonce advanced) — the floor is
+                # stale. Drop it so fresh bundles price from the oracle.
+                del self.pending_tx_fees[bundler_address]
+
+        # max priority fee per gas can't be higher than max fee per gas
+        if block_max_priority_fee_per_gas_dec_mod > block_max_fee_per_gas_dec_mod:
+            block_max_fee_per_gas_dec_mod = block_max_priority_fee_per_gas_dec_mod
+
+        block_max_fee_per_gas_hex = hex(block_max_fee_per_gas_dec_mod)
+        block_max_priority_fee_per_gas_hex = (
+            hex(block_max_priority_fee_per_gas_dec_mod)
+            if block_max_priority_fee_per_gas_dec_mod > 0 else "0x0"
+        )
 
         logging.info(
             f"Sending bundle with {num_of_user_operations} user operations, "
@@ -646,23 +692,35 @@ class BundlerManager:
                     "ReplacementNotAllowed" in result["error"]["message"]  or # nethermind
                     "could not replace existing tx" in result["error"]["message"]  # erigon
                 ):
-                    # retry sending useroperations with higher gas price
-                    # if the gas_price_percentage_multiplier reached 600,
-                    # drop all user_operations
-                    if gas_price_percentage_multiplier <= 600:
-                        gas_price_percentage_multiplier += 30
-                        self.gas_price_percentage_multiplier[
-                            bundler_address
-                        ] = gas_price_percentage_multiplier
+                    # Record the attempted fees as the new floor so the
+                    # retry escalates over what the pool just compared us
+                    # against, then retry. Every retry is a strict
+                    # REPLACEMENT_FEE_BUMP_PERCENT over the last attempt —
+                    # geometric, so it always clears the pool's +10% rule
+                    # (the old additive +30-point ladder fell below the
+                    # rule from the 8th retry onward and could never
+                    # replace after that).
+                    if replacement_attempt < MAX_REPLACEMENT_ATTEMPTS:
+                        self.pending_tx_fees[bundler_address] = (
+                            nonce_int,
+                            block_max_fee_per_gas_dec_mod,
+                            block_max_priority_fee_per_gas_dec_mod,
+                        )
                         logging.warning(
                             str(result["error"]["message"]) +
-                            " increasing bundle gas price by 30% "
-                            "- gas_price_percentage_multiplier now is "
-                            f"{gas_price_percentage_multiplier}%"
+                            f" - retrying (attempt {replacement_attempt + 1}"
+                            f"/{MAX_REPLACEMENT_ATTEMPTS}) with fees at least "
+                            f"+{REPLACEMENT_FEE_BUMP_PERCENT}% over "
+                            f"maxFeePerGas {block_max_fee_per_gas_hex} / "
+                            "maxPriorityFeePerGas "
+                            f"{block_max_priority_fee_per_gas_hex}"
                         )
 
                         await self.send_bundle(
-                            user_operations, mempool_manager, highest_verified_at_block
+                            user_operations,
+                            mempool_manager,
+                            highest_verified_at_block,
+                            replacement_attempt=replacement_attempt + 1,
                         )
                     else:
                         logging.error(
@@ -709,16 +767,17 @@ class BundlerManager:
             transaction_hash = result["result"]
             logging.info(
                 "Bundle was sent with transaction hash : " + transaction_hash)
-            # NOTE: do not reset gas_price_percentage_multiplier here.
-            # eth_sendRawTransaction returning a hash only means the node
-            # accepted the tx into its mempool — the previous bundle from
-            # this EOA is likely still pending at whatever price got us
-            # here, and resetting to 100% would force the next round to
-            # re-climb via ~15 recursive underpriced-replacement retries
-            # before it can replace the pending tx. The multiplier is
-            # reset instead when the monitor sweep confirms the userop
-            # landed on chain (or gives up on it), i.e. when we know the
-            # nonce actually advanced.
+            # The tx is in the pool at these fees now. Record them as the
+            # floor: any later attempt at the same nonce (this tx not yet
+            # mined) is a replacement and must outbid them. The entry is
+            # dropped when the EOA's nonce advances — detected either at
+            # the top of send_bundle (fresh eth_getTransactionCount) or by
+            # the monitor sweep on confirmed inclusion.
+            self.pending_tx_fees[bundler_address] = (
+                nonce_int,
+                block_max_fee_per_gas_dec_mod,
+                block_max_priority_fee_per_gas_dec_mod,
+            )
 
             self.update_monitor_status_transation_hash(
                 user_operations,
@@ -874,11 +933,12 @@ class BundlerManager:
                 unconditional_remove.append(
                     user_operation.user_operation_hash)
                 # This EP's bundler EOA landed a tx → its nonce advanced, so
-                # any leftover multiplier accumulated while we waited for
-                # this inclusion no longer applies. Reset only THIS EOA's
-                # entry; other EPs may still be climbing under different
-                # bundler_secrets.
-                self.gas_price_percentage_multiplier[bundler_address] = 100
+                # the pending-tx fee floor no longer applies. Drop only THIS
+                # EOA's entry; other EPs may still be chasing pending txs
+                # under different bundler_secrets. (send_bundle would also
+                # self-heal on the next nonce fetch — this just makes the
+                # next bundle price from the oracle immediately.)
+                self.pending_tx_fees.pop(bundler_address, None)
                 # Preemptively warm the tx-by-hash and tx-receipt caches in
                 # the background so the next client poll for this userop
                 # finds them hot instead of paying two more RPC round trips.
@@ -902,12 +962,15 @@ class BundlerManager:
                 )
                 unconditional_remove.append(
                     user_operation.user_operation_hash)
-                # We're giving up on this userop, so any multiplier that
-                # accumulated while chasing its pending tx is stale — leaving
-                # it high would either overpay the next unrelated userop on
-                # this EOA or trip the <=600 cap on the very first retry and
-                # drop without climbing. Reset only this EOA's entry.
-                self.gas_price_percentage_multiplier[bundler_address] = 100
+                # Giving up on the USEROP does not clear the pending-tx fee
+                # floor: the bundle tx may still be sitting in the pool at
+                # the fees we escalated to, and the next bundle from this
+                # EOA must still outbid it or the pool rejects the
+                # replacement. (The old code reset the escalation state
+                # here, which guaranteed the next bundle started below the
+                # stuck tx and re-failed — a permanent underpriced loop.)
+                # The floor self-heals in send_bundle once the nonce
+                # advances.
             elif time_diff_sec > 5:
                 logging.info(
                     f"user operation: {user_operation.user_operation_hash} "
