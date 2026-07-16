@@ -481,12 +481,6 @@ class BundlerManager:
         )
 
         block_max_fee_per_gas_dec = gas_price_snapshot.max_fee_per_gas
-        block_max_fee_per_gas_dec_mod = math.ceil(
-            block_max_fee_per_gas_dec
-            * (self.max_fee_per_gas_percentage_multiplier / 100)
-            * (gas_price_percentage_multiplier / 100)
-        )
-        block_max_fee_per_gas_hex = hex(block_max_fee_per_gas_dec_mod)
 
         block_max_priority_fee_per_gas_hex = "0x0"
         # skip eth_maxPriorityFeePerGas in legacy mode and on HyperEVM —
@@ -513,9 +507,40 @@ class BundlerManager:
             block_max_priority_fee_per_gas_hex = hex(
                     block_max_priority_fee_per_gas_dec_mod)
 
-            # max priority fee per gas can't be higher than max fee per gas
-            if block_max_priority_fee_per_gas_dec_mod > block_max_fee_per_gas_dec_mod:
-                block_max_priority_fee_per_gas_hex = block_max_fee_per_gas_hex
+            # EIP-1559 fee cap with real base-fee headroom.
+            #
+            # eth_gasPrice on geth-family nodes returns
+            # (base_fee + suggested_tip), so subtracting the priority-fee
+            # oracle recovers an estimate of the current base fee — same
+            # trick gas_manager.py uses for userop fee validation.
+            #
+            # The cap is then 2x the estimated base fee plus the tip.
+            # Base fee grows at most 12.5% per full block, so 2x covers
+            # ~6 consecutive full blocks before the tx becomes unmineable
+            # — versus less than one block of headroom with the previous
+            # (1.1 * eth_gasPrice) formula, which routinely stranded
+            # bundles on Sepolia/mainnet base-fee spikes. EIP-1559 refunds
+            # everything above (base_fee + tip), so the extra headroom
+            # costs nothing when the spike doesn't materialize.
+            estimated_base_fee = max(
+                block_max_fee_per_gas_dec
+                - gas_price_snapshot.max_priority_fee_per_gas,
+                1,
+            )
+            block_max_fee_per_gas_dec_mod = math.ceil(
+                2 * estimated_base_fee
+                * (self.max_fee_per_gas_percentage_multiplier / 100)
+                * (gas_price_percentage_multiplier / 100)
+            ) + block_max_priority_fee_per_gas_dec_mod
+            block_max_fee_per_gas_hex = hex(block_max_fee_per_gas_dec_mod)
+        else:
+            # Legacy / no-priority-fee chains: gasPrice-based cap, as before.
+            block_max_fee_per_gas_dec_mod = math.ceil(
+                block_max_fee_per_gas_dec
+                * (self.max_fee_per_gas_percentage_multiplier / 100)
+                * (gas_price_percentage_multiplier / 100)
+            )
+            block_max_fee_per_gas_hex = hex(block_max_fee_per_gas_dec_mod)
 
         logging.info(
             f"Sending bundle with {num_of_user_operations} user operations, "
