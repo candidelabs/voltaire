@@ -417,6 +417,39 @@ class BundlerManager:
             return self.bundler_secrets_per_ep["v7"]
         return self.bundler_secrets_per_ep["v6"]
 
+    async def _readd_userops_after_send_failure(
+        self,
+        user_operations: list[UserOperationV7V8V9] | list[UserOperationV6],
+        mempool_manager: LocalMempoolManagerV8 | LocalMempoolManagerV7 | LocalMempoolManagerV6,
+        reason: str,
+    ) -> None:
+        """Re-add every userop from a failed bundle to the mempool so
+        the next tick can try again.
+
+        Previously a terminal send failure silently discarded every
+        userop in the bundle — a single bad node response, base-fee
+        spike, or exhausted replacement climb wiped an entire batch of
+        successfully-validated userops with no visibility to the caller.
+        Re-adding lets them ride the next bundle round; if the userop
+        has since become invalid, add_user_operation surfaces that as a
+        ValidationException which is logged (not raised) here.
+        """
+        for op in user_operations:
+            try:
+                await mempool_manager.add_user_operation(op)
+            except (ValidationException, ExecutionException, ValueError) as exp:
+                logging.info(
+                    "readd after send failure — dropping userop %s: %s "
+                    "(cause: %s)",
+                    op.user_operation_hash, reason, str(exp),
+                )
+            except Exception:
+                logging.exception(
+                    "unexpected error re-adding userop %s after send "
+                    "failure (%s); this op is lost",
+                    op.user_operation_hash, reason,
+                )
+
     async def send_bundle(
         self,
         user_operations: list[UserOperationV7V8V9] | list[UserOperationV6],
@@ -684,6 +717,65 @@ class BundlerManager:
                 # ErrReplaceUnderpriced is returned if a transaction is
                 # attempted to be replaced with a different one without
                 # the required price bump.
+                # ErrNonceTooLow — our previous tx at this nonce was
+                # included between the top-of-send_bundle nonce fetch and
+                # here. Drop the stale pending-tx floor so the retry
+                # prices from the oracle, then retry once with a fresh
+                # nonce (send_bundle's own eth_getTransactionCount will
+                # return the advanced value).
+                elif (
+                    "nonce too low" in result["error"]["message"].lower() or
+                    "OldNonce" in result["error"]["message"]  # nethermind
+                ):
+                    self.pending_tx_fees.pop(bundler_address, None)
+                    if replacement_attempt < MAX_REPLACEMENT_ATTEMPTS:
+                        logging.warning(
+                            "nonce too low — previous bundle from EOA "
+                            f"{bundler_address} landed; retrying with fresh "
+                            "nonce."
+                        )
+                        await self.send_bundle(
+                            user_operations,
+                            mempool_manager,
+                            highest_verified_at_block,
+                            replacement_attempt=replacement_attempt + 1,
+                        )
+                    else:
+                        await self._readd_userops_after_send_failure(
+                            user_operations, mempool_manager,
+                            reason="nonce too low (retry budget exhausted)",
+                        )
+                # ErrFeeCapTooLow — our maxFeePerGas is below the current
+                # base fee. Commit 1's 2x-base-fee cap has generous
+                # headroom, so this usually means the gas-price snapshot
+                # was stale relative to the block that just landed.
+                # Retry lets send_bundle re-read the snapshot; if the
+                # cache is still lagging, replacement_attempt will burn
+                # attempts until it catches up or the budget runs out.
+                elif (
+                    "max fee per gas less than block base fee"
+                    in result["error"]["message"].lower() or
+                    "FeeTooLowToCompete" in result["error"]["message"]
+                ):
+                    if replacement_attempt < MAX_REPLACEMENT_ATTEMPTS:
+                        logging.warning(
+                            "maxFeePerGas below base fee — retrying "
+                            f"(attempt {replacement_attempt + 1}/"
+                            f"{MAX_REPLACEMENT_ATTEMPTS}) with fresh "
+                            "gas-price snapshot."
+                        )
+                        await self.send_bundle(
+                            user_operations,
+                            mempool_manager,
+                            highest_verified_at_block,
+                            replacement_attempt=replacement_attempt + 1,
+                        )
+                    else:
+                        await self._readd_userops_after_send_failure(
+                            user_operations, mempool_manager,
+                            reason="maxFeePerGas below base fee "
+                                   "(retry budget exhausted)",
+                        )
                 elif (
                     "already known" in result["error"]["message"] or  # Geth
                     "transaction underpriced" in result["error"]["message"] or  # Geth
@@ -724,8 +816,13 @@ class BundlerManager:
                         )
                     else:
                         logging.error(
-                            "Failed to send bundle. Dropping all user operations"
+                            "underpriced replacement budget exhausted "
+                            "- re-adding userops to mempool: "
                             + str(result["error"])
+                        )
+                        await self._readd_userops_after_send_failure(
+                            user_operations, mempool_manager,
+                            reason="underpriced (retry budget exhausted)",
                         )
                 # ErrAccountLimitExceeded is returned if a transaction would
                 # exceed the number allowed by a pool for a single account.
@@ -755,13 +852,21 @@ class BundlerManager:
                     pass  # todo
                 else:
                     logging.error(
-                        "Failed to send bundle. Dropping all user operations"
+                        "unknown send error - re-adding userops to mempool: "
                         + str(result["error"])
+                    )
+                    await self._readd_userops_after_send_failure(
+                        user_operations, mempool_manager,
+                        reason=f"unknown error: {result['error']}",
                     )
             else:
                 logging.error(
-                    "Failed to send bundle. Dropping all user operations"
-                    + str(result["error"])
+                    "malformed error from node - re-adding userops to "
+                    "mempool: " + str(result["error"])
+                )
+                await self._readd_userops_after_send_failure(
+                    user_operations, mempool_manager,
+                    reason=f"malformed node error: {result['error']}",
                 )
         else:
             transaction_hash = result["result"]
