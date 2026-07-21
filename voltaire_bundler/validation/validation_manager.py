@@ -18,6 +18,12 @@ class ValidationManager(ABC, Generic[UserOperationType]):
     enforce_gas_price_tolerance: int
     enforce_pre_verification_gas_tolerance: int
     ethereum_node_debug_trace_call_urls: list[str]
+    # entrypoint address (lowercase) -> delegatecall-proxy code override
+    # pointing at a pre-deployed simulation contract. Populated at boot by
+    # ExecutionEndpoint.init_deployed_simulations for the simulation
+    # contracts found deployed on-chain; empty means always use the full
+    # bytecode state override.
+    deployed_simulations_overrides: dict[str, str]
 
     @abstractmethod
     async def validate_user_operation(

@@ -30,6 +30,7 @@ from voltaire_bundler.user_operation.user_operation_handler import \
     fell_user_operation_optional_parameters_for_estimateUserOperationGas
 from voltaire_bundler.gas.gas_price_cache import GasPriceCache
 from voltaire_bundler.utils.cache import PersistentFIFOCache
+from voltaire_bundler.utils.deployed_simulations import check_deployed_simulations
 from voltaire_bundler.utils.eth_client_utils import get_block_info, send_rpc_request_to_eth_client
 
 from .bundle.bundle_manager import BundlerManager
@@ -376,7 +377,31 @@ class ExecutionEndpoint(Endpoint):
 
                 self.peer_ids_to_user_ops_hashes_queue[peer_id] = []
 
+    async def init_deployed_simulations(self) -> None:
+        """Check at boot if the simulation contracts are pre-deployed at
+        their canonical deterministic addresses (logging the result per
+        contract) and, if so, have the validation managers use a tiny
+        delegatecall-proxy code override pointing at the deployed contract
+        instead of the full ~40KB simulation bytecode on every eth_call."""
+        deployed_overrides = await check_deployed_simulations(
+            self.ethereum_node_urls, self.chain_id, self.disable_v6
+        )
+        if not deployed_overrides:
+            return
+        validation_managers = [
+            self.local_mempool_manager_v9.validation_manager,
+            self.local_mempool_manager_v8.validation_manager,
+            self.local_mempool_manager_v7.validation_manager,
+        ]
+        if self.local_mempool_manager_v6 is not None:
+            validation_managers.append(
+                self.local_mempool_manager_v6.validation_manager)
+        for validation_manager in validation_managers:
+            validation_manager.deployed_simulations_overrides.update(
+                deployed_overrides)
+
     async def start_execution_endpoint(self) -> None:
+        await self.init_deployed_simulations()
         self.add_events_and_response_functions_by_prefix(
             prefix="_event_", decorator_func=exception_handler_decorator
         )
