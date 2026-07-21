@@ -406,19 +406,32 @@ class LocalMempoolManager():
             accumulated += op_max
             user_operations.append(op)
 
-        validate_user_operations_ops = [
-            self.validate_user_operation_to_bundle(op) for op in user_operations
-        ]
-        validation_results = await asyncio.gather(*validate_user_operations_ops)
+        if self.is_fast:
+            # fast mode: skip the second validation and the code-hash
+            # recheck entirely — every gas-cap-filtered candidate is
+            # bundled as-is. A userop that became invalid since the first
+            # validation is only caught when the bundle lands (or reverts)
+            # on-chain.
+            validation_results = [
+                (True, None, None) for _ in user_operations
+            ]
+            new_code_hash_results = [
+                op.code_hash for op in user_operations
+            ]
+        else:
+            validate_user_operations_ops = [
+                self.validate_user_operation_to_bundle(op) for op in user_operations
+            ]
+            validation_results = await asyncio.gather(*validate_user_operations_ops)
 
-        new_code_hash_ops = []
-        for (_, associated_addresses, _) in validation_results:
-            new_code_hash_ops.append(
-                self.validation_manager.tracer_manager.get_addresses_code_hash(
-                    associated_addresses
+            new_code_hash_ops = []
+            for (_, associated_addresses, _) in validation_results:
+                new_code_hash_ops.append(
+                    self.validation_manager.tracer_manager.get_addresses_code_hash(
+                        associated_addresses
+                    )
                 )
-            )
-        new_code_hash_results = await asyncio.gather(*new_code_hash_ops)
+            new_code_hash_results = await asyncio.gather(*new_code_hash_ops)
 
         for (
             user_operation,
