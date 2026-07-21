@@ -60,6 +60,10 @@ class ValidationManagerV6(ValidationManager):
         self.entrypoint_code_override_arb = load_bytecode(
             "EntryPointSimulationsV6Arb.json")
 
+        # Populated at boot by ExecutionEndpoint.init_deployed_simulations
+        # when the simulation contracts are pre-deployed on-chain.
+        self.deployed_simulations_overrides: dict[str, str] = {}
+
 
     async def validate_user_operation(
         self,
@@ -236,23 +240,25 @@ class ValidationManagerV6(ValidationManager):
 
         # arbitrum One or arbitrum sepolia
         if self.chain_id == 42161 or self.chain_id == 421614:
-            state_overrides = {
-                # override the Entrypoint with EntryPointSimulationsV6Arb
-                entrypoint: {"code": self.entrypoint_code_override_arb},
-                self.bundler_address: {
-                    # override the bundler address balance with a high value
-                    "balance": "0x314dc6448d9338c15b0a00000000",
-                },
-            }
+            entrypoint_code_override = self.entrypoint_code_override_arb
         else:
-            state_overrides = {
-                # override the Entrypoint with EntryPointSimulationsV6
-                entrypoint: {"code": self.entrypoint_code_override},
-                self.bundler_address: {
-                    # override the bundler address balance with a high value
-                    "balance": "0x314dc6448d9338c15b0a00000000",
-                },
-            }
+            entrypoint_code_override = self.entrypoint_code_override
+        # If the simulation contract was found pre-deployed at boot, override
+        # with a tiny delegatecall proxy pointing at it instead of shipping
+        # the full ~40KB simulation bytecode on every eth_call. Delegatecall
+        # keeps address(this)/storage = EntryPoint, so execution is identical.
+        # Only the non-tracing path does this: an extra call frame would shift
+        # the depths BundlerCollectorTracer relies on in the tracing path.
+        entrypoint_code_override = self.deployed_simulations_overrides.get(
+            entrypoint.lower(), entrypoint_code_override)
+        state_overrides = {
+            # override the Entrypoint with EntryPointSimulations
+            entrypoint: {"code": entrypoint_code_override},
+            self.bundler_address: {
+                # override the bundler address balance with a high value
+                "balance": "0x314dc6448d9338c15b0a00000000",
+            },
+        }
 
         params = [
             {
