@@ -25,6 +25,29 @@ Deploy Voltaire using the latest docker image
 docker run --net=host --rm -ti ghcr.io/candidelabs/voltaire/voltaire-bundler:latest --bundler_secret $BUNDLER_SECRET --rpc_url $RPC_URL --rpc_port $PORT --ethereum_node_url $ETHEREUM_NODE_URL --chain_id $CHAIN_ID --verbose --unsafe --disable_p2p
 ```
 
+# Scaling inclusion with a bundler EOA pool
+
+A single bundler EOA is one nonce lane — it can land at most one bundle per
+inclusion window, which caps throughput under load. To submit bundles in
+parallel, pass **multiple comma-separated keys** to `--bundler_secret`; they
+form a pool of bundler EOAs shared across all EntryPoints:
+
+```
+--bundler_secret 0xkey1,0xkey2,0xkey3,...
+```
+
+- **Sender sharding.** Each UserOperation is assigned to an EOA by
+  `int(sender, 16) % N`. A given sender always maps to the same EOA, so its
+  operations serialize on one nonce sequence and never race across EOAs, while
+  different senders spread across the pool and submit in parallel.
+- **Nonce safety.** Each EOA is an independent nonce lane, and an EOA never
+  broadcasts more than one bundle per tick — so the shared pool can safely
+  serve every EntryPoint without nonce collisions.
+- **Sizing.** Roughly `N ≈ target_bundles_per_sec × inclusion_latency`. Every
+  key must be a distinct EOA funded with native gas.
+
+A single `--bundler_secret` key keeps the plain single-EOA behaviour.
+
 # Development
 
 ## Ubuntu: Get started testing the bundler in 5 minutes 

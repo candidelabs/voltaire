@@ -84,6 +84,7 @@ poetry run python3 -m voltaire_bundler \
 - `--disable_entrypoints_code_check`: Skip checking if all EntryPoints are deployed
 - `--eip7702`: Enable EIP-7702 authorization tuple support (required for 7702 accounts)
 - `--bundle_interval N`: Seconds between bundle submission attempts (default: 2)
+- `--bundler_secret`: One private key for a single-EOA bundler, or several comma-separated keys forming a **pool of bundler EOAs** shared across all EntryPoints. With a pool, each tick's bundles are sharded by sender (`int(sender,16) % N`) and submitted in parallel — one bundle per EOA per tick (each EOA an independent nonce lane) — to raise inclusion throughput. Keys must be distinct, funded EOAs. The index-0 EOA also serves as the validation `eth_call` `from`. See `voltaire_bundler/bundle/executor_pool.py` and `executor_lane.py`.
 
 ## Architecture Overview
 
