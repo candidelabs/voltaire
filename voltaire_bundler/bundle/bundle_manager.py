@@ -278,21 +278,28 @@ class BundlerManager:
         # gated by its own 5s threshold anyway. Effect: busy mempools
         # sweep often, quiet ones don't; sub-second bundle_interval
         # doesn't translate to one eth_getLogs per tick.
+        # With an executor pool the per-lane gas cap is applied per shard, so
+        # the pool pulls up to num_lanes x a single bundle's budget each tick
+        # (each EOA fills its own bundle). Without a pool this is one shard.
+        num_shards = self.executor_pool.num_lanes if self.executor_pool else 1
+        sender_to_shard = (
+            self.executor_pool.shard_for_sender if self.executor_pool else None
+        )
         bundle_tasks = [
             self.local_mempool_manager_v9.get_user_operations_to_bundle(
-                self.conditional_rpc is not None
+                self.conditional_rpc is not None, num_shards, sender_to_shard
             ),
             self.local_mempool_manager_v8.get_user_operations_to_bundle(
-                self.conditional_rpc is not None
+                self.conditional_rpc is not None, num_shards, sender_to_shard
             ),
             self.local_mempool_manager_v7.get_user_operations_to_bundle(
-                self.conditional_rpc is not None
+                self.conditional_rpc is not None, num_shards, sender_to_shard
             ),
         ]
         if self.local_mempool_manager_v6 is not None:
             bundle_tasks.append(
                 self.local_mempool_manager_v6.get_user_operations_to_bundle(
-                    self.conditional_rpc is not None
+                    self.conditional_rpc is not None, num_shards, sender_to_shard
                 )
             )
 

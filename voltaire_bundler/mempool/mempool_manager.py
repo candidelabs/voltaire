@@ -4,6 +4,7 @@ import logging
 import math
 from functools import cache
 from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Any, List
 
 from eth_abi import encode, decode
@@ -357,15 +358,22 @@ class LocalMempoolManager():
         return user_operation_hash in self.seen_user_operation_hashs
 
     async def get_user_operations_to_bundle(
-        self, is_conditional_rpc: bool
+        self, is_conditional_rpc: bool,
+        num_shards: int = 1,
+        sender_to_shard: "Callable[[str], int] | None" = None,
     ) -> dict[str, UserOperation]:
+        # num_shards / sender_to_shard describe the executor pool: each shard is
+        # one EOA that submits its own bundle transaction. The gas cap below is
+        # applied PER SHARD, so with N EOAs up to N x the single-bundle budget
+        # is pulled this tick while no single lane's bundle exceeds one tx's
+        # worth. A single EOA (num_shards=1) is unchanged.
         bundle = {}
         senders_lowercase = [x.lower() for x in self.senders_to_senders_mempools.keys()]
 
         if self.chain_id in (5031, 50312):  # Somnia
-            max_compined_bundle_user_operations_gas_limit = 500_000_000
+            per_lane_gas_limit = 500_000_000
         else:
-            max_compined_bundle_user_operations_gas_limit = 15_000_000
+            per_lane_gas_limit = 15_000_000
 
         # Collect candidate userops in fee-order (one per sender, head of
         # queue). This is just dict iteration — no RPC.
@@ -393,14 +401,20 @@ class LocalMempoolManager():
         #
         # Skip over-cap ops individually (don't truncate on the first one):
         # a single oversized op in the middle of fee-order candidates
-        # shouldn't starve later smaller ops that still fit.
-        accumulated = 0
+        # shouldn't starve later smaller ops that still fit. The cap is
+        # tracked per shard (per EOA) so each lane fills up to a full bundle
+        # rather than the pool sharing one bundle's budget.
+        accumulated_per_shard = [0] * num_shards
         user_operations: list[UserOperation] = []
         for op in candidates:
             op_max = op.get_max_gas_without_pre_verification_gas()
-            if accumulated + op_max > max_compined_bundle_user_operations_gas_limit:
+            shard = (
+                sender_to_shard(op.sender_address)
+                if sender_to_shard is not None else 0
+            )
+            if accumulated_per_shard[shard] + op_max > per_lane_gas_limit:
                 continue
-            accumulated += op_max
+            accumulated_per_shard[shard] += op_max
             user_operations.append(op)
 
         validate_user_operations_ops = [
