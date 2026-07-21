@@ -1095,6 +1095,17 @@ class BundlerManager:
         if self.chain_id in (5031, 50312):  # Somnia
             bundle_gas_limit += 200_000 * len(user_operations)
 
+        if self.is_fast:
+            # fast mode: skip the third validation — the eth_call that
+            # simulates the entire bundle through the EntryPoint before
+            # submission. call_data and bundle_gas_limit are computed
+            # locally from the userops' gas fields, so nothing else is
+            # needed from the simulation; an invalid userop is only caught
+            # by the on-chain revert of the whole bundle.
+            merged_storage_map = await self.get_merged_storage_map(
+                user_operations)
+            return call_data, bundle_gas_limit, merged_storage_map, auth_list
+
         # arbitrum One or arbitrum sepolia
         if self.chain_id == 42161 or self.chain_id == 421614:
             # see EntryPointMinBlockArb.sol
