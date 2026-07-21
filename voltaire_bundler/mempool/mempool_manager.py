@@ -111,7 +111,10 @@ class LocalMempoolManager():
                     "An unstaked paymaster may not return a context.",
                 )
 
-        if associated_addresses is None:
+        # fast mode: skip the code-hash snapshot (an eth_call to
+        # BundlerHelper) - it only feeds the second-validation code-hash
+        # recheck, which fast mode skips as well.
+        if self.is_fast or associated_addresses is None:
             user_operation.code_hash = None
         else:
             user_operation.code_hash = (
@@ -258,7 +261,8 @@ class LocalMempoolManager():
                         "An unstaked paymaster may not return a context.",
                     )
 
-            if associated_addresses is None:
+            # fast mode: skip the code-hash snapshot (see add_user_operation)
+            if self.is_fast or associated_addresses is None:
                 user_operation.code_hash = None
             else:
                 user_operation.code_hash = (
