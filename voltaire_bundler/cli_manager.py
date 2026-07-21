@@ -50,10 +50,13 @@ class InitData:
     rpc_port: int
     ethereum_node_urls: list[str]
     bundle_node_urls: list[str]
-    # (address, private_key) tuples keyed by entrypoint label
-    # ("v6", "v7", "v8", "v9"). When the operator passes a single
-    # --bundler_secret all four entries share the same EOA.
-    bundler_secrets_per_ep: dict[str, tuple[Address, str]]
+    # Pool of (address, private_key) bundler EOAs keyed by entrypoint label
+    # ("v6", "v7", "v8", "v9") — an executor pool per entrypoint. Currently
+    # each pool holds one EOA (so behaviour matches the single-EOA bundler);
+    # a multi-EOA pool is what enables parallel bundle submission. Index 0 is
+    # the primary EOA used for validation-only concerns. When the operator
+    # passes a single --bundler_secret all four pools share the same EOA.
+    bundler_secrets_per_ep: dict[str, list[tuple[Address, str]]]
     chain_id: int
     is_debug: bool
     is_unsafe: bool
@@ -120,6 +123,11 @@ class InitData:
     # Warmed synchronously in get_init_data so a bad ethereum node URL is
     # caught at startup. Started as a TaskGroup child in main().
     gas_price_cache: GasPriceCache
+    # The shared pool of bundler EOAs when --bundler_secret carries more than
+    # one key: bundles are sharded by sender across these EOAs and submitted in
+    # parallel (one bundle per EOA per tick). None for a single-key bundler,
+    # which keeps the single-EOA submission path.
+    executor_secrets: list[tuple[Address, str]] | None
 
 
 def address(ep: str):
@@ -206,10 +214,12 @@ def initialize_argument_parser() -> ArgumentParser:
         "--bundler_secret",
         type=str,
         help=(
-            "Bundler private key. Pass a single secret to use one EOA for all "
-            "entrypoints, or four comma-separated secrets (in v0.6,v0.7,v0.8,v0.9 "
-            "order) to use a distinct EOA per entrypoint. When --disable_v6 is "
-            "set the v0.6 slot is still required but its EOA is unused."
+            "Bundler private key(s). Pass one key for a single-EOA bundler, or "
+            "several comma-separated keys to form a pool of bundler EOAs shared "
+            "across all entrypoints. With a pool, each tick's bundles are "
+            "sharded by sender and submitted in parallel — one bundle per EOA "
+            "per tick (each EOA an independent nonce lane) — for higher "
+            "inclusion throughput. Every key must be a distinct, funded EOA."
         ),
         nargs="?",
         default=_get_env_or_default("VOLTAIRE_BUNDLER_SECRET", None, str),
@@ -845,7 +855,20 @@ ENTRYPOINT_LABELS = ("v6", "v7", "v8", "v9")
 
 async def init_bundler_address_and_secret(
     args: Namespace, ethereum_node_url: str
-) -> dict[str, tuple[Address, str]]:
+) -> tuple[dict[str, list[tuple[Address, str]]], list[tuple[Address, str]] | None]:
+    """Parse the bundler secret(s) into (per_ep_secrets, executor_pool).
+
+    --bundler_secret takes one or more comma-separated private keys forming a
+    shared pool of bundler EOAs used across ALL entrypoints. With more than one
+    key, each tick's bundles are sharded by sender and submitted in parallel —
+    one per EOA, each an independent nonce lane. A single key is the plain
+    single-EOA bundler (unchanged behaviour).
+
+    per_ep_secrets: the pool keyed by entrypoint label; index 0 is the primary
+    EOA used for the validation eth_call `from`. executor_pool: the shared pool
+    for parallel submission, or None when there is only one EOA.
+    """
+    executor_pool: list[tuple[Address, str]] | None = None
     if args.keystore_file_path is not None:
         # Keystore is single-EOA only: the same EOA is reused for every
         # entrypoint.
@@ -853,39 +876,39 @@ async def init_bundler_address_and_secret(
             args.keystore_file_password, args.keystore_file_path
         )
         per_ep_secrets = {
-            label: (bundler_address, bundler_pk) for label in ENTRYPOINT_LABELS
+            label: [(bundler_address, bundler_pk)] for label in ENTRYPOINT_LABELS
         }
     else:
         raw_secrets = [s.strip() for s in args.bundler_secret.split(",")]
         if any(s == "" for s in raw_secrets):
             logging.critical(
-                "--bundler_secret contains an empty entry; provide either one "
-                "secret or four non-empty comma-separated secrets (one per "
-                "entrypoint in v0.6,v0.7,v0.8,v0.9 order)."
+                "--bundler_secret contains an empty entry; provide one or more "
+                "non-empty comma-separated private keys."
             )
             sys.exit(1)
-        if len(raw_secrets) == 1:
-            pk = raw_secrets[0]
+        pool: list[tuple[Address, str]] = []
+        seen: set[Address] = set()
+        for pk in raw_secrets:
             addr = public_address_from_private_key(pk)
-            per_ep_secrets = {label: (addr, pk) for label in ENTRYPOINT_LABELS}
-        elif len(raw_secrets) == 4:
-            per_ep_secrets = {}
-            for label, pk in zip(ENTRYPOINT_LABELS, raw_secrets):
-                addr = public_address_from_private_key(pk)
-                per_ep_secrets[label] = (addr, pk)
-        else:
-            logging.critical(
-                "--bundler_secret must be either one secret or four "
-                "comma-separated secrets (one per entrypoint in "
-                "v0.6,v0.7,v0.8,v0.9 order); got "
-                f"{len(raw_secrets)}."
-            )
-            sys.exit(1)
+            if addr in seen:
+                logging.critical(
+                    f"--bundler_secret contains a duplicate EOA {addr}; each "
+                    "bundler EOA must be a distinct key (one nonce lane each)."
+                )
+                sys.exit(1)
+            seen.add(addr)
+            pool.append((addr, pk))
+        # The same pool serves every entrypoint; index 0 is the validation
+        # `from`. A pool of >1 enables parallel sharded submission.
+        per_ep_secrets = {label: pool for label in ENTRYPOINT_LABELS}
+        executor_pool = pool if len(pool) > 1 else None
 
     # Verify each unique EOA address is actually an EOA (no contract code,
     # no EIP-7702 delegation). De-duplicate first so the single-secret case
     # only spends one RPC round-trip.
-    unique_addresses = {addr for addr, _ in per_ep_secrets.values()}
+    unique_addresses = {
+        addr for pool in per_ep_secrets.values() for addr, _ in pool
+    }
     for bundler_address in unique_addresses:
         try:
             bundler_code_res = await send_rpc_request_to_eth_client_no_retry(
@@ -917,7 +940,14 @@ async def init_bundler_address_and_secret(
             )
             sys.exit(1)
 
-    return per_ep_secrets
+    if executor_pool is not None:
+        logging.info(
+            "Bundler EOA pool: %d EOAs (%s) — sharded parallel submission",
+            len(executor_pool),
+            ", ".join(addr for addr, _ in executor_pool),
+        )
+
+    return per_ep_secrets, executor_pool
 
 
 def check_if_valid_rpc_url_and_port(rpc_url, rpc_port) -> None:
@@ -1037,8 +1067,9 @@ async def get_init_data(args: Namespace) -> InitData:
         )
         sys.exit(1)
 
-    bundler_secrets_per_ep = await init_bundler_address_and_secret(
-        args, ethereum_node_urls_rearranged[0])
+    bundler_secrets_per_ep, executor_secrets = \
+        await init_bundler_address_and_secret(
+            args, ethereum_node_urls_rearranged[0])
 
     if args.bundle_node_url is None:
         bundle_node_urls = ethereum_node_urls
@@ -1273,6 +1304,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.enable_banning,
         args.logs_fallback_recent_window,
         gas_price_cache,
+        executor_secrets,
     )
 
     if args.verbose:

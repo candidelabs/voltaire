@@ -1,10 +1,11 @@
 import asyncio
 import copy
 from collections import defaultdict
+from collections.abc import Coroutine
 from datetime import datetime
 import logging
 import math
-from typing import cast
+from typing import Any, cast
 
 # Per-userop floor on "old enough to be worth checking for inclusion".
 # Below this age the userop almost certainly hasn't been mined yet, so
@@ -17,6 +18,7 @@ MIN_INCLUSION_CHECK_AGE_S = 2.0
 from eth_account import Account
 from eth_abi import encode
 
+from voltaire_bundler.bundle.executor_pool import ExecutorPool
 from voltaire_bundler.cli_manager import ConditionalRpc
 from voltaire_bundler.gas.gas_price_cache import GasPriceCache
 from voltaire_bundler.user_operation.models import \
@@ -72,10 +74,11 @@ async def _warm_inclusion_caches(
 class BundlerManager:
     ethereum_node_urls: list[str]
     bundle_node_urls: list[str]
-    # (address, private_key) per entrypoint label ("v6", "v7", "v8", "v9").
-    # Operators may set one EOA for all four (the default) or a distinct EOA
-    # per entrypoint via comma-separated --bundler_secret.
-    bundler_secrets_per_ep: dict[str, tuple[Address, str]]
+    # Pool of (address, private_key) bundler EOAs per entrypoint label
+    # ("v6", "v7", "v8", "v9") — an executor pool per entrypoint. Operators may
+    # set one EOA for all four (the default) or a distinct EOA per entrypoint
+    # via comma-separated --bundler_secret. Index 0 is the primary EOA.
+    bundler_secrets_per_ep: dict[str, list[tuple[Address, str]]]
     local_mempool_manager_v6: LocalMempoolManagerV6 | None
     local_mempool_manager_v7: LocalMempoolManagerV7
     local_mempool_manager_v8: LocalMempoolManagerV8
@@ -115,7 +118,7 @@ class BundlerManager:
         ethereum_node_urls: list[str],
         ethereum_node_eth_get_logs_urls: list[str],
         bundle_node_urls: list[str],
-        bundler_secrets_per_ep: dict[str, tuple[Address, str]],
+        bundler_secrets_per_ep: dict[str, list[tuple[Address, str]]],
         chain_id: int,
         is_legacy_mode: bool,
         conditional_rpc: ConditionalRpc | None,
@@ -124,6 +127,7 @@ class BundlerManager:
         max_priority_fee_per_gas_percentage_multiplier: int,
         bundle_gas_estimation_multiplier: float,
         gas_price_cache: GasPriceCache,
+        executor_secrets: list[tuple[Address, str]] | None = None,
     ):
         self.local_mempool_manager_v6 = local_mempool_manager_v6
         self.local_mempool_manager_v7 = local_mempool_manager_v7
@@ -164,6 +168,11 @@ class BundlerManager:
         self.bundle_gas_estimation_multiplier = bundle_gas_estimation_multiplier
         self.entrypoint_v9_reentrant = load_bytecode("EntryPointV9Reentrant.json")
         self.gas_price_cache = gas_price_cache
+        # Shared executor pool (one nonce sequence per EOA, used across all
+        # entrypoints). None -> single-EOA-per-entrypoint submission (legacy).
+        self.executor_pool: ExecutorPool | None = (
+            ExecutorPool(executor_secrets) if executor_secrets else None
+        )
 
     async def send_next_bundle(self) -> None:
         await self.update_send_queue_and_monitor_queue()
@@ -197,22 +206,15 @@ class BundlerManager:
             user_operations_to_send_v7.values()
         ))[-1] if user_operations_to_send_v7.values() else 0
 
-        tasks_arr = [
-            self.send_bundle(
-                list(user_operations_to_send_v9.values()),
-                self.local_mempool_manager_v9,
-                highest_verified_at_block_v9
-            ),
-            self.send_bundle(
-                list(user_operations_to_send_v8.values()),
-                self.local_mempool_manager_v8,
-                highest_verified_at_block_v8
-            ),
-            self.send_bundle(
-                list(user_operations_to_send_v7.values()),
-                self.local_mempool_manager_v7,
-                highest_verified_at_block_v7
-            )
+        ep_jobs: list[tuple[dict[str, Any], LocalMempoolManagerV9
+                            | LocalMempoolManagerV8 | LocalMempoolManagerV7
+                            | LocalMempoolManagerV6, int]] = [
+            (user_operations_to_send_v9, self.local_mempool_manager_v9,
+             highest_verified_at_block_v9),
+            (user_operations_to_send_v8, self.local_mempool_manager_v8,
+             highest_verified_at_block_v8),
+            (user_operations_to_send_v7, self.local_mempool_manager_v7,
+             highest_verified_at_block_v7),
         ]
         if self.bundles_to_send_v6 is not None:
             assert self.local_mempool_manager_v6 is not None
@@ -226,14 +228,11 @@ class BundlerManager:
                 user_operations_to_send_v6.values()
             ))[-1] if user_operations_to_send_v6.values() else 0
 
-            tasks_arr.append(
-                self.send_bundle(
-                    list(user_operations_to_send_v6.values()),
-                    self.local_mempool_manager_v6,
-                    highest_verified_at_block_v6
-                )
-            )
-        await asyncio.gather(*tasks_arr)
+            ep_jobs.append((
+                user_operations_to_send_v6, self.local_mempool_manager_v6,
+                highest_verified_at_block_v6))
+
+        await asyncio.gather(*self._build_send_tasks(ep_jobs))
 
         useroperation_banning_ops = []
         for user_operation, reason, entrypoint in self.user_operations_to_ban.values():
@@ -381,6 +380,23 @@ class BundlerManager:
             self.user_operations_to_monitor_v6 |= copy.deepcopy(
                 user_operations_to_bundle_v6)
 
+    def _pool_for_mempool(
+        self,
+        mempool_manager: (
+            LocalMempoolManagerV9
+            | LocalMempoolManagerV8
+            | LocalMempoolManagerV7
+            | LocalMempoolManagerV6
+        ),
+    ) -> list[tuple[Address, str]]:
+        if isinstance(mempool_manager, LocalMempoolManagerV9):
+            return self.bundler_secrets_per_ep["v9"]
+        if isinstance(mempool_manager, LocalMempoolManagerV8):
+            return self.bundler_secrets_per_ep["v8"]
+        if isinstance(mempool_manager, LocalMempoolManagerV7):
+            return self.bundler_secrets_per_ep["v7"]
+        return self.bundler_secrets_per_ep["v6"]
+
     def _secret_for_mempool(
         self,
         mempool_manager: (
@@ -390,26 +406,81 @@ class BundlerManager:
             | LocalMempoolManagerV6
         ),
     ) -> tuple[Address, str]:
-        if isinstance(mempool_manager, LocalMempoolManagerV9):
-            return self.bundler_secrets_per_ep["v9"]
-        if isinstance(mempool_manager, LocalMempoolManagerV8):
-            return self.bundler_secrets_per_ep["v8"]
-        if isinstance(mempool_manager, LocalMempoolManagerV7):
-            return self.bundler_secrets_per_ep["v7"]
-        return self.bundler_secrets_per_ep["v6"]
+        # Primary (index 0) EOA of the pool — used when no shared executor
+        # pool is configured (one bundle per EP per tick from this EOA).
+        return self._pool_for_mempool(mempool_manager)[0]
+
+    def _build_send_tasks(
+        self,
+        ep_jobs: list[tuple[
+            dict[str, Any],
+            LocalMempoolManagerV9 | LocalMempoolManagerV8
+            | LocalMempoolManagerV7 | LocalMempoolManagerV6,
+            int,
+        ]],
+    ) -> list[Coroutine[Any, Any, None]]:
+        """Turn this tick's per-EP bundles into concurrent send coroutines.
+
+        Without a shared executor pool: one send per EP from that EP's
+        primary EOA (the legacy path, unchanged).
+
+        With a shared executor pool: shard each EP's bundle by sender across
+        the pool's EOAs and submit the shards in parallel. Crucially, each EOA
+        is used at most ONCE per tick (``used_lanes``): every EOA has a single
+        nonce sequence, so two concurrent sends from the same EOA — e.g. a v7
+        and a v8 shard that happen to hash to it — would collide on its nonce.
+        Deferred ops (a shard whose EOA is already busy this tick) stay in the
+        monitor and are re-added on a later tick. In practice a sender belongs
+        to one entrypoint, so cross-EP collisions on a lane essentially never
+        happen; this is a safety guard, not a throughput cost.
+        """
+        if self.executor_pool is None:
+            return [
+                self.send_bundle(
+                    list(ops.values()), mempool, highest_block,
+                    self._secret_for_mempool(mempool))
+                for ops, mempool, highest_block in ep_jobs
+                if len(ops) > 0
+            ]
+
+        pool = self.executor_pool
+        used_lanes: set[int] = set()
+        tasks = []
+        for ops, mempool, highest_block in ep_jobs:
+            if len(ops) == 0:
+                continue
+            by_lane: dict[int, dict[str, Any]] = defaultdict(dict)
+            for op_hash, op in ops.items():
+                lane_idx = pool.shard_for_sender(op.sender_address)
+                by_lane[lane_idx][op_hash] = op
+            for lane_idx, sub_bundle in by_lane.items():
+                if lane_idx in used_lanes:
+                    continue  # EOA already sends a tx this tick — defer
+                used_lanes.add(lane_idx)
+                lane = pool.lanes[lane_idx]
+                tasks.append(self.send_bundle(
+                    list(sub_bundle.values()), mempool, highest_block,
+                    (lane.address, lane.private_key)))
+        return tasks
 
     async def send_bundle(
         self,
         user_operations: list[UserOperationV7V8V9] | list[UserOperationV6],
-        mempool_manager: LocalMempoolManagerV8 | LocalMempoolManagerV7 | LocalMempoolManagerV6,
-        highest_verified_at_block: int
+        mempool_manager: LocalMempoolManagerV9 | LocalMempoolManagerV8
+        | LocalMempoolManagerV7 | LocalMempoolManagerV6,
+        highest_verified_at_block: int,
+        bundler_secret: tuple[Address, str],
     ) -> None:
+        # The submitting EOA is passed in explicitly (an executor-pool lane),
+        # not derived from the mempool — this is what lets one EP fan a tick's
+        # bundles across multiple EOAs. Nonce and the fee-escalation multiplier
+        # are already scoped per bundler_address, so each EOA is managed
+        # independently.
         entrypoint = mempool_manager.entrypoint
         num_of_user_operations = len(user_operations)
         if num_of_user_operations == 0:
             return
-        bundler_address, bundler_private_key = self._secret_for_mempool(
-            mempool_manager)
+        bundler_address, bundler_private_key = bundler_secret
         logging.info(
             f"Attempting to send bundle with {num_of_user_operations} user operations."
         )
@@ -637,7 +708,8 @@ class BundlerManager:
                         )
 
                         await self.send_bundle(
-                            user_operations, mempool_manager, highest_verified_at_block
+                            user_operations, mempool_manager,
+                            highest_verified_at_block, bundler_secret
                         )
                     else:
                         logging.error(
@@ -815,10 +887,17 @@ class BundlerManager:
         # dedupe before scheduling warmups to avoid redundant RPC round
         # trips for the same transaction.
         seen_warmup_tx_hashes: set[str] = set()
-        # Every userop in this monitor set belongs to the same EP → same
-        # bundler EOA, so resolve once and scope multiplier resets to it.
-        bundler_address = self._secret_for_mempool(local_mempool)[0]
+        # The EOA whose fee-multiplier to reset on inclusion. Without a pool
+        # every userop in this EP's monitor set was sent by the same primary
+        # EOA, so resolve once. With a shared executor pool the sender was
+        # sharded to a specific lane, so it's resolved per userop below.
+        primary_bundler_address = self._secret_for_mempool(local_mempool)[0]
         for user_operation in list(user_operations_to_monitor.values()):
+            if self.executor_pool is not None:
+                bundler_address = self.executor_pool.lane_for_sender(
+                    user_operation.sender_address).address
+            else:
+                bundler_address = primary_bundler_address
             user_operation_log = user_operations_logs_by_hash.get(
                 user_operation.user_operation_hash
             )

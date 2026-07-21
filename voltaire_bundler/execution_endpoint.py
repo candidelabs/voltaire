@@ -98,7 +98,7 @@ class ExecutionEndpoint(Endpoint):
         self,
         ethereum_node_urls: list[str],
         bundle_node_urls: list[str],
-        bundler_secrets_per_ep: dict[str, tuple[Address, str]],
+        bundler_secrets_per_ep: dict[str, list[tuple[Address, str]]],
         chain_id: int,
         is_unsafe: bool,
         is_debug: bool,
@@ -127,15 +127,18 @@ class ExecutionEndpoint(Endpoint):
         enable_banning: bool,
         logs_fallback_recent_window: int,
         gas_price_cache: GasPriceCache,
+        executor_secrets: list[tuple[Address, str]] | None = None,
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_urls = ethereum_node_urls
         self.chain_id = chain_id
 
-        bundler_address_v6, _ = bundler_secrets_per_ep["v6"]
-        bundler_address_v7, _ = bundler_secrets_per_ep["v7"]
-        bundler_address_v8, _ = bundler_secrets_per_ep["v8"]
-        bundler_address_v9, _ = bundler_secrets_per_ep["v9"]
+        # Primary (index 0) EOA per pool — used only as the validation
+        # eth_call `from`, where any pool EOA works (balance is overridden).
+        bundler_address_v6, _ = bundler_secrets_per_ep["v6"][0]
+        bundler_address_v7, _ = bundler_secrets_per_ep["v7"][0]
+        bundler_address_v8, _ = bundler_secrets_per_ep["v8"][0]
+        bundler_address_v9, _ = bundler_secrets_per_ep["v9"][0]
 
         # The shared v7/v8/v9 user-operation handler only uses ``bundler_address``
         # as the ``from`` for simulation eth_calls — the balance is state-
@@ -258,6 +261,7 @@ class ExecutionEndpoint(Endpoint):
             max_priority_fee_per_gas_percentage_multiplier,
             bundle_gas_estimation_multiplier,
             gas_price_cache,
+            executor_secrets,
         )
         self.peer_ids_to_cursor = dict()
         self.peer_ids_to_user_ops_hashes_queue = dict()

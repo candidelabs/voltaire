@@ -111,11 +111,12 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
     # nobody mistakes the v6 line for an active signer.
     logging.info("Bundler addresses per entrypoint:")
     for label in ("v6", "v7", "v8", "v9"):
-        addr, _ = init_data.bundler_secrets_per_ep[label]
+        pool = init_data.bundler_secrets_per_ep[label]
+        addresses = ", ".join(addr for addr, _ in pool)
         suffix = " (unused — --disable_v6)" if (
             label == "v6" and init_data.disable_v6
         ) else ""
-        logging.info("  %s: %s%s", label, addr, suffix)
+        logging.info("  %s (%d): %s%s", label, len(pool), addresses, suffix)
 
     try:
         async with asyncio.TaskGroup() as task_group:
@@ -151,6 +152,7 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
                 init_data.enable_banning,
                 init_data.logs_fallback_recent_window,
                 init_data.gas_price_cache,
+                init_data.executor_secrets,
             )
             task_group.create_task(execution_endpoint.start_execution_endpoint())
             # Keep the gas-price cache fresh in the background. Already
@@ -169,8 +171,9 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             labels_to_check = ("v7", "v8", "v9") if init_data.disable_v6 \
                 else ("v6", "v7", "v8", "v9")
             bundler_addresses_to_check = sorted({
-                init_data.bundler_secrets_per_ep[label][0]
+                addr
                 for label in labels_to_check
+                for addr, _ in init_data.bundler_secrets_per_ep[label]
             })
             task_group.create_task(
                 run_rpc_http_server(
