@@ -1009,6 +1009,40 @@ class BundlerManager:
         if paymaster_address is not None:
             mempool_manager.reputation_manager.update_included_status(paymaster_address)
 
+    async def get_merged_storage_map(
+        self,
+        user_operations: list[UserOperationV6] | list[UserOperationV7V8V9],
+    ) -> dict[str, str | dict[str, str]] | None:
+        """Collect the merged storage map for conditional-rpc submission:
+        the storage maps observed during validation plus each sender's
+        current storage root hash. Returns None when conditional rpc is
+        not configured."""
+        if self.conditional_rpc is None:
+            return None
+        senders_root_hashs_operations = list()
+        merged_storage_map: dict[str, str | dict[str, str]] = dict()
+        for user_operation in user_operations:
+            if user_operation.storage_map is not None:
+                merged_storage_map |= user_operation.storage_map
+            senders_root_hashs_operations.append(
+                send_rpc_request_to_eth_client(
+                    self.ethereum_node_urls,
+                    "eth_getProof",
+                    [user_operation.sender_address, [], "latest"],
+                    None, "result"
+                )
+            )
+        senders_root_hashes = await asyncio.gather(
+                *senders_root_hashs_operations)
+
+        for user_operation, root_hash_result in zip(
+            user_operations, senders_root_hashes
+        ):
+            merged_storage_map[
+                user_operation.sender_address
+            ] = root_hash_result["result"]["storageHash"]
+        return merged_storage_map
+
     async def create_bundle_calldata_and_estimate_gas(
         self,
         user_operations: list[UserOperationV6] | list[UserOperationV7V8V9],
@@ -1120,30 +1154,8 @@ class BundlerManager:
         )
 
         if "result" in result:
-            merged_storage_map = None
-            if self.conditional_rpc is not None:
-                senders_root_hashs_operations = list()
-                merged_storage_map = dict()
-                for user_operation in user_operations:
-                    if user_operation.storage_map is not None:
-                        merged_storage_map |= user_operation.storage_map
-                    senders_root_hashs_operations.append(
-                        send_rpc_request_to_eth_client(
-                            self.ethereum_node_urls,
-                            "eth_getProof",
-                            [user_operation.sender_address, [], "latest"],
-                            None, "result"
-                        )
-                    )
-                senders_root_hashes = await asyncio.gather(
-                        *senders_root_hashs_operations)
-
-                for user_operation, root_hash_result in zip(
-                    user_operations, senders_root_hashes
-                ):
-                    merged_storage_map[
-                        user_operation.sender_address
-                    ] = root_hash_result["result"]["storageHash"]
+            merged_storage_map = await self.get_merged_storage_map(
+                user_operations)
             return call_data, bundle_gas_limit, merged_storage_map, auth_list
         # the bundler performs the third validation of the entire UserOperations
         # bundle. If any of the UserOperations fail validation,
