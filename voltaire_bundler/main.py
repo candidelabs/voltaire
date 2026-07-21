@@ -151,6 +151,7 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
                 init_data.enable_banning,
                 init_data.logs_fallback_recent_window,
                 init_data.gas_price_cache,
+                init_data.is_fast,
             )
             task_group.create_task(execution_endpoint.start_execution_endpoint())
             # Keep the gas-price cache fresh in the background. Already

@@ -46,6 +46,9 @@ class LocalMempoolManager():
     latest_paymaster_deposits_cache_block: int
     min_stake: int
     min_unstake_delay: int
+    # Fast mode: skip the second validation (and the code-hash recheck)
+    # when pulling userops from the mempool for bundling.
+    is_fast: bool
     MAX_OPS_PER_REQUEST = 4096
 
     def clear_user_operations(self) -> None:

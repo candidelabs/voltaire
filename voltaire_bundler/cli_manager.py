@@ -120,6 +120,10 @@ class InitData:
     # Warmed synchronously in get_init_data so a bad ethereum node URL is
     # caught at startup. Started as a TaskGroup child in main().
     gas_price_cache: GasPriceCache
+    # Fast mode: skip the second validation (re-validating each
+    # UserOperation when pulled from the mempool for bundling) and the
+    # third validation (simulating the entire bundle before submission).
+    is_fast: bool
 
 
 def address(ep: str):
@@ -739,6 +743,24 @@ def initialize_argument_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
+        "--fast",
+        type=str_to_bool,
+        help=(
+            "Fast mode: skip the second validation (re-validating each "
+            "UserOperation when it is pulled from the mempool for bundling) "
+            "and the third validation (simulating the entire bundle via "
+            "eth_call before submission). Cuts per-bundle validation load "
+            "and latency, at the risk of submitting bundles that revert "
+            "on-chain (the bundler pays the gas of a reverted bundle), and "
+            "without the reputation penalties those validations feed."
+        ),
+        nargs="?",
+        const=True,
+        default=_get_env_or_default(
+            "VOLTAIRE_FAST", False, lambda v: v.lower() == "true"),
+    )
+
+    parser.add_argument(
         "--eip7702",
         type=str_to_bool,
         help="enable eip7702 auth",
@@ -1273,7 +1295,15 @@ async def get_init_data(args: Namespace) -> InitData:
         args.enable_banning,
         args.logs_fallback_recent_window,
         gas_price_cache,
+        args.fast,
     )
+
+    if args.fast:
+        logging.warning(
+            "Fast mode enabled: skipping the second validation (mempool -> "
+            "bundle re-validation) and the third validation (full bundle "
+            "simulation). Bundles may revert on-chain."
+        )
 
     if args.verbose:
         print(VOLTAIRE_HEADER)

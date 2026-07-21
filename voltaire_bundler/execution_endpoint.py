@@ -127,6 +127,7 @@ class ExecutionEndpoint(Endpoint):
         enable_banning: bool,
         logs_fallback_recent_window: int,
         gas_price_cache: GasPriceCache,
+        is_fast: bool,
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_urls = ethereum_node_urls
@@ -170,6 +171,7 @@ class ExecutionEndpoint(Endpoint):
             min_stake,
             min_unstake_delay,
             enable_banning,
+            is_fast,
         )
 
         self.local_mempool_manager_v8 = LocalMempoolManagerV8(
@@ -187,6 +189,7 @@ class ExecutionEndpoint(Endpoint):
             min_stake,
             min_unstake_delay,
             enable_banning,
+            is_fast,
         )
 
         self.local_mempool_manager_v7 = LocalMempoolManagerV7(
@@ -204,6 +207,7 @@ class ExecutionEndpoint(Endpoint):
             min_stake,
             min_unstake_delay,
             enable_banning,
+            is_fast,
         )
 
         if disable_v6:
@@ -239,6 +243,7 @@ class ExecutionEndpoint(Endpoint):
                 min_stake,
                 min_unstake_delay,
                 enable_banning,
+                is_fast,
             )
 
         self.bundle_manager = BundlerManager(
@@ -258,6 +263,7 @@ class ExecutionEndpoint(Endpoint):
             max_priority_fee_per_gas_percentage_multiplier,
             bundle_gas_estimation_multiplier,
             gas_price_cache,
+            is_fast,
         )
         self.peer_ids_to_cursor = dict()
         self.peer_ids_to_user_ops_hashes_queue = dict()
