@@ -54,6 +54,16 @@ def publish(block_number: int) -> None:
     _cached_at_monotonic = time.monotonic()
 
 
+def peek() -> int | None:
+    """Return the cached chain head without any I/O or freshness check.
+
+    None if nothing has been published yet. Unlike ``get_or_fetch`` this
+    never issues an RPC, so it can be used for cheap heuristics (e.g.
+    "is this per-block cache probably still fresh?") where a slightly
+    stale answer only costs a redundant fetch, never correctness."""
+    return _cached_block_number
+
+
 def _get_fetch_lock() -> asyncio.Lock:
     global _fetch_lock
     if _fetch_lock is None:

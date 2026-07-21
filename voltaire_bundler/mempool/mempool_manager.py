@@ -18,6 +18,7 @@ from voltaire_bundler.event_bus_manager.endpoint import RequestEvent
 from voltaire_bundler.validation.validation_manager import ValidationManager
 from voltaire_bundler.custom_types import Address, MempoolId
 from voltaire_bundler.user_operation.user_operation import UserOperation
+from voltaire_bundler.utils import latest_block_cache
 from voltaire_bundler.utils.eth_client_utils import get_block_info, send_rpc_request_to_eth_client
 
 from .sender_mempool import SenderMempool
@@ -80,6 +81,25 @@ class LocalMempoolManager():
                 )
             )
 
+        # Prefetch the paymaster deposit concurrently with the first
+        # validation so the arrival path doesn't pay an extra round trip on
+        # a deposit-cache miss. Anchored at "latest" instead of the
+        # validated block, which is acceptable for a heuristic aggregate
+        # check. Skipped when the per-block cache is expected to hit; an
+        # inaccurate expectation only costs a redundant fetch (stale peek)
+        # or falls back to the sequential fetch (missed prefetch).
+        paymaster_deposit_prefetch = None
+        paymaster = user_operation.paymaster_address_lowercase
+        if paymaster is not None:
+            known_head = latest_block_cache.peek()
+            if (
+                paymaster not in self.paymaster_deposits_cache
+                or known_head is None
+                or known_head > self.latest_paymaster_deposits_cache_block
+            ):
+                paymaster_deposit_prefetch = asyncio.create_task(
+                    self._fetch_paymaster_deposit_at_latest(paymaster))
+
         (
             sender_stake_info,
             factory_stake_info,
@@ -131,7 +151,8 @@ class LocalMempoolManager():
         )
 
         await self.validate_paymaster_deposit(
-            user_operation, validated_at_block_number)
+            user_operation, validated_at_block_number,
+            paymaster_deposit_prefetch)
 
         self.validate_multiple_roles_violation(user_operation)
 
@@ -843,13 +864,14 @@ class LocalMempoolManager():
         self,
         user_operation: UserOperation,
         block_number_hex: str,
+        deposit_prefetch: "asyncio.Task[int | None] | None" = None,
     ):
         paymaster = user_operation.paymaster_address_lowercase
         if paymaster is None:
             return
         else:
             remaining_deposit = await self.get_paymaster_deposit(
-                paymaster, block_number_hex)
+                paymaster, block_number_hex, deposit_prefetch)
             user_op_max_cost = user_operation.get_max_cost()
 
         remaining_deposit -= user_op_max_cost
@@ -885,7 +907,9 @@ class LocalMempoolManager():
                     )
 
     async def get_paymaster_deposit(
-            self, paymaster: Address, block_number_hex: str) -> int:
+            self, paymaster: Address, block_number_hex: str,
+            deposit_prefetch: "asyncio.Task[int | None] | None" = None,
+    ) -> int:
         block_number = int(block_number_hex, 16)
         if block_number > self.latest_paymaster_deposits_cache_block:
             self.paymaster_deposits_cache.clear()
@@ -893,34 +917,60 @@ class LocalMempoolManager():
 
         if paymaster in self.paymaster_deposits_cache:  # cached
             return self.paymaster_deposits_cache[paymaster]
-        else:
-            function_selector = "0x70a08231"  # balanceOf
-            params = encode(["address"], [paymaster])
 
-            call_data = function_selector + params.hex()
-
-            params = [
-                {
-                    "to": self.entrypoint,
-                    "data": call_data,
-                },
-                block_number_hex,
-            ]
-
-            result: Any = await send_rpc_request_to_eth_client(
-                self.ethereum_node_urls, "eth_call", params, None, "result"
-            )
-            if "result" in result:
-                balance = int(result["result"], 16) if result["result"] != "0x" else 0
+        if deposit_prefetch is not None:
+            # deposit was fetched concurrently with the first validation
+            balance = await deposit_prefetch
+            if balance is not None:
                 self.paymaster_deposits_cache[paymaster] = balance
                 return balance
+            # prefetch failed - fall through to the sequential fetch
+
+        result = await self._fetch_paymaster_balance(
+            paymaster, block_number_hex)
+        if "result" in result:
+            balance = int(result["result"], 16) if result["result"] != "0x" else 0
+            self.paymaster_deposits_cache[paymaster] = balance
+            return balance
+        else:
+            logging.critical("balanceOf eth_call failed")
+            if "error" in result:
+                error = str(result["error"])
+                raise ValueError(f"balanceOf eth_call failed - {error}")
             else:
-                logging.critical("balanceOf eth_call failed")
-                if "error" in result:
-                    error = str(result["error"])
-                    raise ValueError(f"balanceOf eth_call failed - {error}")
-                else:
-                    raise ValueError("balanceOf eth_call failed")
+                raise ValueError("balanceOf eth_call failed")
+
+    async def _fetch_paymaster_balance(
+            self, paymaster: Address, block_number_hex: str) -> Any:
+        function_selector = "0x70a08231"  # balanceOf
+        call_params = encode(["address"], [paymaster])
+        params = [
+            {
+                "to": self.entrypoint,
+                "data": function_selector + call_params.hex(),
+            },
+            block_number_hex,
+        ]
+        return await send_rpc_request_to_eth_client(
+            self.ethereum_node_urls, "eth_call", params, None, "result"
+        )
+
+    async def _fetch_paymaster_deposit_at_latest(
+            self, paymaster: Address) -> int | None:
+        """balanceOf(paymaster) at "latest", run concurrently with the
+        first validation. Swallows all errors (returns None) so a failed
+        or orphaned prefetch (e.g. validation raised before the result
+        was consumed) never surfaces an unretrieved-exception warning;
+        the caller falls back to the regular sequential fetch."""
+        try:
+            result = await self._fetch_paymaster_balance(paymaster, "latest")
+            if "result" in result:
+                return int(result["result"], 16) if result["result"] != "0x" else 0
+        except Exception:
+            pass
+        logging.debug(
+            "paymaster deposit prefetch failed for %s", paymaster)
+        return None
 
     def get_known_factories_and_paymasters_lowercase(self) -> list[Address]:
         known_entities = []
