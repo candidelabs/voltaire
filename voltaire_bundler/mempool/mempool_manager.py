@@ -371,7 +371,7 @@ class LocalMempoolManager():
         senders_lowercase = [x.lower() for x in self.senders_to_senders_mempools.keys()]
 
         if self.chain_id in (5031, 50312):  # Somnia
-            per_lane_gas_limit = 500_000_000
+            per_lane_gas_limit = 1_000_000_000
         else:
             per_lane_gas_limit = 15_000_000
 
