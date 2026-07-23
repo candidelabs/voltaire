@@ -217,9 +217,10 @@ def initialize_argument_parser() -> ArgumentParser:
             "Bundler private key(s). Pass one key for a single-EOA bundler, or "
             "several comma-separated keys to form a pool of bundler EOAs shared "
             "across all entrypoints. With a pool, each tick's bundles are "
-            "sharded by sender and submitted in parallel — one bundle per EOA "
-            "per tick (each EOA an independent nonce lane) — for higher "
-            "inclusion throughput. Every key must be a distinct, funded EOA."
+            "sharded by sender and submitted in parallel as background tasks "
+            "— each EOA an independent nonce lane with at most one bundle in "
+            "flight — for higher inclusion throughput. Every key must be a "
+            "distinct, funded EOA."
         ),
         nargs="?",
         default=_get_env_or_default("VOLTAIRE_BUNDLER_SECRET", None, str),

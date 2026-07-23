@@ -173,6 +173,13 @@ class BundlerManager:
         self.executor_pool: ExecutorPool | None = (
             ExecutorPool(executor_secrets) if executor_secrets else None
         )
+        # In-flight background send per lane index. A lane accepts a new
+        # shard only when its previous task is done — this is what keeps
+        # each EOA's sends strictly serial (nonce safety) now that lane
+        # submissions are detached from the tick. Entries are overwritten
+        # on re-dispatch; holding the reference also keeps the task from
+        # being garbage-collected mid-flight.
+        self._lane_send_tasks: dict[int, asyncio.Task[None]] = {}
 
     async def send_next_bundle(self) -> None:
         await self.update_send_queue_and_monitor_queue()
@@ -232,6 +239,11 @@ class BundlerManager:
                 user_operations_to_send_v6, self.local_mempool_manager_v6,
                 highest_verified_at_block_v6))
 
+        # Legacy (no pool): gather awaits the per-EP sends, blocking the tick
+        # until submission finishes. Pool mode: _build_send_tasks dispatched
+        # each lane's shard as a background task and returned [], so this
+        # gather is a no-op and the tick moves straight on to the next
+        # intake — lane submission latency no longer paces the loop.
         await asyncio.gather(*self._build_send_tasks(ep_jobs))
 
         useroperation_banning_ops = []
@@ -426,20 +438,25 @@ class BundlerManager:
             int,
         ]],
     ) -> list[Coroutine[Any, Any, None]]:
-        """Turn this tick's per-EP bundles into concurrent send coroutines.
+        """Turn this tick's per-EP bundles into send work.
 
         Without a shared executor pool: one send per EP from that EP's
-        primary EOA (the legacy path, unchanged).
+        primary EOA, returned as coroutines the tick awaits (the legacy
+        path, unchanged).
 
         With a shared executor pool: shard each EP's bundle by sender across
-        the pool's EOAs and submit the shards in parallel. Crucially, each EOA
-        is used at most ONCE per tick (``used_lanes``): every EOA has a single
-        nonce sequence, so two concurrent sends from the same EOA — e.g. a v7
-        and a v8 shard that happen to hash to it — would collide on its nonce.
-        Deferred ops (a shard whose EOA is already busy this tick) stay in the
-        monitor and are re-added on a later tick. In practice a sender belongs
-        to one entrypoint, so cross-EP collisions on a lane essentially never
-        happen; this is a safety guard, not a throughput cost.
+        the pool's EOAs and DISPATCH each shard as an independent background
+        task — the tick does not wait for submission, so a slow lane (e.g.
+        one climbing the fee-escalation ladder through several re-estimate +
+        resend rounds) delays only itself, never the tick loop or the other
+        lanes. Returns [] in this mode.
+
+        Per-lane serialization is the nonce-safety invariant: every EOA has a
+        single nonce sequence, so a lane accepts a new shard only when it is
+        free — not claimed by an earlier EP this tick and not still running a
+        send task from a previous tick. Deferred ops (shard landed on a busy
+        lane) stay in the monitor and are re-added to the mempool by the
+        stale-op sweep, exactly as before.
         """
         if self.executor_pool is None:
             return [
@@ -451,8 +468,7 @@ class BundlerManager:
             ]
 
         pool = self.executor_pool
-        used_lanes: set[int] = set()
-        tasks = []
+        claimed_lanes: set[int] = set()
         for ops, mempool, highest_block in ep_jobs:
             if len(ops) == 0:
                 continue
@@ -461,14 +477,34 @@ class BundlerManager:
                 lane_idx = pool.shard_for_sender(op.sender_address)
                 by_lane[lane_idx][op_hash] = op
             for lane_idx, sub_bundle in by_lane.items():
-                if lane_idx in used_lanes:
-                    continue  # EOA already sends a tx this tick — defer
-                used_lanes.add(lane_idx)
+                if lane_idx in claimed_lanes or self._lane_is_busy(lane_idx):
+                    continue  # EOA has a send in flight — defer this shard
+                claimed_lanes.add(lane_idx)
                 lane = pool.lanes[lane_idx]
-                tasks.append(self.send_bundle(
+                task = asyncio.create_task(self.send_bundle(
                     list(sub_bundle.values()), mempool, highest_block,
                     (lane.address, lane.private_key)))
-        return tasks
+                task.add_done_callback(self._log_lane_send_result)
+                self._lane_send_tasks[lane_idx] = task
+        return []
+
+    def _lane_is_busy(self, lane_idx: int) -> bool:
+        task = self._lane_send_tasks.get(lane_idx)
+        return task is not None and not task.done()
+
+    @staticmethod
+    def _log_lane_send_result(task: "asyncio.Task[None]") -> None:
+        # Background lane sends detach from the tick's exception path
+        # (execute_cron_job's try/except only covers awaited work), so an
+        # unlogged failure here would vanish silently. The lane itself
+        # recovers regardless: done() is True either way, so the next tick
+        # can dispatch to it, and the failed shard's ops come back through
+        # the monitor's stale-op re-add.
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logging.error("background lane bundle send failed", exc_info=exc)
 
     async def send_bundle(
         self,

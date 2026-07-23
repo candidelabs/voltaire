@@ -40,9 +40,14 @@ form a pool of bundler EOAs shared across all EntryPoints:
   `int(sender, 16) % N`. A given sender always maps to the same EOA, so its
   operations serialize on one nonce sequence and never race across EOAs, while
   different senders spread across the pool and submit in parallel.
-- **Nonce safety.** Each EOA is an independent nonce lane, and an EOA never
-  broadcasts more than one bundle per tick — so the shared pool can safely
-  serve every EntryPoint without nonce collisions.
+- **Nonce safety.** Each EOA is an independent nonce lane and never has more
+  than one bundle submission in flight — so the shared pool can safely serve
+  every EntryPoint without nonce collisions.
+- **Non-blocking submission.** Lane submissions run as background tasks,
+  decoupled from the bundling tick: a slow lane (e.g. one climbing the
+  fee-escalation ladder) delays only itself, never the intake loop or the
+  other lanes. A busy lane's next shard is deferred and re-added to the
+  mempool by the stale-op monitor.
 - **Sizing.** Roughly `N ≈ target_bundles_per_sec × inclusion_latency`. Every
   key must be a distinct EOA funded with native gas.
 
