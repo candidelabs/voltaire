@@ -93,7 +93,10 @@ async def check_deployed_simulations(
         address = DEPLOYED_SIMULATIONS_ADDRESSES[contract_name]
         try:
             result = await send_rpc_request_to_eth_client(
-                ethereum_node_urls, "eth_getCode", [address, "latest"]
+                ethereum_node_urls,
+                "eth_getCode",
+                [address, "latest"],
+                expected_key="result",
             )
             onchain_code = result.get("result")
         except Exception:
