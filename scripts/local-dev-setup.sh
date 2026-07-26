@@ -86,16 +86,16 @@ rpc() {
         -d "$1"
 }
 
-# Extract deploy data from deploy.js for a given EntryPoint version.
-# Usage: extract_deploy_data "v0.06" "entrypointDeployDataV6"
+# Extract deploy data from deploy.js for a given section marker.
+# Usage: extract_deploy_data "Entrypoint v0.06" "entrypointDeployDataV6"
 extract_deploy_data() {
-    local version_label="$1"
+    local marker="$1"
     local var_name="$2"
     python3 -c "
 import re
 with open('$PROJECT_DIR/scripts/deploy.js') as f:
     content = f.read()
-idx = content.find('Deploy Entrypoint $version_label')
+idx = content.find('Deploy $marker')
 section = content[idx:idx+200000]
 match = re.search(r'var $var_name\s*=\s*\"(0x[0-9a-fA-F]+)\"', section)
 print(match.group(1))
@@ -161,19 +161,19 @@ echo "Funded $BUNDLER_ADDRESS with 100 ETH"
 
 # ─── Deploy EntryPoint v0.6 ──────────────────────────────────
 echo "=== Deploying EntryPoint v0.6 ==="
-DEPLOY_DATA=$(extract_deploy_data "v0.06" "entrypointDeployDataV6")
+DEPLOY_DATA=$(extract_deploy_data "Entrypoint v0.06" "entrypointDeployDataV6")
 rpc "{\"jsonrpc\":\"2.0\",\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"$ANVIL_FUNDER\",\"to\":\"$DETERMINISTIC_FACTORY\",\"data\":\"$DEPLOY_DATA\",\"gas\":\"0x1C9C380\"}],\"id\":1}" > /dev/null
 echo "EntryPoint v0.6 deployed at $ENTRYPOINT_V06"
 
 # ─── Deploy EntryPoint v0.7 ──────────────────────────────────
 echo "=== Deploying EntryPoint v0.7 ==="
-DEPLOY_DATA=$(extract_deploy_data "v0.07" "entrypointDeployDataV7")
+DEPLOY_DATA=$(extract_deploy_data "Entrypoint v0.07" "entrypointDeployDataV7")
 rpc "{\"jsonrpc\":\"2.0\",\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"$ANVIL_FUNDER\",\"to\":\"$DETERMINISTIC_FACTORY\",\"data\":\"$DEPLOY_DATA\",\"gas\":\"0x1C9C380\"}],\"id\":1}" > /dev/null
 echo "EntryPoint v0.7 deployed at $ENTRYPOINT_V07"
 
 # ─── Deploy EntryPoint v0.8 ──────────────────────────────────
 echo "=== Deploying EntryPoint v0.8 ==="
-DEPLOY_DATA=$(extract_deploy_data "v0.08" "entrypointDeployDataV8")
+DEPLOY_DATA=$(extract_deploy_data "Entrypoint v0.08" "entrypointDeployDataV8")
 rpc "{\"jsonrpc\":\"2.0\",\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"$ANVIL_FUNDER\",\"to\":\"$DETERMINISTIC_FACTORY\",\"data\":\"$DEPLOY_DATA\",\"gas\":\"0x1C9C380\"}],\"id\":1}" > /dev/null
 echo "EntryPoint v0.8 deployed at $ENTRYPOINT_V08"
 
@@ -181,7 +181,7 @@ echo "EntryPoint v0.8 deployed at $ENTRYPOINT_V08"
 # v0.9 uses a vanity address on mainnet. We deploy via the factory (produces a
 # different address), then copy the runtime bytecode to the expected address.
 echo "=== Deploying EntryPoint v0.9 ==="
-DEPLOY_DATA=$(extract_deploy_data "v0.09" "entrypointDeployDataV9")
+DEPLOY_DATA=$(extract_deploy_data "Entrypoint v0.09" "entrypointDeployDataV9")
 rpc "{\"jsonrpc\":\"2.0\",\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"$ANVIL_FUNDER\",\"to\":\"$DETERMINISTIC_FACTORY\",\"data\":\"$DEPLOY_DATA\",\"gas\":\"0x1C9C380\"}],\"id\":1}" > /dev/null
 
 # Mine pending txs so all EntryPoints are available before continuing.
@@ -198,6 +198,19 @@ if [ ${#RUNTIME_CODE} -lt 10 ]; then
 fi
 rpc "{\"jsonrpc\":\"2.0\",\"method\":\"anvil_setCode\",\"params\":[\"$ENTRYPOINT_V09\",\"$RUNTIME_CODE\"],\"id\":1}" > /dev/null
 echo "EntryPoint v0.9 deployed at $ENTRYPOINT_V09 (via anvil_setCode)"
+
+# ─── Deploy EntryPoint simulation contracts ───────────────────
+# Pre-deploys the validation simulation contracts at their canonical CREATE2
+# addresses (see voltaire_bundler/utils/deployed_simulations.py) so the
+# bundler's boot check finds them and validation uses the small delegatecall
+# override instead of shipping the full runtime bytecode on every eth_call.
+echo "=== Deploying EntryPoint simulation contracts ==="
+for VERSION in V6 V7 V8 V9; do
+    DEPLOY_DATA=$(extract_deploy_data "EntryPointSimulations$VERSION" "simulationsDeployData$VERSION")
+    rpc "{\"jsonrpc\":\"2.0\",\"method\":\"eth_sendTransaction\",\"params\":[{\"from\":\"$ANVIL_FUNDER\",\"to\":\"$DETERMINISTIC_FACTORY\",\"data\":\"$DEPLOY_DATA\",\"gas\":\"0x989680\"}],\"id\":1}" > /dev/null
+done
+rpc '{"jsonrpc":"2.0","method":"anvil_mine","params":["0x4"],"id":1}' > /dev/null
+echo "Simulation contracts EntryPointSimulationsV6-V9 deployed"
 
 # ─── Deposit ETH into EntryPoints for bundler ──────────────────
 echo "=== Depositing 10 ETH into each EntryPoint for bundler ==="
