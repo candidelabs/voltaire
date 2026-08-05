@@ -1040,18 +1040,21 @@ async def get_init_data(args: Namespace) -> InitData:
     bundler_secrets_per_ep = await init_bundler_address_and_secret(
         args, ethereum_node_urls_rearranged[0])
 
+    # Derived URL lists default to the reachable-first rearranged
+    # ordering so every consumer (and the equality comparisons in
+    # main.py's health-check aggregation) sees one consistent list.
     if args.bundle_node_url is None:
-        bundle_node_urls = ethereum_node_urls
+        bundle_node_urls = ethereum_node_urls_rearranged
     else:
         bundle_node_urls = args.bundle_node_url.split(',')
 
     if args.ethereum_node_debug_trace_call_url is None:
-        ethereum_node_debug_trace_call_urls = ethereum_node_urls
+        ethereum_node_debug_trace_call_urls = ethereum_node_urls_rearranged
     else:
         ethereum_node_debug_trace_call_urls = args.ethereum_node_debug_trace_call_url.split(',')
 
     if args.ethereum_node_eth_get_logs_url is None:
-        ethereum_node_eth_get_logs_urls = ethereum_node_urls
+        ethereum_node_eth_get_logs_urls = ethereum_node_urls_rearranged
     else:
         ethereum_node_eth_get_logs_urls = args.ethereum_node_eth_get_logs_url.split(',')
 
@@ -1223,7 +1226,9 @@ async def get_init_data(args: Namespace) -> InitData:
     ret = InitData(
         args.rpc_url,
         args.rpc_port,
-        ethereum_node_urls,
+        # Reachable-first ordering so ExecutionEndpoint, the RPC server,
+        # and the health-check cron try the responsive node first.
+        ethereum_node_urls_rearranged,
         bundle_node_urls,
         bundler_secrets_per_ep,
         args.chain_id,
