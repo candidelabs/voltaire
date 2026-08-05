@@ -859,13 +859,19 @@ class ExecutionEndpoint(Endpoint):
             self.ethereum_node_urls, "eth_gasPrice", None, None, "result"
         )
 
+        # Computed once and reused below: this flag decides BOTH whether
+        # tasks_arr gets the priority-fee task AND whether tasks[1] is
+        # read after the gather — keeping the two in a single predicate
+        # makes the one-task case unable to index past the list.
+        skip_priority_fee = (
+            self.chain_id == 999 or self.chain_id == 998 or  # HyperEVM
+            self.chain_id == 42161 or self.chain_id == 421614  # Arbitrum
+        )
+
         tasks_arr = [max_fee_per_gas_op]
 
         # skip eth_maxPriorityFeePerGas on HyperEVM and Arbitrum
-        if not (
-            self.chain_id == 999 or self.chain_id == 998 or
-            self.chain_id == 42161 or self.chain_id == 421614
-        ):
+        if not skip_priority_fee:
             max_priority_fee_per_gas_op = send_rpc_request_to_eth_client(
                 self.ethereum_node_urls, "eth_maxPriorityFeePerGas", None, None, "result"
             )
@@ -877,10 +883,7 @@ class ExecutionEndpoint(Endpoint):
 
         # HyperEVM and Arbitrum: eth_maxPriorityFeePerGas was skipped above,
         # so tasks only has one element; default the priority fee to 0.
-        if (
-            self.chain_id == 999 or self.chain_id == 998 or
-            self.chain_id == 42161 or self.chain_id == 421614
-        ):
+        if skip_priority_fee:
             max_priority_fee_per_gas_with_buffer = "0x0"
         else:
             max_priority_fee_per_gas_hex = tasks[1]["result"]
