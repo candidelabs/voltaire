@@ -38,7 +38,7 @@ pytestmark = pytest.mark.skipif(
 TEST_PREFIX = "t_"
 
 
-@pytest_asyncio.fixture(scope="session", autouse=True)
+@pytest_asyncio.fixture(scope="session", autouse=True, loop_scope="session")
 async def _postgres_pool() -> "object":
     """Session-scoped pool init. Opens once per test session, tears
     down at the end. autouse so individual tests don't have to ask
@@ -74,7 +74,7 @@ async def _backdate(
         )
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 async def test_set_get_roundtrip() -> None:
     backend = await _make_backend()
     try:
@@ -91,7 +91,7 @@ async def test_set_get_roundtrip() -> None:
         await backend.close()
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 async def test_delete_via_none_payload() -> None:
     backend = await _make_backend()
     try:
@@ -103,7 +103,7 @@ async def test_delete_via_none_payload() -> None:
         await backend.close()
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 async def test_commit_batch_dedup_last_op_wins() -> None:
     """``commit_batch`` dedupes by key before issuing the executemany
     calls, so a single batch containing multiple ops for the same key
@@ -146,7 +146,7 @@ async def test_commit_batch_dedup_last_op_wins() -> None:
         await backend.close()
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 async def test_overwrite_refreshes_inserted_at() -> None:
     """Overwriting a key resets its inserted_at to now() so a
     frequently-touched key doesn't age out from its original
@@ -168,7 +168,7 @@ async def test_overwrite_refreshes_inserted_at() -> None:
         await backend.close()
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 async def test_load_recent_returns_oldest_first() -> None:
     """The cache's warmup relies on oldest-first ordering so the
     OrderedDict preserves disk FIFO order."""
@@ -182,7 +182,7 @@ async def test_load_recent_returns_oldest_first() -> None:
         await backend.close()
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 async def test_evict_expired_removes_old_rows() -> None:
     """Backdate a subset of rows past the TTL horizon and verify the
     DELETE picks them up while the fresh rows survive."""
@@ -199,7 +199,7 @@ async def test_evict_expired_removes_old_rows() -> None:
         await backend.close()
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 async def test_count_rows_uses_planner_stats() -> None:
     """count_rows reads pg_class.reltuples — the planner statistic
     refreshed by VACUUM/ANALYZE — so it's constant-time but stale
