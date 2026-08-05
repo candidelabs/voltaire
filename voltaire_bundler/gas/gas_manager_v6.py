@@ -24,7 +24,7 @@ MIN_CALL_GAS_LIMIT = 21_000
 
 class GasManagerV6(GasManager):
     ethereum_node_urls: list[str]
-    chain_id: str
+    chain_id: int
     bundler_address: Address
     is_legacy_mode: bool
     estimate_gas_with_override_enabled: bool

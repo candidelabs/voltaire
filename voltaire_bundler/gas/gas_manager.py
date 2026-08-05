@@ -19,7 +19,7 @@ from voltaire_bundler.utils.eth_client_utils import \
 
 class GasManager(ABC, Generic[UserOperationType]):
     ethereum_node_urls: list[str]
-    chain_id: str
+    chain_id: int
     bundler_address: Address
     is_legacy_mode: bool
     estimate_gas_with_override_enabled: bool
