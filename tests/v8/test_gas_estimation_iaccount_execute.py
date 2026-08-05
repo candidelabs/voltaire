@@ -263,8 +263,7 @@ async def test_execute_user_op_revert_at_max_raises_execution_exception():
             )
 
 
-@pytest.mark.asyncio
-async def test_execute_user_op_calldata_detected_correctly():
+def test_execute_user_op_calldata_detected_correctly():
     """
     Verify that the executeUserOp selector is correctly identified in UserOperation callData.
     The selector 0x8dd7712f corresponds to executeUserOp(PackedUserOperation,bytes32).
