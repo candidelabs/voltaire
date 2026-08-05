@@ -102,6 +102,10 @@ class PersistentFIFOCache:
     # all caches in one shot without threading them through every
     # constructor.
     _instances: list["PersistentFIFOCache"] = []
+    # Strong reference to the one-shot startup row-count reporter; the
+    # event loop holds tasks weakly, so without this the task could be
+    # garbage-collected mid-flight and the log lines silently vanish.
+    _log_disk_row_counts_task: "asyncio.Task[None] | None" = None
 
     def __init__(
         self,
@@ -350,9 +354,13 @@ class PersistentFIFOCache:
                 ", ".join(c.name for c in memory_only),
             )
 
-        asyncio.create_task(
+        task = asyncio.create_task(
             cls._log_disk_row_counts(persistent),
             name="cache-disk-row-count-report",
+        )
+        cls._log_disk_row_counts_task = task
+        task.add_done_callback(
+            lambda _: setattr(cls, "_log_disk_row_counts_task", None)
         )
 
     @classmethod
