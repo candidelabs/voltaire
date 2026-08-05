@@ -258,10 +258,21 @@ class GasPriceCache:
             asyncio.gather(*tasks), timeout=_REFRESH_TIMEOUT_SECONDS
         )
 
-        max_fee = int(results[0]["result"], 16)
-        priority: int | None = (
-            int(results[1]["result"], 16) if self._fetch_priority_fee else None
-        )
+        try:
+            max_fee = int(results[0]["result"], 16)
+            priority: int | None = (
+                int(results[1]["result"], 16)
+                if self._fetch_priority_fee else None
+            )
+        except (ValueError, TypeError) as exc:
+            # TypeError covers JSON null / bare numbers in "result";
+            # ValueError covers non-hex garbage. Either way the bare
+            # int() message doesn't say what produced it.
+            raise ValueError(
+                "GasPriceCache: eth node returned a malformed gas-price "
+                "response (eth_gasPrice / eth_maxPriorityFeePerGas): "
+                f"{results!r}"
+            ) from exc
 
         self._snapshot = GasPriceSnapshot(
             max_fee_per_gas=max_fee,
