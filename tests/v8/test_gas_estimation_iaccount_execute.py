@@ -110,7 +110,7 @@ def _make_estimate_revert_at_max(revert_data: bytes) -> dict:
 def _make_gas_manager() -> GasManagerV7V8V9:
     return GasManagerV7V8V9(
         ethereum_node_urls=["http://localhost:8545"],
-        chain_id="11155111",
+        chain_id=11155111,
         bundler_address=BUNDLER_ADDRESS,
         is_legacy_mode=False,
         max_verification_gas=1_000_000,
