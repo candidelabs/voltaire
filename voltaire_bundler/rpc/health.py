@@ -82,7 +82,19 @@ async def _check_single_bundler_balance(
         return False, {"status": "ERROR", "message": error_message}
 
     bundler_balance = bundler_balance_res["result"]
-    if int(bundler_balance, 16) >= min_balance:
+    try:
+        bundler_balance_int = int(bundler_balance, 16)
+    except (ValueError, TypeError):
+        # A misbehaving node can put anything in "result" (null, a number,
+        # non-hex garbage); treat it as a failed check instead of letting
+        # the exception kill the health-check cron loop.
+        error_message = (
+            f"eth_getBalance returned malformed balance "
+            f"{bundler_balance!r} from {ethereum_node_url}"
+        )
+        logging.critical(error_message)
+        return False, {"status": "ERROR", "message": error_message}
+    if bundler_balance_int >= min_balance:
         return True, {
             "status": "OK",
             "message": (
