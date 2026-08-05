@@ -158,7 +158,11 @@ async def main(cmd_args=sys.argv[1:], loop=None) -> None:
             # first userop never waits on this task.
             task_group.create_task(init_data.gas_price_cache.run())
 
-            node_urls_to_check = init_data.ethereum_node_urls
+            # Copy, don't alias: += on the shared list would mutate
+            # init_data.ethereum_node_urls (already handed to
+            # ExecutionEndpoint and GasPriceCache) and corrupt the
+            # second != comparison below.
+            node_urls_to_check = list(init_data.ethereum_node_urls)
             if init_data.ethereum_node_urls != init_data.ethereum_node_debug_trace_call_urls:
                 node_urls_to_check += init_data.ethereum_node_debug_trace_call_urls
             if init_data.ethereum_node_urls != init_data.ethereum_node_eth_get_logs_urls:
