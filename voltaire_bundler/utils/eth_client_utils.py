@@ -203,14 +203,19 @@ async def send_rpc_request_to_eth_client(
                     )
                     await asyncio.sleep(1)
                     continue
-                elif expected_key is not None and expected_key not in json_result:
-                    logging.error(
-                        f"Attempt No. {i+1} to call node rpc failed."
-                        f"the request: {str(json_request)}"
-                        f"as the key {expected_key} is not in the result: {str(json_result)}"
-                    )
-                    await asyncio.sleep(1)
-                    continue
+            # Checked independently of the "error" branch: a response
+            # carrying neither "error" nor the expected key (flaky
+            # proxies, load balancers returning bare {"jsonrpc","id"})
+            # must retry too, not be returned for the caller to
+            # KeyError on.
+            if expected_key is not None and expected_key not in json_result:
+                logging.error(
+                    f"Attempt No. {i+1} to call node rpc failed."
+                    f"the request: {str(json_request)}"
+                    f"as the key {expected_key} is not in the result: {str(json_result)}"
+                )
+                await asyncio.sleep(1)
+                continue
             return json_result
     raise ValueError("Failed rpc request to rpc node client")
 
