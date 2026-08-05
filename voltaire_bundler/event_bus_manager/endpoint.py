@@ -360,10 +360,26 @@ class Client:
             filepath = "p2p_endpoint.ipc"
             try:
                 _, writer = await asyncio.open_unix_connection(filepath)
-            except ConnectionRefusedError:
+            except (ConnectionRefusedError, FileNotFoundError):
+                # FileNotFoundError: the p2p process unlinks its socket
+                # file on shutdown — same best-effort contract as the
+                # refused case (and as the Windows branch above).
                 return
 
-        await _broadcast(request_event, writer)
+        try:
+            await _broadcast(request_event, writer)
+        except OSError:
+            # Same contract as the connect failures above: this is a
+            # fire-and-forget path, so the p2p endpoint going away
+            # mid-send (ConnectionResetError / BrokenPipeError) must
+            # not disturb the caller.
+            pass
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
 
 
 async def _listen(
