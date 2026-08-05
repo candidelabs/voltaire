@@ -88,6 +88,14 @@ BATCH_MAX = 100              # max writes coalesced into one backend commit
 QUEUE_MAX = 10_000           # max disk-writes queued before we drop-oldest
 EVICT_EVERY_N_WRITES = 1000  # how often the writer task prunes excess rows
 
+# Upper bound on how long aclose() waits for queued disk writes to
+# flush. Even with the backend's per-query command_timeout, a full
+# queue (QUEUE_MAX / BATCH_MAX batches) against a slow Postgres could
+# otherwise stretch shutdown into minutes. Writes still pending when
+# the bound expires are lost — logged as data loss, consistent with
+# every other drop path in this module.
+SHUTDOWN_DRAIN_TIMEOUT_S = 30.0
+
 
 class PersistentFIFOCache:
     # Process-wide registry so the bundler entry point can start/stop
@@ -193,8 +201,7 @@ class PersistentFIFOCache:
         if not self._started:
             return
         if self._write_queue is not None:
-            # Wait for all enqueued writes to flush.
-            await self._write_queue.join()
+            await self._drain_write_queue()
         if self._writer_task is not None:
             self._writer_task.cancel()
             try:
@@ -209,6 +216,27 @@ class PersistentFIFOCache:
                 logger.exception("cache %s: backend close failed", self.name)
             self._backend = None
         self._started = False
+
+    async def _drain_write_queue(self) -> None:
+        """Wait for all enqueued disk writes to flush, but never hang
+        shutdown on a slow or dead backend."""
+        assert self._write_queue is not None
+        try:
+            async with asyncio.timeout(SHUTDOWN_DRAIN_TIMEOUT_S):
+                await self._write_queue.join()
+        except TimeoutError:
+            # qsize() misses the batch the writer already popped and
+            # is stuck committing, so the true loss can exceed the
+            # reported count by up to BATCH_MAX.
+            logger.error(
+                "CACHE DATA LOSS — cache %s: shutdown drain timed "
+                "out after %ss with %d writes still queued (plus up "
+                "to one in-flight batch); those writes are lost and "
+                "the userop history they held is not reproducible "
+                "from a non-archival node.",
+                self.name, SHUTDOWN_DRAIN_TIMEOUT_S,
+                self._write_queue.qsize(),
+            )
 
     @classmethod
     def apply_capacity_settings(
