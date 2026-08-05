@@ -53,6 +53,17 @@ DEFAULT_REFRESH_INTERVAL_SECONDS = 1.0
 # also disables the call (handled at construction time).
 _CHAINS_WITHOUT_PRIORITY_FEE: frozenset[int] = frozenset({999, 998})
 
+# Hard deadline for one refresh's RPC fetch. send_rpc_request_to_eth_client
+# bounds each HTTP attempt at 60 s but internally retries up to 60 times, so
+# against a dead upstream a single call can block for ~an hour. Every
+# _refresh runs while holding self._lock, so without this cap a hung node
+# would pin the lock and stall every stale-snapshot reader behind it (until
+# their own IPC request timeouts fire). eth_gasPrice normally answers in
+# milliseconds; 15 s is generous headroom while keeping lock holds short —
+# the background loop retries next tick and the get_snapshot fallback
+# surfaces the timeout to its caller, both of which fail fast by design.
+_REFRESH_TIMEOUT_SECONDS = 15.0
+
 
 @dataclass(frozen=True)
 class GasPriceSnapshot:
@@ -218,8 +229,10 @@ class GasPriceCache:
                 # guard in ``get_snapshot`` will trigger a synchronous retry
                 # the next time a consumer reads, and that path will surface
                 # the error to its caller.
+                # %r, not %s: str(TimeoutError()) is an empty string, which
+                # would log the deadline-exceeded case with no reason at all.
                 logging.warning(
-                    "GasPriceCache background refresh failed: %s", exc
+                    "GasPriceCache background refresh failed: %r", exc
                 )
 
     def stop(self) -> None:
@@ -241,7 +254,9 @@ class GasPriceCache:
                 "eth_maxPriorityFeePerGas",
                 None, None, "result",
             ))
-        results = await asyncio.gather(*tasks)
+        results = await asyncio.wait_for(
+            asyncio.gather(*tasks), timeout=_REFRESH_TIMEOUT_SECONDS
+        )
 
         max_fee = int(results[0]["result"], 16)
         priority: int | None = (
