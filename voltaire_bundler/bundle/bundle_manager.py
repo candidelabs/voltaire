@@ -6,14 +6,6 @@ import logging
 import math
 from typing import cast
 
-# Per-userop floor on "old enough to be worth checking for inclusion".
-# Below this age the userop almost certainly hasn't been mined yet, so
-# the coalesced eth_getLogs would return no useful new data. Applied
-# per EP: a monitor set with no userop past this age skips its sweep
-# this tick. Short-circuits on the first match, so even a large monitor
-# set with a few stale entries returns immediately.
-MIN_INCLUSION_CHECK_AGE_S = 2.0
-
 from eth_account import Account
 from eth_abi import encode
 
@@ -41,6 +33,14 @@ from voltaire_bundler.utils.eth_client_utils import \
 from voltaire_bundler.utils.load_bytecode import load_bytecode
 
 from ..mempool.reputation_manager import ReputationManager
+
+# Per-userop floor on "old enough to be worth checking for inclusion".
+# Below this age the userop almost certainly hasn't been mined yet, so
+# the coalesced eth_getLogs would return no useful new data. Applied
+# per EP: a monitor set with no userop past this age skips its sweep
+# this tick. Short-circuits on the first match, so even a large monitor
+# set with a few stale entries returns immediately.
+MIN_INCLUSION_CHECK_AGE_S = 2.0
 
 
 async def _warm_inclusion_caches(
