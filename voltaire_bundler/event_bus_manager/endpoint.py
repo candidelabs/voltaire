@@ -244,34 +244,54 @@ class Client:
         async with self._connect_lock:
             if self._writer is not None and not self._writer.is_closing():
                 return
+            # A previous connection's reader task may still be alive (e.g.
+            # request() tore down after a write error while the reader was
+            # blocked on the dead stream). Cancel it so it can't run its own
+            # teardown against the connection we're about to create.
+            if self._reader_task is not None:
+                self._reader_task.cancel()
+                self._reader_task = None
             if IS_WINDOWS:
                 port_filepath = self.server_id + ".port"
                 with open(port_filepath, 'r') as f:
                     port = int(f.read().strip())
-                self._reader, self._writer = await asyncio.open_connection(
+                reader, writer = await asyncio.open_connection(
                         '127.0.0.1', port)
             else:
                 filepath = self.server_id + ".ipc"
-                self._reader, self._writer = await asyncio.open_unix_connection(
+                reader, writer = await asyncio.open_unix_connection(
                         filepath)
-            self._reader_task = asyncio.create_task(self._read_loop())
+            self._reader, self._writer = reader, writer
+            self._reader_task = asyncio.create_task(self._read_loop(reader))
 
-    async def _read_loop(self) -> None:
-        assert self._reader is not None
+    async def _read_loop(self, reader: asyncio.StreamReader) -> None:
+        # The stream is passed in (rather than read from self._reader) so a
+        # task that outlives its connection keeps reading its own dead stream
+        # instead of stealing frames from a reconnected one.
         try:
             while True:
-                envelope = await _listen(self._reader)
+                envelope = await _listen(reader)
                 req_id = envelope.get("id")
                 fut = self._pending.pop(req_id, None)
                 if fut is not None and not fut.done():
                     fut.set_result(envelope["payload"])
         except (asyncio.IncompleteReadError, OSError) as exc:
-            self._teardown(exc)
+            # Only tear down if we're still the active connection; a stale
+            # task waking up after a reconnect must not close the new one.
+            if self._reader is reader:
+                self._teardown(exc)
         except Exception as exc:
             logging.exception("IPC client read loop crashed for %s", self.server_id)
-            self._teardown(exc)
+            if self._reader is reader:
+                self._teardown(exc)
 
     def _teardown(self, exc: BaseException) -> None:
+        task = self._reader_task
+        self._reader_task = None
+        # Don't cancel ourselves when teardown runs inside the reader task's
+        # own exception handler — it's about to exit anyway.
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
         if self._writer is not None:
             try:
                 self._writer.close()
