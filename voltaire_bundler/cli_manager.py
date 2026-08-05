@@ -154,11 +154,19 @@ def positive_float(value):
 
 def str_to_bool(value: str | bool) -> bool:
     # argparse's built-in type=bool treats every non-empty string as True
-    # (so `--disable_p2p false` would silently disable nothing). Match the
-    # env-var lambda convention: only "true" (case-insensitive) is true.
+    # (so `--disable_p2p false` would silently disable nothing). Accept
+    # the conventional spellings and reject anything else loudly — a
+    # typo like "treu" must fail startup, not silently mean False.
     if isinstance(value, bool):
         return value
-    return str(value).lower() == "true"
+    lowered = str(value).strip().lower()
+    if lowered in ("true", "1", "yes", "y", "on"):
+        return True
+    if lowered in ("false", "0", "no", "n", "off"):
+        return False
+    raise ArgumentTypeError(
+        f"invalid boolean value: {value!r} (use true/false)"
+    )
 
 
 def rpc_path(value: str):
