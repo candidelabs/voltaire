@@ -568,6 +568,29 @@ def del_user_operation_logs_cache_entry(
     )
 
 
+def del_transaction_caches_entries(transaction_hash: str) -> None:
+    """Drop the transactions_cache and transaction_receipts_cache entries
+    for a tx hash whose block was reorged out. Both caches are persistent
+    and never revalidate, and after a reorg the same tx hash is typically
+    re-mined into a new block — without this eviction, later receipt /
+    by-hash lookups would pair fresh logs with the orphaned block's cached
+    transaction data forever. Called together with
+    del_user_operation_logs_cache_entry so all three caches drop the
+    stale state as one unit."""
+    transactions_cache.delete(transaction_hash)
+    transaction_receipts_cache.delete(transaction_hash)
+
+
+def _del_transaction_caches_for_logs(stale_logs: list) -> None:
+    """Evict the tx caches for every transaction hash referenced by a
+    dropped (reorged-out) cached log set."""
+    for stale_log in stale_logs:
+        if isinstance(stale_log, dict):
+            stale_tx_hash = stale_log.get("transactionHash")
+            if isinstance(stale_tx_hash, str):
+                del_transaction_caches_entries(stale_tx_hash)
+
+
 USER_OPERATION_EVENT_DESCRIPTOR = (
     "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
 )
@@ -722,8 +745,12 @@ async def get_user_operation_logs_for_block_range(
             return cached
         # Cached block was reorged out (or revalidation failed). Drop the
         # entry so we don't keep serving stale data, then fall through to
-        # the fresh eth_getLogs path below.
+        # the fresh eth_getLogs path below. Also drop the tx caches keyed
+        # by the orphaned logs' transaction hash(es) — a re-mined tx keeps
+        # its hash, and a surviving receipt/transaction entry would keep
+        # serving the orphaned block's data.
         user_operation_logs_cache.delete(cache_key)
+        _del_transaction_caches_for_logs(cached)
 
     # If the caller asked for the whole chain, first probe the last
     # ``earliest_fallback_recent_window`` blocks — that covers the

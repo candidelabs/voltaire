@@ -7,6 +7,7 @@ from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.user_operation_handler import (
     HANDLE_OPS_SELECTOR_V7V8V9,
     UserOperationHandler,
+    del_transaction_caches_entries,
     del_user_operation_logs_cache_entry,
     get_transaction_by_hash,
 )
@@ -84,6 +85,10 @@ class UserOperationHandlerV7V8V9(UserOperationHandler):
                 f"for user operation hash: {user_operation_hash}. Retrying."
             )
             del_user_operation_logs_cache_entry(user_operation_hash, entrypoint)
+            # Evict all three caches together: a stale receipt cached for
+            # the vanished tx would otherwise pair orphaned block data with
+            # the refetched logs.
+            del_transaction_caches_entries(transaction_hash)
             event_log_info = await self.get_user_operation_event_log_info(
                 user_operation_hash, entrypoint, validated_at_block_hex
             )
