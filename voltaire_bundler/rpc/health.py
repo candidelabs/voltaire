@@ -71,7 +71,7 @@ async def _check_single_bundler_balance(
     except Exception:
         error_message = (
             f"Error when connecting to Eth node {ethereum_node_url} "
-            f"for eth_getBalance"
+            "for eth_getBalance"
         )
         logging.critical(error_message)
         return False, {"status": "ERROR", "message": error_message}
@@ -89,7 +89,7 @@ async def _check_single_bundler_balance(
         # non-hex garbage); treat it as a failed check instead of letting
         # the exception kill the health-check cron loop.
         error_message = (
-            f"eth_getBalance returned malformed balance "
+            "eth_getBalance returned malformed balance "
             f"{bundler_balance!r} from {ethereum_node_url}"
         )
         logging.critical(error_message)
