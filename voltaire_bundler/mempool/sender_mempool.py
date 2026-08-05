@@ -85,12 +85,12 @@ class SenderMempool:
             raise ValidationException(
                 ValidationExceptionCode.InvalidFields,
                 (
-                    f"invalid UserOperation struct/fields: a UserOperation with nonce "
+                    "invalid UserOperation struct/fields: a UserOperation with nonce "
                     f"{hex(new_user_operation.nonce)} is already in the mempool for sender "
                     f"{self.address} (maxFeePerGas: {hex(existing_operation.max_fee_per_gas)}, "
                     f"maxPriorityFeePerGas: {hex(existing_operation.max_priority_fee_per_gas)}). "
-                    f"Wait for it to be included onchain; only resend if it fails. "
-                    f"To replace it, resubmit with both maxFeePerGas and maxPriorityFeePerGas "
+                    "Wait for it to be included onchain; only resend if it fails. "
+                    "To replace it, resubmit with both maxFeePerGas and maxPriorityFeePerGas "
                     f"at least {MIN_PRICE_BUMP}% higher."
                 ),
             )
