@@ -103,7 +103,8 @@ async def check_deployed_simulations(
             logging.warning(
                 f"eth_getCode failed while checking if {contract_name} is "
                 f"deployed at {address} - falling back to the full bytecode "
-                "state override for validation."
+                "state override for validation.",
+                exc_info=True,
             )
             continue
 
