@@ -69,7 +69,7 @@ class ValidationManagerV6(ValidationManager):
         self,
         user_operation: UserOperationV6,
         entrypoint: str,
-        block_number: str,
+        block_number: str | None,
         min_block_number: str | None,
         min_stake: int,
         min_unstake_delay: int,
@@ -297,7 +297,7 @@ class ValidationManagerV6(ValidationManager):
         self,
         user_operation: UserOperationV6,
         entrypoint: str,
-        block_number: str,
+        block_number: str | None,
         min_block_number: str | None = None
     ) -> str:
         call_data = ValidationManagerV6.encode_simulate_validation_calldata(
