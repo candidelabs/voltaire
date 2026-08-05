@@ -129,6 +129,41 @@ async def test_tolerance_10_at_90pct_passes():
 
 
 @pytest.mark.asyncio
+async def test_tolerance_10_ceil_boundary_passes():
+    """Fractional threshold: 100_001 * 0.9 = 90_000.9 -> ceil = 90_001.
+    Pins the rounding direction — floor/int would accept 90_000."""
+    gm = _make_gas_manager()
+    user_op = _make_user_operation(90_001)
+
+    with patch.object(
+        gm, "get_preverification_gas",
+        new_callable=AsyncMock,
+        return_value=100_001,
+    ):
+        await gm.verify_preverification_gas_and_verification_gas_limit(
+            user_op, ENTRYPOINT, 10
+        )
+
+
+@pytest.mark.asyncio
+async def test_tolerance_10_ceil_boundary_rejects():
+    """Fractional threshold: 90_000 sits below ceil(90_000.9) and must
+    reject."""
+    gm = _make_gas_manager()
+    user_op = _make_user_operation(90_000)
+
+    with patch.object(
+        gm, "get_preverification_gas",
+        new_callable=AsyncMock,
+        return_value=100_001,
+    ):
+        with pytest.raises(ValidationException):
+            await gm.verify_preverification_gas_and_verification_gas_limit(
+                user_op, ENTRYPOINT, 10
+            )
+
+
+@pytest.mark.asyncio
 async def test_tolerance_10_below_90pct_rejects():
     """Tolerance 10 (default): below 90% of expected should reject."""
     gm = _make_gas_manager()
