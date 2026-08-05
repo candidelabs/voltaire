@@ -63,11 +63,21 @@ class PostgresConfig:
     ownership for ops (decommissioning, autovacuum tuning, disk
     attribution). Override at construction time if you need
     different scoping (e.g. multi-tenant), or set to an empty string
-    for a dedicated single-purpose database."""
+    for a dedicated single-purpose database.
+
+    ``command_timeout`` bounds every query issued through the pool
+    (seconds). Cache queries are all single-key lookups or small
+    batched writes that normally answer in milliseconds; without a
+    bound, a hung Postgres connection (network partition, TCP black
+    hole) would block cache reads on the RPC path — and shutdown
+    draining — indefinitely. On expiry asyncpg raises TimeoutError,
+    which ``PostgresBackend._wrap`` converts to CacheBackendError so
+    the cache layer soft-fails to memory-only."""
     url: str
     min_pool_size: int = 1
     max_pool_size: int = 10
     table_prefix: str = "voltaire_cache_"
+    command_timeout: float = 10.0
 
 
 class CacheBackend(abc.ABC):
@@ -145,6 +155,7 @@ async def init_postgres_pool(config: PostgresConfig) -> None:
                 dsn=config.url,
                 min_size=config.min_pool_size,
                 max_size=config.max_pool_size,
+                command_timeout=config.command_timeout,
             )
         except Exception as exc:
             raise CacheBackendError(
@@ -390,8 +401,15 @@ class PostgresBackend(CacheBackend):
         return result or 0
 
     def _wrap(self, exc: Exception, op: str) -> Exception:
-        if asyncpg is not None and isinstance(
-            exc, (asyncpg.PostgresError, asyncpg.InterfaceError),
+        # TimeoutError covers the pool's command_timeout expiring
+        # (asyncio.TimeoutError is an alias since 3.11). It must
+        # become CacheBackendError so the cache layer's soft-fail
+        # paths catch it instead of the timeout leaking into RPC
+        # handlers.
+        if isinstance(exc, TimeoutError) or (
+            asyncpg is not None and isinstance(
+                exc, (asyncpg.PostgresError, asyncpg.InterfaceError),
+            )
         ):
             return CacheBackendError(
                 f"postgres {op} on {self._table} failed: "
