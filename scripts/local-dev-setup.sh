@@ -12,7 +12,7 @@
 # Postgres container and wires the bundler's persistent cache to it.
 #
 # Usage:
-#   ./scripts/local-dev-setup.sh                 # SQLite (memory-only by default)
+#   ./scripts/local-dev-setup.sh                 # memory-only caches (no persistence)
 #   ./scripts/local-dev-setup.sh --with-postgres # Postgres-backed persistent cache
 #
 # Environment variables (all optional):
@@ -68,8 +68,12 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 cleanup() {
     echo ""
     echo "Shutting down..."
-    kill "$ANVIL_PID" 2>/dev/null || true
-    kill "$BUNDLER_PID" 2>/dev/null || true
+    # The trap is registered before anvil/the bundler launch; under
+    # set -u an early Ctrl-C would abort cleanup() on the unbound PID
+    # expansion and never reach the container stop below. Guard each
+    # kill on its PID actually having been set.
+    [ -n "${ANVIL_PID:-}" ] && kill "$ANVIL_PID" 2>/dev/null || true
+    [ -n "${BUNDLER_PID:-}" ] && kill "$BUNDLER_PID" 2>/dev/null || true
     if [ "$WITH_POSTGRES" = "1" ]; then
         # Leave the container's data intact so a re-run picks up the
         # warm cache. Operators who want a clean slate can
