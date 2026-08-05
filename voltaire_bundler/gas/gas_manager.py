@@ -110,16 +110,21 @@ class GasManager(ABC, Generic[UserOperationType]):
         entrypoint: str,
         enforce_pre_verification_gas_tolerance: int = 0,
     ) -> None:
-        expected_preverification_gas = await self.get_preverification_gas(
-            user_operation,
-            entrypoint,
-        )
-
-        min_preverification_gas = math.ceil(
-            expected_preverification_gas * (1 - (enforce_pre_verification_gas_tolerance / 100))
-        )
-
+        # Tolerance >= 100 disables the check entirely, so skip the
+        # expected-PVG lookup too — on OP-stack and Arbitrum chains it
+        # costs a live gas-oracle eth_call per userop. Mirrors the
+        # early-out in verify_gas_fees_and_get_price.
         if enforce_pre_verification_gas_tolerance < 100:
+            expected_preverification_gas = await self.get_preverification_gas(
+                user_operation,
+                entrypoint,
+            )
+
+            min_preverification_gas = math.ceil(
+                expected_preverification_gas
+                * (1 - (enforce_pre_verification_gas_tolerance / 100))
+            )
+
             if user_operation.pre_verification_gas < min_preverification_gas:
                 raise ValidationException(
                     ValidationExceptionCode.InvalidFields,
