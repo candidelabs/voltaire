@@ -146,6 +146,11 @@ class BundlerManager:
         self.bundles_to_send_v9 = []
         self.bundles_to_send_v8 = []
         self.bundles_to_send_v7 = []
+        # Strong references to fire-and-forget inclusion-cache warmup
+        # tasks; the event loop holds tasks weakly, so without this a
+        # warmup could be garbage-collected mid-flight (and, being
+        # deduped via seen_warmup_tx_hashes, never retried).
+        self._warmup_tasks: set[asyncio.Task] = set()
         if self.local_mempool_manager_v6 is None:
             self.bundles_to_send_v6 = None
         else:
@@ -862,12 +867,16 @@ class BundlerManager:
                 tx_hash = log_entry.get("transactionHash")
                 if tx_hash and tx_hash not in seen_warmup_tx_hashes:
                     seen_warmup_tx_hashes.add(tx_hash)
-                    asyncio.create_task(
+                    warmup_task = asyncio.create_task(
                         _warm_inclusion_caches(
                             self.ethereum_node_urls,
                             local_mempool.user_operation_handler,
                             tx_hash,
                         )
+                    )
+                    self._warmup_tasks.add(warmup_task)
+                    warmup_task.add_done_callback(
+                        self._warmup_tasks.discard
                     )
             elif user_operation.number_of_add_to_mempool_attempts > 20:
                 logging.warning(
