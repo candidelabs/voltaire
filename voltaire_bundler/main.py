@@ -8,7 +8,6 @@ import platform
 if platform.system() != "Windows":
     import uvloop
 from voltaire_bundler.execution_endpoint import ExecutionEndpoint
-from voltaire_bundler.mempool.mempool_info import DEFAULT_MEMPOOL_INFO
 from voltaire_bundler.metrics.metrics import run_metrics_server
 from voltaire_bundler.p2p_boot import p2p_boot
 from voltaire_bundler.rpc.health import periodic_health_check_cron_job
