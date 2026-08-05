@@ -636,6 +636,17 @@ class PersistentFIFOCache:
         self, batch: list[tuple[str, Any]],
     ) -> None:
         if self._backend is None:
+            # Reached when a read-path failure disabled the disk tier
+            # while batches were still queued. The drop was already
+            # happening; log it like every other data-loss path so
+            # operators can size the outage instead of guessing.
+            logger.error(
+                "CACHE DATA LOSS — cache %s: disk tier already "
+                "disabled; dropping a queued batch of %d writes. The "
+                "userop history in the dropped batch is not "
+                "reproducible from a non-archival node.",
+                self.name, len(batch),
+            )
             return
         # Encode in the cache layer; the backend stores opaque bytes.
         encoded: list[tuple[str, bytes | None]] = []
