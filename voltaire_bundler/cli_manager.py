@@ -1071,7 +1071,18 @@ async def get_init_data(args: Namespace) -> InitData:
     else:
         flashbots_protect_node_urls = None
 
-    if bundle_node_urls != ethereum_node_urls:
+    # These three gates ask "did the operator supply a genuinely
+    # different URL list that needs its own chain-id validation?".
+    # Defaulted lists alias ethereum_node_urls_rearranged, so compare
+    # against the rearranged list (and against the original ordering,
+    # so an explicitly-supplied list equal to the configured one keeps
+    # skipping) — comparing only against the original made every gate
+    # fire spuriously whenever startup probing reordered the nodes,
+    # re-probing a dead node up to three more times.
+    if (
+        bundle_node_urls != ethereum_node_urls_rearranged
+        and bundle_node_urls != ethereum_node_urls
+    ):
         ethereum_node_debug_chain_id_hex, _ = (
             await check_and_rearrange_valid_ethereum_rpc_nodes_and_get_chain_id(
                 bundle_node_urls
@@ -1084,7 +1095,10 @@ async def get_init_data(args: Namespace) -> InitData:
             )
             sys.exit(1)
 
-    if ethereum_node_debug_trace_call_urls != ethereum_node_urls:
+    if (
+        ethereum_node_debug_trace_call_urls != ethereum_node_urls_rearranged
+        and ethereum_node_debug_trace_call_urls != ethereum_node_urls
+    ):
         ethereum_node_debug_chain_id_hex, _ = (
             await check_and_rearrange_valid_ethereum_rpc_nodes_and_get_chain_id(
                 ethereum_node_debug_trace_call_urls
@@ -1097,7 +1111,10 @@ async def get_init_data(args: Namespace) -> InitData:
             )
             sys.exit(1)
 
-    if ethereum_node_eth_get_logs_urls != ethereum_node_urls:
+    if (
+        ethereum_node_eth_get_logs_urls != ethereum_node_urls_rearranged
+        and ethereum_node_eth_get_logs_urls != ethereum_node_urls
+    ):
         eth_get_logs_url_chain_id_hex, _ = (
             await check_and_rearrange_valid_ethereum_rpc_nodes_and_get_chain_id(
                 ethereum_node_eth_get_logs_urls
