@@ -15,12 +15,28 @@ from voltaire_bundler.user_operation.user_operation_v7v8v9 import (
 )
 from voltaire_bundler.gas.gas_manager_v7v8v9 import GasManagerV7V8V9
 from voltaire_bundler.gas.gas_price_cache import GasPriceCache
-from voltaire_bundler.bundle.exceptions import ValidationException
+from voltaire_bundler.bundle.exceptions import (
+    ValidationException,
+    ValidationExceptionCode,
+)
 
 
 ENTRYPOINT = "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
 BUNDLER_ADDRESS = "0x0000000000000000000000000000000000000001"
 EXPECTED_PREVERIFICATION_GAS = 100_000
+
+
+def _assert_pvg_rejection(excinfo) -> None:
+    """The function under test has two raise sites (preVerificationGas
+    floor and verification_gas_limit cap), both ValidationException with
+    InvalidFields. Pin the rejection to the preVerificationGas check so
+    a helper/cap change can't silently flip which one fires. str(exc)
+    is empty for this dataclass exception, so pytest.raises(match=...)
+    can't be used — assert on the fields instead."""
+    assert "preVerificationGas is too low" in excinfo.value.message
+    assert (
+        excinfo.value.exception_code == ValidationExceptionCode.InvalidFields
+    )
 
 
 def _make_gas_manager() -> GasManagerV7V8V9:
@@ -90,10 +106,11 @@ async def test_tolerance_0_below_rejects():
         new_callable=AsyncMock,
         return_value=EXPECTED_PREVERIFICATION_GAS,
     ):
-        with pytest.raises(ValidationException):
+        with pytest.raises(ValidationException) as excinfo:
             await gm.verify_preverification_gas_and_verification_gas_limit(
                 user_op, ENTRYPOINT, 0
             )
+    _assert_pvg_rejection(excinfo)
 
 
 @pytest.mark.asyncio
@@ -157,10 +174,11 @@ async def test_tolerance_10_ceil_boundary_rejects():
         new_callable=AsyncMock,
         return_value=100_001,
     ):
-        with pytest.raises(ValidationException):
+        with pytest.raises(ValidationException) as excinfo:
             await gm.verify_preverification_gas_and_verification_gas_limit(
                 user_op, ENTRYPOINT, 10
             )
+    _assert_pvg_rejection(excinfo)
 
 
 @pytest.mark.asyncio
@@ -174,10 +192,11 @@ async def test_tolerance_10_below_90pct_rejects():
         new_callable=AsyncMock,
         return_value=EXPECTED_PREVERIFICATION_GAS,
     ):
-        with pytest.raises(ValidationException):
+        with pytest.raises(ValidationException) as excinfo:
             await gm.verify_preverification_gas_and_verification_gas_limit(
                 user_op, ENTRYPOINT, 10
             )
+    _assert_pvg_rejection(excinfo)
 
 
 @pytest.mark.asyncio
