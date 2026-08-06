@@ -338,6 +338,14 @@ class Client:
                 # itself is still healthy.
                 self._pending.pop(req_id, None)
                 raise
+            except asyncio.CancelledError:
+                # Caller was cancelled while awaiting (client disconnect,
+                # task-group teardown). Without this arm the req_id entry
+                # would strand in _pending forever whenever the response
+                # never arrives — cancellation bypasses the timeout arm's
+                # cleanup. Drop it and propagate the cancellation.
+                self._pending.pop(req_id, None)
+                raise
         # Unreachable — the loop either returns or raises.
         raise RuntimeError("unreachable")
 
