@@ -355,6 +355,13 @@ class Client:
                 if attempt == 0:
                     continue
                 raise
+            except asyncio.CancelledError:
+                # Caller cancelled while queued on the write lock or
+                # mid-drain; only OSError is handled above, so without
+                # this arm the req_id entry would strand in _pending
+                # (same leak as the wait-phase arm below).
+                self._pending.pop(req_id, None)
+                raise
             try:
                 return await asyncio.wait_for(fut, timeout=_REQUEST_TIMEOUT_S)
             except asyncio.TimeoutError:
