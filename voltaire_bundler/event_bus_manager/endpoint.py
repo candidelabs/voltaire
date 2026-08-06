@@ -285,7 +285,19 @@ class Client:
             if self._reader is reader:
                 self._teardown(exc)
 
-    def _teardown(self, exc: BaseException) -> None:
+    def _teardown(
+        self,
+        exc: BaseException,
+        writer: Optional[asyncio.StreamWriter] = None,
+    ) -> None:
+        # Generation guard, mirroring the reader task's ``self._reader
+        # is reader`` check: a failing actor passes the writer it was
+        # using, and if that writer is no longer the active one a newer
+        # connection exists — a stale failure (e.g. a slow drain on the
+        # old connection erroring after a reconnect) must not tear the
+        # new connection down.
+        if writer is not None and writer is not self._writer:
+            return
         task = self._reader_task
         self._reader_task = None
         # Don't cancel ourselves when teardown runs inside the reader task's
@@ -320,6 +332,7 @@ class Client:
             fut: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
             self._pending[req_id] = fut
             envelope = {"id": req_id, "payload": request_event}
+            writer: Optional[asyncio.StreamWriter] = None
             try:
                 async with self._write_lock:
                     # Re-read under the lock: a concurrent request's
@@ -333,7 +346,12 @@ class Client:
                     await _broadcast(envelope, writer)
             except OSError as exc:
                 self._pending.pop(req_id, None)
-                self._teardown(exc)
+                # Pass the writer this attempt actually used so a stale
+                # failure can't tear down a reconnected connection.
+                # writer is None only on the connection-already-lost
+                # raise above, where teardown is the right (no-op-ish)
+                # move.
+                self._teardown(exc, writer)
                 if attempt == 0:
                     continue
                 raise
