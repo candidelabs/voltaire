@@ -17,6 +17,23 @@ from voltaire_bundler.utils.eth_client_utils import \
     encode_handleops_calldata_v6, encode_handleops_calldata_v7v8v9, send_rpc_request_to_eth_client
 
 
+def _min_accepting_tolerance(effective_fee: int, block_max_fee: int) -> int:
+    """Smallest integer tolerance % for which ``effective_fee`` passes the
+    gas-fee check ``effective_fee >= ceil(block_max_fee * (1 - t/100))``.
+    Used only for the operator-facing debug recommendation on rejection."""
+    if block_max_fee <= 0:
+        return 0
+    # Evaluate the check's own formula for each candidate rather than
+    # inverting it in closed form: float rounding in ``1 - t/100`` makes
+    # an algebraic inversion off-by-one near exact percentages, while
+    # this scan is minimal-by-construction and runs only on the (rare)
+    # rejection path — at most 100 cheap iterations.
+    for t in range(0, 100):
+        if effective_fee >= math.ceil(block_max_fee * (1 - t / 100)):
+            return t
+    return 100
+
+
 class GasManager(ABC, Generic[UserOperationType]):
     ethereum_node_urls: list[str]
     chain_id: int
@@ -65,6 +82,19 @@ class GasManager(ABC, Generic[UserOperationType]):
             else:  # HyperEVM or Arbitrum
                 block_max_priority_fee_per_gas = 0
             if max_fee_per_gas < block_max_fee_per_gas_with_tolerance:
+                logging.debug(
+                    "gas-fee rejection on chain %s: maxFeePerGas=%s < "
+                    "min=%s (node gas price %s, tolerance %s%%); a "
+                    "tolerance of at least %s%% "
+                    "(--enforce_gas_price_tolerance) would have accepted "
+                    "this userop",
+                    self.chain_id, hex(max_fee_per_gas),
+                    block_max_fee_per_gas_with_tolerance_hex,
+                    hex(block_max_fee_per_gas), enforce_gas_price_tolerance,
+                    _min_accepting_tolerance(
+                        max_fee_per_gas, block_max_fee_per_gas,
+                    ),
+                )
                 raise ValidationException(
                     ValidationExceptionCode.InvalidFields,
                     "maxFeePerGas is too low. it should be minimum : " +
@@ -85,19 +115,42 @@ class GasManager(ABC, Generic[UserOperationType]):
             )
 
             if max_fee_per_gas < estimated_base_fee:
+                logging.debug(
+                    "gas-fee rejection on chain %s: maxFeePerGas=%s is "
+                    "below the estimated base fee %s itself — no "
+                    "--enforce_gas_price_tolerance value helps here (the "
+                    "sender must raise maxFeePerGas; only tolerance >= "
+                    "100 would bypass, by disabling the check entirely)",
+                    self.chain_id, hex(max_fee_per_gas),
+                    hex(estimated_base_fee),
+                )
                 raise ValidationException(
                     ValidationExceptionCode.InvalidFields,
                     "maxFeePerGas is too low." +
                     "it should be minimum the estimated base fee: " +
                     f"{hex(estimated_base_fee)}",
                 )
-            if (
-                min(
-                    max_fee_per_gas,
-                    estimated_base_fee + max_priority_fee_per_gas,
+            effective_fee = min(
+                max_fee_per_gas,
+                estimated_base_fee + max_priority_fee_per_gas,
+            )
+            if effective_fee < block_max_fee_per_gas_with_tolerance:
+                logging.debug(
+                    "gas-fee rejection on chain %s: min(maxFeePerGas=%s, "
+                    "estimatedBaseFee=%s + maxPriorityFeePerGas=%s) = %s "
+                    "< min=%s (node gas price %s, tolerance %s%%); a "
+                    "tolerance of at least %s%% "
+                    "(--enforce_gas_price_tolerance) would have accepted "
+                    "this userop",
+                    self.chain_id, hex(max_fee_per_gas),
+                    hex(estimated_base_fee), hex(max_priority_fee_per_gas),
+                    hex(effective_fee),
+                    block_max_fee_per_gas_with_tolerance_hex,
+                    hex(block_max_fee_per_gas), enforce_gas_price_tolerance,
+                    _min_accepting_tolerance(
+                        effective_fee, block_max_fee_per_gas,
+                    ),
                 )
-                < block_max_fee_per_gas_with_tolerance
-            ):
                 raise ValidationException(
                     ValidationExceptionCode.InvalidFields,
                     "maxFeePerGas and (maxPriorityFeePerGas + estimated basefee) " +
