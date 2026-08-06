@@ -322,7 +322,15 @@ class Client:
             envelope = {"id": req_id, "payload": request_event}
             try:
                 async with self._write_lock:
-                    await _broadcast(envelope, self._writer)
+                    # Re-read under the lock: a concurrent request's
+                    # teardown may have cleared/closed the writer while
+                    # we waited on the lock; _broadcast on None would
+                    # raise AttributeError and bypass the OSError
+                    # recovery (pop, teardown, one transparent retry).
+                    writer = self._writer
+                    if writer is None or writer.is_closing():
+                        raise OSError("connection lost before write")
+                    await _broadcast(envelope, writer)
             except OSError as exc:
                 self._pending.pop(req_id, None)
                 self._teardown(exc)
