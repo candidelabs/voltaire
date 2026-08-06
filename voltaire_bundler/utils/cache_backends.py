@@ -240,25 +240,19 @@ class PostgresBackend(CacheBackend):
                     f'ON "{self._table}" (inserted_at)'
                 )
         except Exception as exc:
-            # Asymmetric error handling vs runtime methods (get,
-            # commit_batch, etc.): there we wrap EVERY exception in
-            # CacheBackendError so the cache layer can soft-fail to
-            # memory-only. Here we only wrap PostgresError and let
-            # everything else propagate bare. The reason: at runtime
-            # any failure is plausibly a transient connectivity blip
-            # and soft-failing is the right move; at open() time a
-            # non-PostgresError is almost certainly a programming bug
-            # (bad SQL identifier, missing import, broken pool init)
-            # and we'd rather crash at startup than silently degrade
-            # for the entire process lifetime.
-            if asyncpg is not None and isinstance(
-                exc, asyncpg.PostgresError,
-            ):
-                raise CacheBackendError(
-                    f"postgres open for {self._table} failed: "
-                    f"{type(exc).__name__}: {exc}"
-                ) from exc
-            raise
+            # Connectivity-class failures — PostgresError,
+            # InterfaceError, and the pool's command TimeoutError, the
+            # same classification _wrap applies at runtime — become
+            # CacheBackendError so PersistentFIFOCache.start() can
+            # fall back to memory-only. Anything else is almost
+            # certainly a programming bug (bad SQL identifier, missing
+            # import, broken pool init) and still propagates bare —
+            # better to crash at startup than silently degrade for the
+            # entire process lifetime.
+            wrapped = self._wrap(exc, "open")
+            if wrapped is exc:
+                raise
+            raise wrapped from exc
 
     async def close(self) -> None:
         # The pool itself is owned by the module — see
