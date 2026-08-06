@@ -10,11 +10,17 @@ from importlib.metadata import version
 
 import aiohttp
 
+from voltaire_bundler.gas.gas_price_cache import (
+    GasPriceCache,
+    DEFAULT_REFRESH_INTERVAL_SECONDS,
+)
 from voltaire_bundler.mempool.mempool_info import DEFAULT_MEMPOOL_INFO
+from voltaire_bundler.user_operation import user_operation_handler
+from voltaire_bundler.utils import latest_block_cache
 from voltaire_bundler.utils.eth_client_utils import \
     send_rpc_request_to_eth_client_no_retry
 
-from .typing import Address, MempoolId
+from .custom_types import Address, MempoolId
 from .utils.import_key import (import_bundler_account,
                                public_address_from_private_key)
 
@@ -44,20 +50,24 @@ class InitData:
     rpc_port: int
     ethereum_node_urls: list[str]
     bundle_node_urls: list[str]
-    bundler_pk: str
-    bundler_address: Address
+    # (address, private_key) tuples keyed by entrypoint label
+    # ("v6", "v7", "v8", "v9"). When the operator passes a single
+    # --bundler_secret all four entries share the same EOA.
+    bundler_secrets_per_ep: dict[str, tuple[Address, str]]
     chain_id: int
     is_debug: bool
     is_unsafe: bool
     is_legacy_mode: bool
     conditional_rpc: ConditionalRpc | None
     flashbots_protect_node_urls: list[str] | None
-    bundle_interval: int
+    bundle_interval: float
     max_fee_per_gas_percentage_multiplier: int
     max_priority_fee_per_gas_percentage_multiplier: int
     is_metrics: bool
     rpc_cors_domain: str
+    rpc_path: str
     enforce_gas_price_tolerance: int
+    enforce_pre_verification_gas_tolerance: int
     ethereum_node_debug_trace_call_urls: list[str]
     ethereum_node_eth_get_logs_urls: list[str]
     p2p_enr_address: str
@@ -84,7 +94,32 @@ class InitData:
     p2p_canonical_mempool_id_06: MempoolId | None
     min_stake: int
     min_unstake_delay: int
-    bundle_gas_estimation_multiplier: int
+    bundle_gas_estimation_multiplier: float
+    # libpq DSN for the Postgres cache backend, sourced ONLY from the
+    # VOLTAIRE_CACHE_POSTGRES_URL env var so credentials never appear
+    # on argv. Empty string ⇒ persistent cache disabled, caches run
+    # memory-only.
+    cache_postgres_url: str
+    # Per-deployment scale knobs for the cache caps. 1.0 keeps the
+    # built-in defaults; bump up on hosts with more RAM/disk headroom.
+    cache_memory_size: float
+    # Per-cache TTL (in days) on the Postgres cold tier. ``None``
+    # (default, env var unset) means no eviction — caches grow until
+    # something else trims them. Set an integer to evict rows whose
+    # ``inserted_at`` is older than this many days.
+    postgres_cache_ttl_days: int | None
+    # When False (the default), reputation-driven bans are not enforced:
+    # the bundler logs that an entity *would* have been banned and resets
+    # its accumulated reputation score instead.
+    enable_banning: bool
+    # Block window for the cheap recent-blocks probe that runs before a
+    # full ``fromBlock="earliest"`` eth_getLogs scan in
+    # eth_getUserOperationByHash/Receipt.
+    logs_fallback_recent_window: int
+    # Background-refreshed cache of eth_gasPrice / eth_maxPriorityFeePerGas.
+    # Warmed synchronously in get_init_data so a bad ethereum node URL is
+    # caught at startup. Started as a TaskGroup child in main().
+    gas_price_cache: GasPriceCache
 
 
 def address(ep: str):
@@ -100,6 +135,47 @@ def unsigned_int(value):
         raise ArgumentTypeError(
                 "%s is an invalid unsigned int value" % value)
     return ivalue
+
+
+def float_at_least_one(value):
+    fvalue = float(value)
+    if fvalue < 1.0:
+        raise ArgumentTypeError(
+                "%s must be >= 1.0 (shrinking the gas estimate is unsafe)" % value)
+    return fvalue
+
+
+def positive_float(value):
+    fvalue = float(value)
+    if fvalue <= 0:
+        raise ArgumentTypeError("%s must be > 0" % value)
+    return fvalue
+
+
+def str_to_bool(value: str | bool) -> bool:
+    # argparse's built-in type=bool treats every non-empty string as True
+    # (so `--disable_p2p false` would silently disable nothing). Accept
+    # the conventional spellings and reject anything else loudly — a
+    # typo like "treu" must fail startup, not silently mean False.
+    if isinstance(value, bool):
+        return value
+    lowered = str(value).strip().lower()
+    if lowered in ("true", "1", "yes", "y", "on"):
+        return True
+    if lowered in ("false", "0", "no", "n", "off"):
+        return False
+    raise ArgumentTypeError(
+        f"invalid boolean value: {value!r} (use true/false)"
+    )
+
+
+def rpc_path(value: str):
+    if not value.startswith("/"):
+        value = "/" + value
+    path_pattern = r"^(/[a-zA-Z0-9._~:@!$&'()*+,;=\-]*)+$"
+    if not re.match(path_pattern, value):
+        raise ArgumentTypeError(f"Invalid RPC path: {value}")
+    return value
 
 
 def url_no_port(ep: str):
@@ -137,7 +213,12 @@ def initialize_argument_parser() -> ArgumentParser:
     group.add_argument(
         "--bundler_secret",
         type=str,
-        help="Bundler private key",
+        help=(
+            "Bundler private key. Pass a single secret to use one EOA for all "
+            "entrypoints, or four comma-separated secrets (in v0.6,v0.7,v0.8,v0.9 "
+            "order) to use a distinct EOA per entrypoint. When --disable_v6 is "
+            "set the v0.6 slot is still required but its EOA is unused."
+        ),
         nargs="?",
         default=_get_env_or_default("VOLTAIRE_BUNDLER_SECRET", None, str),
     )
@@ -181,6 +262,15 @@ def initialize_argument_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
+        "--rpc_path",
+        type=rpc_path,
+        help="RPC serve path - defaults to '/rpc'",
+        nargs="?",
+        const="/rpc",
+        default=_get_env_or_default("VOLTAIRE_RPC_PATH", "/rpc", rpc_path),
+    )
+
+    parser.add_argument(
         "--rpc_port",
         type=unsigned_int,
         help="RPC serve port - defaults to 3000",
@@ -218,6 +308,7 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--verbose",
+        type=str_to_bool,
         help="show debug log",
         nargs="?",
         const=True,
@@ -226,6 +317,7 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--debug",
+        type=str_to_bool,
         help="expose _debug rpc namespace for testing",
         nargs="?",
         const=True,
@@ -247,6 +339,7 @@ def initialize_argument_parser() -> ArgumentParser:
 
     group2.add_argument(
         "--unsafe",
+        type=str_to_bool,
         help=(
             "UNSAFE mode: no storage or opcode checks - "
             "when debug_traceCall is not available"
@@ -269,10 +362,11 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--legacy_mode",
+        type=str_to_bool,
         help="for networks that doesn't support EIP-1559",
         nargs="?",
         const=True,
-        default=_get_env_or_default("VOLTAIRE_LEGACY_MODE", False, str),
+        default=_get_env_or_default("VOLTAIRE_LEGACY_MODE", False, lambda v: v.lower() == "true"),
     )
 
     group3 = parser.add_mutually_exclusive_group()
@@ -296,14 +390,37 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--bundle_interval",
-        type=int,
+        type=positive_float,
         help=(
             "set the bundle interval in seconds for the auto bundle mode - "
-            "set to zero for manual mode - defaults to 2 seconds"
+            "must be strictly positive - defaults to 2 seconds. Accepts "
+            "fractional values (e.g. 0.5) for high-throughput deployments; "
+            "sub-second intervals are floored at one 100 ms heartbeat tick "
+            "when p2p is enabled. Use --debug to disable auto bundling and "
+            "trigger bundles manually via debug_bundler_sendBundleNow."
         ),
         nargs="?",
-        const=1,
-        default=_get_env_or_default("VOLTAIRE_BUNDLE_INTERVAL", 2, int),
+        const=1.0,
+        default=_get_env_or_default(
+            "VOLTAIRE_BUNDLE_INTERVAL", 2.0, positive_float
+        ),
+    )
+
+    parser.add_argument(
+        "--gas_price_refresh_interval",
+        type=positive_float,
+        help=(
+            "seconds between background refreshes of the cached "
+            "eth_gasPrice / eth_maxPriorityFeePerGas values. Defaults to "
+            "1s across every chain; the background loop is idle-aware "
+            "and skips refreshes when the cache hasn't been read in "
+            "3 * interval seconds, so a shorter interval on a quiet "
+            "bundler costs nothing."
+        ),
+        nargs="?",
+        default=_get_env_or_default(
+            "VOLTAIRE_GAS_PRICE_REFRESH_INTERVAL", None, positive_float,
+        ),
     )
 
     parser.add_argument(
@@ -348,8 +465,23 @@ def initialize_argument_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
+        "--enforce_pre_verification_gas_tolerance",
+        type=unsigned_int,
+        help=(
+            "eth_sendUserOperation will return an error if the UserOperation's "
+            "preVerificationGas is less than min_pre_verification_gas, "
+            "takes a tolerance percentage as a parameter as the following formula "
+            "min_pre_verification_gas = expected_pre_verification_gas * (1-tolerance/100), "
+            "tolerance defaults to 3"
+        ),
+        nargs="?",
+        const=3,
+        default=_get_env_or_default("VOLTAIRE_ENFORCE_PRE_VERIFICATION_GAS_TOLERANCE", 3, unsigned_int),
+    )
+
+    parser.add_argument(
         "--metrics",
-        type=bool,
+        type=str_to_bool,
         help="enable metrics collection",
         nargs="?",
         const=True,
@@ -364,7 +496,7 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--disable_v6",
-        type=bool,
+        type=str_to_bool,
         help="disable support for entrypoint v0.06",
         nargs="?",
         const=True,
@@ -420,6 +552,7 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--p2p_upnp_enabled",
+        type=str_to_bool,
         help="Attempt to construct external port mappings with UPnP.",
         nargs="?",
         const=True,
@@ -428,6 +561,7 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--p2p_metrics_enabled",
+        type=str_to_bool,
         help="Whether metrics are enabled.",
         nargs="?",
         const=True,
@@ -436,11 +570,44 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--disable_p2p",
-        type=bool,
-        help="disable p2p",
+        type=str_to_bool,
+        help="disable p2p (on by default; pass VOLTAIRE_DISABLE_P2P=false to opt in)",
         nargs="?",
         const=True,
-        default=_get_env_or_default("VOLTAIRE_DISABLE_P2P", False, lambda v: v.lower() == "true"),
+        default=_get_env_or_default("VOLTAIRE_DISABLE_P2P", True, lambda v: v.lower() == "true"),
+    )
+
+    parser.add_argument(
+        "--cache_memory_size",
+        type=positive_float,
+        help=(
+            "Multiplier applied to every cache's in-memory capacity. "
+            "1.0 keeps the 10_000-entry default; 2.0 doubles it."
+        ),
+        nargs="?",
+        const=1.0,
+        default=_get_env_or_default(
+            "VOLTAIRE_CACHE_MEMORY_SIZE", 1.0, positive_float,
+        ),
+    )
+
+    parser.add_argument(
+        "--postgres_cache_ttl_days",
+        type=unsigned_int,
+        help=(
+            "Per-cache TTL (in days) on the Postgres cold tier. "
+            "Unset (the default) means no eviction — the writer task "
+            "skips eviction entirely. Set an integer to evict rows "
+            "whose inserted_at is older than this many days; the "
+            "DELETE uses an indexed range scan (no COUNT(*), no full "
+            "table scan)."
+        ),
+        nargs="?",
+        default=_get_env_or_default(
+            "VOLTAIRE_POSTGRES_CACHE_TTL_DAYS",
+            None,
+            unsigned_int,
+        ),
     )
 
     parser.add_argument(
@@ -498,6 +665,43 @@ def initialize_argument_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
+        "--logs_fallback_recent_window",
+        type=unsigned_int,
+        help=(
+            "Block window for the cheap recent-blocks probe that runs "
+            "before a full fromBlock=\"earliest\" eth_getLogs scan in "
+            "eth_getUserOperationByHash/Receipt. The vast majority of "
+            "polling clients hit a userop submitted seconds ago, which "
+            "lives within this window. Defaults to 5000."
+        ),
+        nargs="?",
+        const=5_000,
+        default=_get_env_or_default(
+            "VOLTAIRE_LOGS_FALLBACK_RECENT_WINDOW", 5_000, unsigned_int),
+    )
+
+    parser.add_argument(
+        "--enable_logs_reorg_check",
+        help=(
+            "When set, on every eth_getUserOperationByHash/Receipt cache "
+            "hit issue an eth_getBlockByNumber to confirm the cached "
+            "block is still on the canonical chain — protects against "
+            "serving receipts for reorged-out blocks. Off by default: "
+            "the extra RPC per poll is expensive on busy bundlers. With "
+            "this off, the userop-logs cache is only evicted when a "
+            "client poll happens to detect a missing transaction "
+            "(del_user_operation_logs_cache_entry), so a userop whose "
+            "block reorged out AND was not re-bundled AND is never "
+            "polled stays cached — turn this on if you serve receipts "
+            "directly to end users on a reorg-prone chain."
+        ),
+        action="store_true",
+        default=_get_env_or_default(
+            "VOLTAIRE_ENABLE_LOGS_REORG_CHECK", False, lambda v: str(v).lower() in ("1", "true", "yes")
+        ),
+    )
+
+    parser.add_argument(
         "--health_check_interval",
         type=int,
         help=(
@@ -526,8 +730,25 @@ def initialize_argument_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
+        "--enable_banning",
+        type=str_to_bool,
+        help=(
+            "Enforce reputation-driven bans of entities that fail validation "
+            "or exceed the inclusion-rate threshold. Off by default; when "
+            "off the bundler logs that an entity would have been banned and "
+            "resets its reputation score instead of marking it BANNED."
+        ),
+        nargs="?",
+        const=True,
+        default=_get_env_or_default(
+            "VOLTAIRE_ENABLE_BANNING", False,
+            lambda v: v.lower() == "true",
+        ),
+    )
+
+    parser.add_argument(
         "--eip7702",
-        type=bool,
+        type=str_to_bool,
         help="enable eip7702 auth",
         nargs="?",
         const=True,
@@ -536,7 +757,7 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--disable_entrypoints_code_check",
-        type=bool,
+        type=str_to_bool,
         help="disable checking if the supported entrypoints are deployed.",
         nargs="?",
         const=True,
@@ -588,9 +809,10 @@ def initialize_argument_parser() -> ArgumentParser:
 
     parser.add_argument(
         "--bundle_gas_estimation_multiplier",
-        type=unsigned_int,
-        help="bundle gas estimation multiplier.",
-        default=_get_env_or_default("VOLTAIRE_BUNDLE_GAS_ESTIMATION_MULTIPLIER", 1, int),
+        type=float_at_least_one,
+        help="bundle gas estimation multiplier (>= 1.0).",
+        default=_get_env_or_default(
+            "VOLTAIRE_BUNDLE_GAS_ESTIMATION_MULTIPLIER", 1.1, float),
     )
 
     return parser
@@ -619,56 +841,91 @@ async def parse_args(cmd_args: [str]) -> InitData:
 def init_logging(args: Namespace):
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING,
-        format="%(asctime)s %(levelname)s %(message)s",
-        datefmt="%b %d %H:%M:%S.%03d",
+        format="%(asctime)s.%(msecs)03d %(levelname)s %(message)s",
+        datefmt="%b %d %H:%M:%S",
     )
 
     logging.getLogger("Voltaire")
 
 
-async def init_bundler_address_and_secret(args: Namespace, ethereum_node_url: str):
-    bundler_address = ""
-    bundler_pk = ""
+ENTRYPOINT_LABELS = ("v6", "v7", "v8", "v9")
 
+
+async def init_bundler_address_and_secret(
+    args: Namespace, ethereum_node_url: str
+) -> dict[str, tuple[Address, str]]:
     if args.keystore_file_path is not None:
+        # Keystore is single-EOA only: the same EOA is reused for every
+        # entrypoint.
         bundler_address, bundler_pk = import_bundler_account(
             args.keystore_file_password, args.keystore_file_path
         )
+        per_ep_secrets = {
+            label: (bundler_address, bundler_pk) for label in ENTRYPOINT_LABELS
+        }
     else:
-        bundler_pk = args.bundler_secret
-        bundler_address = public_address_from_private_key(bundler_pk)
-
-    try:
-        bundler_code_res = await send_rpc_request_to_eth_client_no_retry(
-            ethereum_node_url,
-            "eth_getCode",
-            [bundler_address, "latest"],
-        )
-        if "result" not in bundler_code_res:
+        raw_secrets = [s.strip() for s in args.bundler_secret.split(",")]
+        if any(s == "" for s in raw_secrets):
             logging.critical(
-                f"eth_getCode failed for bundler address {bundler_address}"
+                "--bundler_secret contains an empty entry; provide either one "
+                "secret or four non-empty comma-separated secrets (one per "
+                "entrypoint in v0.6,v0.7,v0.8,v0.9 order)."
             )
             sys.exit(1)
+        if len(raw_secrets) == 1:
+            pk = raw_secrets[0]
+            addr = public_address_from_private_key(pk)
+            per_ep_secrets = {label: (addr, pk) for label in ENTRYPOINT_LABELS}
+        elif len(raw_secrets) == 4:
+            per_ep_secrets = {}
+            for label, pk in zip(ENTRYPOINT_LABELS, raw_secrets):
+                addr = public_address_from_private_key(pk)
+                per_ep_secrets[label] = (addr, pk)
         else:
-            bundler_code = bundler_code_res["result"]
-            if (len(bundler_code) > 2):
+            logging.critical(
+                "--bundler_secret must be either one secret or four "
+                "comma-separated secrets (one per entrypoint in "
+                "v0.6,v0.7,v0.8,v0.9 order); got "
+                f"{len(raw_secrets)}."
+            )
+            sys.exit(1)
+
+    # Verify each unique EOA address is actually an EOA (no contract code,
+    # no EIP-7702 delegation). De-duplicate first so the single-secret case
+    # only spends one RPC round-trip.
+    unique_addresses = {addr for addr, _ in per_ep_secrets.values()}
+    for bundler_address in unique_addresses:
+        try:
+            bundler_code_res = await send_rpc_request_to_eth_client_no_retry(
+                ethereum_node_url,
+                "eth_getCode",
+                [bundler_address, "latest"],
+            )
+            if "result" not in bundler_code_res:
                 logging.critical(
-                    f"Invalid Eth bundler beneficiary address: {bundler_address}"
-                    " as it should be an eoa without an eip7702 delegation."
+                    f"eth_getCode failed for bundler address {bundler_address}"
                 )
                 sys.exit(1)
-    except aiohttp.client_exceptions.ClientConnectorError:
-        logging.critical(
-            f"Error when connecting to Eth node {ethereum_node_url} for eth_getCode"
-        )
-        sys.exit(1)
-    except Exception:
-        logging.critical(
-            f"Error when connecting to Eth node {ethereum_node_url} for eth_getCode"
-        )
-        sys.exit(1)
+            else:
+                bundler_code = bundler_code_res["result"]
+                if (len(bundler_code) > 2):
+                    logging.critical(
+                        f"Invalid Eth bundler beneficiary address: {bundler_address}"
+                        " as it should be an eoa without an eip7702 delegation."
+                    )
+                    sys.exit(1)
+        except (aiohttp.ClientConnectionError, TimeoutError) as e:
+            logging.critical(
+                f"Connection error for Eth node {ethereum_node_url} for eth_getCode: {e}"
+            )
+            sys.exit(1)
+        except Exception:
+            logging.critical(
+                f"Error when connecting to Eth node {ethereum_node_url} for eth_getCode"
+            )
+            sys.exit(1)
 
-    return bundler_address, bundler_pk
+    return per_ep_secrets
 
 
 def check_if_valid_rpc_url_and_port(rpc_url, rpc_port) -> None:
@@ -690,39 +947,55 @@ def check_if_valid_rpc_url_and_port(rpc_url, rpc_port) -> None:
         soc.close()
 
 
-async def check_valid_ethereum_rpc_nodes_and_get_chain_id(
+async def check_and_rearrange_valid_ethereum_rpc_nodes_and_get_chain_id(
     ethereum_node_urls: list[str]
-) -> str:
+) -> tuple[str, list[str]]:
     chain_id_hex: str | None = None
-    try:
-        chosen_ethereum_node_url = None
-        for ethereum_node_url in ethereum_node_urls:
-            chosen_ethereum_node_url = ethereum_node_url
+    valid_urls: list[str] = []
+    failed_urls: list[str] = []
+    for ethereum_node_url in ethereum_node_urls:
+        try:
             chain_id_hex_res = await send_rpc_request_to_eth_client_no_retry(
                 ethereum_node_url,
                 "eth_chainId",
                 [],
             )
             if "result" not in chain_id_hex_res:
-                logging.critical(f"Invalid Eth node {ethereum_node_url}")
-                sys.exit(1)
-            else:
-                if (
-                    chain_id_hex is not None and
-                    chain_id_hex != chain_id_hex_res["result"]
-                ):
-                    logging.critical(f"Invalid Eth node {ethereum_node_url}")
-                    sys.exit(1)
+                logging.warning(f"Invalid Eth node {ethereum_node_url} - no result in response")
+                failed_urls.append(ethereum_node_url)
+                continue
 
-                chain_id_hex = chain_id_hex_res["result"]
-        assert chain_id_hex is not None
-        return chain_id_hex
-    except aiohttp.client_exceptions.ClientConnectorError:
-        logging.critical(f"Connection refused for Eth node {chosen_ethereum_node_url}")
+            if (
+                chain_id_hex is not None and
+                chain_id_hex != chain_id_hex_res["result"]
+            ):
+                logging.critical(
+                    f"Chain ID mismatch for Eth node {ethereum_node_url}: "
+                    f"expected {chain_id_hex}, got {chain_id_hex_res['result']}"
+                )
+                sys.exit(1)
+
+            chain_id_hex = chain_id_hex_res["result"]
+            valid_urls.append(ethereum_node_url)
+        except (aiohttp.ClientConnectionError, TimeoutError) as e:
+            logging.warning(f"Connection error for Eth node {ethereum_node_url}: {e}")
+            failed_urls.append(ethereum_node_url)
+        except Exception:
+            logging.warning(f"Error when connecting to Eth node {ethereum_node_url}")
+            failed_urls.append(ethereum_node_url)
+
+    if not valid_urls or chain_id_hex is None:
+        logging.critical(
+            f"All Eth nodes failed: {failed_urls}"
+        )
         sys.exit(1)
-    except Exception:
-        logging.critical(f"Error when connecting to Eth node {chosen_ethereum_node_url}")
-        sys.exit(1)
+
+    if failed_urls:
+        logging.warning(
+            f"Some Eth nodes are unavailable and will be skipped: {failed_urls}"
+        )
+    rearranged_ethereum_node_urls = valid_urls + failed_urls
+    return chain_id_hex, rearranged_ethereum_node_urls
 
 
 async def check_valid_entrypoint(ethereum_node_url: str, entrypoint: Address):
@@ -762,7 +1035,7 @@ async def get_init_data(args: Namespace) -> InitData:
     check_if_valid_rpc_url_and_port(args.rpc_url, args.rpc_port)
 
     ethereum_node_urls = args.ethereum_node_url.split(',')
-    ethereum_node_chain_id_hex = await check_valid_ethereum_rpc_nodes_and_get_chain_id(
+    ethereum_node_chain_id_hex, ethereum_node_urls_rearranged= await check_and_rearrange_valid_ethereum_rpc_nodes_and_get_chain_id(
         ethereum_node_urls
     )
 
@@ -772,21 +1045,24 @@ async def get_init_data(args: Namespace) -> InitData:
         )
         sys.exit(1)
 
-    bundler_address, bundler_pk = await init_bundler_address_and_secret(
-        args, ethereum_node_urls[0])
+    bundler_secrets_per_ep = await init_bundler_address_and_secret(
+        args, ethereum_node_urls_rearranged[0])
 
+    # Derived URL lists default to the reachable-first rearranged
+    # ordering so every consumer (and the equality comparisons in
+    # main.py's health-check aggregation) sees one consistent list.
     if args.bundle_node_url is None:
-        bundle_node_urls = ethereum_node_urls
+        bundle_node_urls = ethereum_node_urls_rearranged
     else:
         bundle_node_urls = args.bundle_node_url.split(',')
 
     if args.ethereum_node_debug_trace_call_url is None:
-        ethereum_node_debug_trace_call_urls = ethereum_node_urls
+        ethereum_node_debug_trace_call_urls = ethereum_node_urls_rearranged
     else:
         ethereum_node_debug_trace_call_urls = args.ethereum_node_debug_trace_call_url.split(',')
 
     if args.ethereum_node_eth_get_logs_url is None:
-        ethereum_node_eth_get_logs_urls = ethereum_node_urls
+        ethereum_node_eth_get_logs_urls = ethereum_node_urls_rearranged
     else:
         ethereum_node_eth_get_logs_urls = args.ethereum_node_eth_get_logs_url.split(',')
 
@@ -795,9 +1071,20 @@ async def get_init_data(args: Namespace) -> InitData:
     else:
         flashbots_protect_node_urls = None
 
-    if bundle_node_urls != ethereum_node_urls:
-        ethereum_node_debug_chain_id_hex = (
-            await check_valid_ethereum_rpc_nodes_and_get_chain_id(
+    # These three gates ask "did the operator supply a genuinely
+    # different URL list that needs its own chain-id validation?".
+    # Defaulted lists alias ethereum_node_urls_rearranged, so compare
+    # against the rearranged list (and against the original ordering,
+    # so an explicitly-supplied list equal to the configured one keeps
+    # skipping) — comparing only against the original made every gate
+    # fire spuriously whenever startup probing reordered the nodes,
+    # re-probing a dead node up to three more times.
+    if (
+        bundle_node_urls != ethereum_node_urls_rearranged
+        and bundle_node_urls != ethereum_node_urls
+    ):
+        ethereum_node_debug_chain_id_hex, _ = (
+            await check_and_rearrange_valid_ethereum_rpc_nodes_and_get_chain_id(
                 bundle_node_urls
             )
         )
@@ -808,9 +1095,12 @@ async def get_init_data(args: Namespace) -> InitData:
             )
             sys.exit(1)
 
-    if ethereum_node_debug_trace_call_urls != ethereum_node_urls:
-        ethereum_node_debug_chain_id_hex = (
-            await check_valid_ethereum_rpc_nodes_and_get_chain_id(
+    if (
+        ethereum_node_debug_trace_call_urls != ethereum_node_urls_rearranged
+        and ethereum_node_debug_trace_call_urls != ethereum_node_urls
+    ):
+        ethereum_node_debug_chain_id_hex, _ = (
+            await check_and_rearrange_valid_ethereum_rpc_nodes_and_get_chain_id(
                 ethereum_node_debug_trace_call_urls
             )
         )
@@ -821,9 +1111,12 @@ async def get_init_data(args: Namespace) -> InitData:
             )
             sys.exit(1)
 
-    if ethereum_node_eth_get_logs_urls != ethereum_node_urls:
-        eth_get_logs_url_chain_id_hex = (
-            await check_valid_ethereum_rpc_nodes_and_get_chain_id(
+    if (
+        ethereum_node_eth_get_logs_urls != ethereum_node_urls_rearranged
+        and ethereum_node_eth_get_logs_urls != ethereum_node_urls
+    ):
+        eth_get_logs_url_chain_id_hex, _ = (
+            await check_and_rearrange_valid_ethereum_rpc_nodes_and_get_chain_id(
                 ethereum_node_eth_get_logs_urls
             )
         )
@@ -842,7 +1135,85 @@ async def get_init_data(args: Namespace) -> InitData:
 
     if not args.disable_entrypoints_code_check:
         await check_valid_entrypoints(
-            ethereum_node_urls[0], args.disable_v6)
+            ethereum_node_urls_rearranged[0], args.disable_v6)
+
+    # Warm the gas-price cache synchronously so a misconfigured eth node
+    # URL fails at startup instead of on the first userop. The CLI
+    # override takes precedence over the built-in default; both are
+    # positive floats.
+    gas_price_refresh_interval = (
+        args.gas_price_refresh_interval
+        if args.gas_price_refresh_interval is not None
+        else DEFAULT_REFRESH_INTERVAL_SECONDS
+    )
+    gas_price_cache = GasPriceCache(
+        ethereum_node_urls_rearranged,
+        args.chain_id,
+        args.legacy_mode,
+        gas_price_refresh_interval,
+    )
+    try:
+        await gas_price_cache.warm()
+        logging.info(
+            "Gas-price cache warmed (refresh interval: "
+            f"{gas_price_refresh_interval}s)."
+        )
+    except Exception as exc:
+        # Soft-fail — a transient node hiccup at container start (DNS,
+        # TLS handshake, first-connect latency past our 2 s timeout,
+        # or the RPC endpoint not yet routable inside the orchestrator
+        # network) shouldn't hard-exit the bundler. GasPriceCache.get_snapshot
+        # falls back to a synchronous fetch under a lock when no fresh
+        # snapshot is available, so the first bundle round will surface
+        # a genuinely bad node URL if one exists. Warn loudly so
+        # operators still notice.
+        #
+        # Don't log the raw URLs — they may embed provider API keys.
+        logging.warning(
+            f"Failed to warm gas-price cache from configured "
+            f"ethereum_node_url(s) ({len(ethereum_node_urls_rearranged)} "
+            f"endpoint(s)): {exc}. Continuing — the cache will fetch "
+            f"lazily on first read (refresh interval: "
+            f"{gas_price_refresh_interval}s)."
+        )
+
+    # Warm the chain-head cache for the same reason as gas_price_cache:
+    # the coalesced eth_getLogs sweep in bundle_manager pins toBlock to
+    # this resolved head; without a warmup, the first cron tick after
+    # startup falls through to an unresolved-bounds path that sends
+    # toBlock="latest" and trips provider block-range caps on the
+    # operator's first request.
+    try:
+        await latest_block_cache.warm(ethereum_node_urls_rearranged)
+        logging.info("Latest-block cache warmed.")
+    except Exception as exc:
+        # Soft-fail — same rationale as the gas-price cache above.
+        # latest_block_cache.get_or_fetch() falls back to a real
+        # eth_getBlockByNumber("latest") when the cache is empty or
+        # stale, so the sweep will pick up a fresh head lazily. The
+        # only downside is that the very first cron tick might scan a
+        # slightly wider range if the fetch also fails then — bounded
+        # by the sweep's own chunking, not fatal.
+        #
+        # Don't log the raw URLs — they may embed provider API keys.
+        logging.warning(
+            f"Failed to warm latest-block cache from configured "
+            f"ethereum_node_url(s) ({len(ethereum_node_urls_rearranged)} "
+            f"endpoint(s)): {exc}. Continuing — cache will fetch lazily "
+            f"on first read."
+        )
+
+    # Toggle the userop-logs reorg revalidation. Off by default — one
+    # eth_getBlockByNumber per cache hit is too expensive on busy
+    # bundlers. With this off, eviction is opportunistic (only when a
+    # client poll's tx-by-hash lookup misses), so a reorged-out userop
+    # that no one polls stays cached. Turn on for reorg-prone chains
+    # served directly to end users.
+    user_operation_handler.ENABLE_LOGS_REORG_CHECK = (
+        args.enable_logs_reorg_check
+    )
+    if args.enable_logs_reorg_check:
+        logging.info("Userop-logs cache reorg revalidation: ENABLED")
 
     if not args.disable_p2p:
         if args.p2p_canonical_mempool_id_08 is None:
@@ -880,10 +1251,11 @@ async def get_init_data(args: Namespace) -> InitData:
     ret = InitData(
         args.rpc_url,
         args.rpc_port,
-        ethereum_node_urls,
+        # Reachable-first ordering so ExecutionEndpoint, the RPC server,
+        # and the health-check cron try the responsive node first.
+        ethereum_node_urls_rearranged,
         bundle_node_urls,
-        bundler_pk,
-        bundler_address,
+        bundler_secrets_per_ep,
         args.chain_id,
         args.debug,
         args.unsafe,
@@ -895,7 +1267,9 @@ async def get_init_data(args: Namespace) -> InitData:
         args.max_priority_fee_per_gas_percentage_multiplier,
         args.metrics,
         args.rpc_cors_domain,
+        args.rpc_path,
         args.enforce_gas_price_tolerance,
+        args.enforce_pre_verification_gas_tolerance,
         ethereum_node_debug_trace_call_urls,
         ethereum_node_eth_get_logs_urls,
         args.p2p_enr_address,
@@ -922,7 +1296,13 @@ async def get_init_data(args: Namespace) -> InitData:
         args.p2p_canonical_mempool_id_06,
         args.min_stake,
         args.min_unstake_delay,
-        args.bundle_gas_estimation_multiplier
+        args.bundle_gas_estimation_multiplier,
+        os.getenv("VOLTAIRE_CACHE_POSTGRES_URL", ""),
+        args.cache_memory_size,
+        args.postgres_cache_ttl_days,
+        args.enable_banning,
+        args.logs_fallback_recent_window,
+        gas_price_cache,
     )
 
     if args.verbose:

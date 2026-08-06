@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "voltaire_bundler"
-version = "v0.1.0-alpha.64"
+version = "v3.0.0"
 description = "EIP-4337 python Bundler"
 authors = ["Candide Wallet Team"]
 license = "LGPL"
@@ -17,12 +17,13 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = "^3.13.2"
-uvloop = "^0.21.0"
+uvloop = {version = "^0.21.0", markers = "sys_platform != 'win32'"}
 eth-abi = "^5.2.0"
 eth-account = "^0.13.5"
 prometheus-client = "^0.21.1"
 aiohttp-cors = "^0.8.1"
 aiohttp = "^3.12.12"
+asyncpg = "^0.30.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.5"

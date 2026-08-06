@@ -35,7 +35,7 @@ impl GossipCacheBuilder {
 
     pub fn build(self) -> GossipCache {
         let GossipCacheBuilder {
-            default_timeout,
+            default_timeout: _,
         } = self;
         GossipCache {
             expirations: DelayQueue::default(),
@@ -53,19 +53,6 @@ impl GossipCache {
 
     // Insert a message to be sent later.
     pub fn insert(&mut self, topic: GossipTopic, data: Vec<u8>) {
-        // let expire_timeout = match topic.kind() {
-        //     // GossipKind::BeaconBlock => self.beacon_block,
-        //     // GossipKind::BeaconAggregateAndProof => self.aggregates,
-        //     // GossipKind::Attestation(_) => self.attestation,
-        //     // GossipKind::VoluntaryExit => self.voluntary_exit,
-        //     GossipKind::VerifiedUserOperation => self.proposer_slashing,
-        //     // GossipKind::AttesterSlashing => self.attester_slashing,
-        //     // GossipKind::SignedContributionAndProof => self.signed_contribution_and_proof,
-        //     // GossipKind::SyncCommitteeMessage(_) => self.sync_committee_message,
-        //     // GossipKind::BlsToExecutionChange => self.bls_to_execution_change,
-        //     // GossipKind::LightClientFinalityUpdate => self.light_client_finality_update,
-        //     // GossipKind::LightClientOptimisticUpdate => self.light_client_optimistic_update,
-        // };
         let expire_timeout = None;
         let expire_timeout = match expire_timeout {
             Some(expire_timeout) => expire_timeout,

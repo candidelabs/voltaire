@@ -5,7 +5,7 @@ authors = ["CandideLabs"]
 edition = "2021"
 
 [dependencies]
-discv5 = { version = "0.3.1", features = ["libp2p"] }
+discv5 = { version = "0.9.0", features = ["libp2p"] }
 unsigned-varint = { version = "0.6.0", features = ["codec"] }
 ssz_types = "0.5.3"
 serde = { version = "1.0.116", features = ["derive"] }
@@ -44,8 +44,7 @@ prometheus-client = "0.21.0"
 unused_port = { path = "./unused_port" }
 delay_map = "0.3.0"
 void = "1"
-libp2p-quic= { version = "0.9.2", features=["tokio"]}
-libp2p-mplex = "0.40.0"
+libp2p-mplex = "0.43"
 ethereum-types = { version = "0.14", features = ["arbitrary"] }
 arbitrary = { version = "1.0", features = ["derive"] }
 ethereum_serde_utils = "0.5"
@@ -54,9 +53,9 @@ bs58 = { version="0.4.0", features=["check"] }
 fixed-hash = { version="0.8.0" }
 
 [dependencies.libp2p]
-version = "0.52"
+version = "0.56.0"
 default-features = false
-features = ["identify", "yamux", "noise", "gossipsub", "dns", "tcp", "tokio", "plaintext", "secp256k1", "macros", "ecdsa"]
+features = ["identify", "yamux", "noise", "gossipsub", "dns", "tcp", "tokio", "plaintext", "secp256k1", "macros", "ecdsa", "quic"]
 
 [dev-dependencies]
 slog-term = "2.6.0"

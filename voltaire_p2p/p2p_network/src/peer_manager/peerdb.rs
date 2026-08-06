@@ -213,7 +213,7 @@ impl PeerDB {
     pub fn synced_peers(&self) -> impl Iterator<Item = &PeerId> {
         self.peers
             .iter()
-            .filter(|(_, info)| {
+            .filter(|(_, _info)| {
                 // if info.sync_status().is_synced() || info.sync_status().is_advanced() {
                 //     return info.is_connected();
                 // }
@@ -595,43 +595,6 @@ impl PeerDB {
             debug!(self.log, "Updating the time a peer is required for"; "peer_id" => %peer_id, "future_min_ttl_secs" => min_ttl_secs);
         }
     }
-
-    // /// Adds a gossipsub subscription to a peer in the peerdb.
-    // // VISIBILITY: The behaviour is able to adjust subscriptions.
-    // pub(crate) fn add_subscription(&mut self, peer_id: &PeerId, subnet: Subnet) {
-    //     if let Some(info) = self.peers.get_mut(peer_id) {
-    //         info.insert_subnet(subnet);
-    //     }
-    // }
-
-    // /// Removes a gossipsub subscription to a peer in the peerdb.
-    // // VISIBILITY: The behaviour is able to adjust subscriptions.
-    // pub(crate) fn remove_subscription(&mut self, peer_id: &PeerId, subnet: &Subnet) {
-    //     if let Some(info) = self.peers.get_mut(peer_id) {
-    //         info.remove_subnet(subnet);
-    //     }
-    // }
-
-    // /// Extends the ttl of all peers on the given subnet that have a shorter
-    // /// min_ttl than what's given.
-    // // VISIBILITY: The behaviour is able to adjust subscriptions.
-    // pub(crate) fn extend_peers_on_subnet(&mut self, subnet: &Subnet, min_ttl: Instant) {
-    //     let log = &self.log;
-    //     self.peers.iter_mut()
-    //         .filter(move |(_, info)| {
-    //             info.is_connected() && info.on_subnet_metadata(subnet) && info.on_subnet_gossipsub(subnet)
-    //         })
-    //         .for_each(|(peer_id,info)| {
-    //             if info.min_ttl().is_none() || Some(&min_ttl) > info.min_ttl() {
-    //                 info.set_min_ttl(min_ttl);
-    //             }
-    //             let min_ttl_secs = min_ttl
-    //                 .checked_duration_since(Instant::now())
-    //                 .map(|duration| duration.as_secs())
-    //                 .unwrap_or_else(|| 0);
-    //             trace!(log, "Updating minimum duration a peer is required for"; "peer_id" => %peer_id, "min_ttl" => min_ttl_secs);
-    //         });
-    // }
 
     /// A peer is being dialed.
     // VISIBILITY: Only the peer manager can adjust the connection state

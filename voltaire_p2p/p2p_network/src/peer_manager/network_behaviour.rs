@@ -8,12 +8,11 @@ use libp2p::identity::PeerId;
 use libp2p::swarm::behaviour::{ConnectionClosed, ConnectionEstablished, DialFailure, FromSwarm};
 use libp2p::swarm::dial_opts::{DialOpts, PeerCondition};
 use libp2p::swarm::dummy::ConnectionHandler;
-use libp2p::swarm::{ConnectionId, NetworkBehaviour, PollParameters, ToSwarm};
+use libp2p::swarm::{ConnectionId, NetworkBehaviour, ToSwarm};
 use slog::{debug, error};
 
 use crate::discovery::enr_ext::EnrExt;
 use crate::rpc::GoodbyeReason;
-// use crate::types::SyncState;
 use crate::{metrics, ClearDialError};
 
 use super::peerdb::BanResult;
@@ -37,8 +36,7 @@ impl NetworkBehaviour for PeerManager {
     fn poll(
         &mut self,
         cx: &mut Context<'_>,
-        _params: &mut impl PollParameters,
-    ) -> Poll<ToSwarm<Self::ToSwarm, void::Void>> {
+    ) -> Poll<ToSwarm<Self::ToSwarm, std::convert::Infallible>> {
         // perform the heartbeat when necessary
         while self.heartbeat.poll_tick(cx).is_ready() {
             self.heartbeat();
@@ -71,24 +69,6 @@ impl NetworkBehaviour for PeerManager {
             }
         }
 
-        // if !matches!(
-        //     self.network_globals.sync_state(),
-        //     SyncState::SyncingFinalized { .. } | SyncState::SyncingHead { .. }
-        // ) {
-        //     loop {
-        //         match self.status_peers.poll_next_unpin(cx) {
-        //             Poll::Ready(Some(Ok(peer_id))) => {
-        //                 self.status_peers.insert(peer_id);
-        //                 self.events.push(PeerManagerEvent::Status(peer_id))
-        //             }
-        //             Poll::Ready(Some(Err(e))) => {
-        //                 error!(self.log, "Failed to check for peers to ping"; "error" => e.to_string())
-        //             }
-        //             Poll::Ready(None) | Poll::Pending => break,
-        //         }
-        //     }
-        // }
-
         if !self.events.is_empty() {
             return Poll::Ready(ToSwarm::GenerateEvent(self.events.remove(0)));
         } else {
@@ -119,7 +99,7 @@ impl NetworkBehaviour for PeerManager {
         Poll::Pending
     }
 
-    fn on_swarm_event(&mut self, event: FromSwarm<Self::ConnectionHandler>) {
+    fn on_swarm_event(&mut self, event: FromSwarm) {
         match event {
             FromSwarm::ConnectionEstablished(ConnectionEstablished {
                 peer_id,
@@ -165,6 +145,7 @@ impl NetworkBehaviour for PeerManager {
                 // The rest of the events we ignore since they are handled in their associated
                 // `SwarmEvent`
             }
+            _ => {}
         }
     }
 
@@ -185,6 +166,7 @@ impl NetworkBehaviour for PeerManager {
         _peer: PeerId,
         _addr: &libp2p::Multiaddr,
         _role_override: libp2p::core::Endpoint,
+        _port_use: libp2p::core::transport::PortUse,
     ) -> Result<libp2p::swarm::THandler<Self>, libp2p::swarm::ConnectionDenied> {
         // TODO: we might want to check if we accept this peer or not in the future.
         Ok(ConnectionHandler)
@@ -266,12 +248,6 @@ impl PeerManager {
         let count_dialing = endpoint.is_listener();
         // Check the connection limits
         if self.peer_limit_reached(count_dialing)
-            // && self
-            //     .network_globals
-            //     .peers
-            //     .read()
-            //     .peer_info(&peer_id)
-            //     .map_or(true, |peer| !peer.has_future_duty())
         {
             // Gracefully disconnect the peer.
             self.disconnect_peer(peer_id, GoodbyeReason::TooManyPeers);

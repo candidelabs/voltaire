@@ -1,16 +1,12 @@
 use crate::multiaddr::Protocol;
 use crate::rpc::MetaData;
-use crate::types::{
-    error, GossipEncoding, GossipKind,
-};
+use crate::types::{GossipEncoding, GossipKind};
 use crate::{GossipTopic, NetworkConfig};
 use futures::future::Either;
-use libp2p::bandwidth::BandwidthSinks;
 use libp2p::core::{multiaddr::Multiaddr, muxing::StreamMuxerBox, transport::Boxed};
 use libp2p::gossipsub;
 use libp2p::identity::{secp256k1, Keypair};
-use libp2p::{core, noise, yamux, PeerId, Transport, TransportExt};
-use libp2p_quic;
+use libp2p::{core, noise, quic, yamux, PeerId, Transport};
 use prometheus_client::registry::Registry;
 use slog::{debug, warn};
 use ssz::Decode;
@@ -20,9 +16,7 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
-use std::sync::Arc;
 use std::time::Duration;
-// use types::{ChainSpec, EnrForkId, EthSpec, ForkContext, SubnetId, SyncSubnetId};
 
 pub const NETWORK_KEY_FILENAME: &str = "key";
 /// The maximum simultaneous libp2p connections per peer.
@@ -32,9 +26,6 @@ pub const METADATA_FILENAME: &str = "metadata";
 
 pub struct Context<'a> {
     pub config: &'a NetworkConfig,
-    // pub enr_fork_id: EnrForkId,
-    // pub fork_context: Arc<ForkContext>,
-    // pub chain_spec: &'a ChainSpec,
     pub gossipsub_registry: Option<&'a mut Registry>,
 }
 
@@ -45,15 +36,14 @@ type BoxedTransport = Boxed<(PeerId, StreamMuxerBox)>;
 pub fn build_transport(
     local_private_key: Keypair,
     quic_support: bool,
-) -> std::io::Result<(BoxedTransport, Arc<BandwidthSinks>)> {
+) -> std::io::Result<BoxedTransport> {
     // mplex config
-    let mut mplex_config = libp2p_mplex::MplexConfig::new();
+    let mut mplex_config = libp2p_mplex::Config::new();
     mplex_config.set_max_buffer_size(256);
     mplex_config.set_max_buffer_behaviour(libp2p_mplex::MaxBufferBehaviour::Block);
 
     // yamux config
-    let mut yamux_config = yamux::Config::default();
-    yamux_config.set_window_update_mode(yamux::WindowUpdateMode::on_read());
+    let yamux_config = yamux::Config::default();
 
     // Creates the TCP transport layer
     let tcp = libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default().nodelay(true))
@@ -65,48 +55,23 @@ pub fn build_transport(
         ))
         .timeout(Duration::from_secs(10));
 
-    let (transport, bandwidth) = if quic_support {
+    let transport = if quic_support {
         // Enables Quic
         // The default quic configuration suits us for now.
-        let quic_config = libp2p_quic::Config::new(&local_private_key);
-        tcp.or_transport(libp2p_quic::tokio::Transport::new(quic_config))
+        let quic_config = quic::Config::new(&local_private_key);
+        tcp.or_transport(quic::tokio::Transport::new(quic_config))
             .map(|either_output, _| match either_output {
                 Either::Left((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
                 Either::Right((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
             })
-            .with_bandwidth_logging()
+            .boxed()
     } else {
-        tcp.with_bandwidth_logging()
+        tcp.map(|(peer_id, muxer), _| (peer_id, StreamMuxerBox::new(muxer))).boxed()
     };
 
-    // // Enables DNS over the transport.
-    let transport = libp2p::dns::TokioDnsConfig::system(transport)?.boxed();
+    let transport = libp2p::dns::tokio::Transport::system(transport)?.boxed();
 
-    Ok((transport, bandwidth))
-}
-
-// Useful helper functions for debugging. Currently not used in the client.
-#[allow(dead_code)]
-fn keypair_from_hex(hex_bytes: &str) -> error::Result<Keypair> {
-    let hex_bytes = if let Some(stripped) = hex_bytes.strip_prefix("0x") {
-        stripped.to_string()
-    } else {
-        hex_bytes.to_string()
-    };
-
-    hex::decode(hex_bytes)
-        .map_err(|e| format!("Failed to parse p2p secret key bytes: {:?}", e).into())
-        .and_then(keypair_from_bytes)
-}
-
-#[allow(dead_code)]
-fn keypair_from_bytes(mut bytes: Vec<u8>) -> error::Result<Keypair> {
-    secp256k1::SecretKey::try_from_bytes(&mut bytes)
-        .map(|secret| {
-            let keypair: secp256k1::Keypair = secret.into();
-            keypair.into()
-        })
-        .map_err(|e| format!("Unable to parse p2p secret key: {:?}", e).into())
+    Ok(transport)
 }
 
 /// Loads a private key from disk. If this fails, a new key is
@@ -180,20 +145,14 @@ pub fn load_or_build_metadata(
         seq_number: 0,
         supported_mempools: VariableList::empty(),
     };
-    // Read metadata from persisted file if available
     let metadata_path = network_dir.join(METADATA_FILENAME);
     if let Ok(mut metadata_file) = File::open(metadata_path) {
         let mut metadata_ssz = Vec::new();
         if metadata_file.read_to_end(&mut metadata_ssz).is_ok() {
-            // Attempt to read a MetaDataV2 version from the persisted file,
-            // if that fails, read MetaDataV1
             match MetaData::from_ssz_bytes(&metadata_ssz) {
                 Ok(persisted_metadata) => {
                     meta_data.seq_number = persisted_metadata.seq_number;
-                    // Increment seq number if persisted attnet is not default
-                    if persisted_metadata.supported_mempools != meta_data.supported_mempools
-                        // || persisted_metadata.syncnets != meta_data.syncnets
-                    {
+                    if persisted_metadata.supported_mempools != meta_data.supported_mempools {
                         meta_data.seq_number += 1;
                     }
                     debug!(log, "Loaded metadata from disk");
@@ -201,8 +160,6 @@ pub fn load_or_build_metadata(
                 Err(_) => {
                     match MetaData::from_ssz_bytes(&metadata_ssz) {
                         Ok(persisted_metadata) => {
-                            // let persisted_metadata = MetaData::V1(persisted_metadata);
-                            // Increment seq number as the persisted metadata version is updated
                             meta_data.seq_number = persisted_metadata.seq_number + 1;
                             debug!(log, "Loaded metadata from disk");
                         }
@@ -219,22 +176,15 @@ pub fn load_or_build_metadata(
         }
     };
 
-    // Wrap the MetaData
-    // let meta_data = MetaData::V2(meta_data);
-
     debug!(log, "Metadata sequence number"; "seq_num" => meta_data.seq_number);
     save_metadata_to_disk(network_dir, meta_data.clone(), log);
-    
     meta_data
 }
 
 /// Creates a whitelist topic filter that covers all possible topics using the given set of
-/// possible fork digests.
+/// possible mempools.
 pub(crate) fn create_whitelist_filter(
-    // possible_fork_digests: Vec<[u8; 4]>,
-    // attestation_subnet_count: u64,
-    // sync_committee_subnet_count: u64,
-    possible_mempools: Vec<String>
+    possible_mempools: Vec<String>,
 ) -> gossipsub::WhitelistSubscriptionFilter {
     let mut possible_hashes = HashSet::new();
 
@@ -245,16 +195,10 @@ pub(crate) fn create_whitelist_filter(
             possible_hashes.insert(topic.hash());
         };
 
-        add(GossipKind::VerifiedUserOperationV07);
+        add(GossipKind::VerifiedUserOperationV07V08V09);
         add(GossipKind::VerifiedUserOperationV06);
-       
     }
     gossipsub::WhitelistSubscriptionFilter(possible_hashes)
-
-    // let t1 = TopicHash::from_raw("t1");
-    // let mut filter = WhitelistSubscriptionFilter(HashSet::from_iter(vec![t1.clone()]));
-
-    // filter
 }
 
 /// Persist metadata to disk
@@ -264,10 +208,6 @@ pub(crate) fn save_metadata_to_disk(
     log: &slog::Logger,
 ) {
     let _ = std::fs::create_dir_all(dir);
-    // let metadata_bytes = match metadata {
-    //     MetaData::V1(md) => md.as_ssz_bytes(),
-    //     MetaData::V2(md) => md.as_ssz_bytes(),
-    // };
     let metadata_bytes = metadata.as_ssz_bytes();
     match File::create(dir.join(METADATA_FILENAME)).and_then(|mut f| f.write_all(&metadata_bytes)) {
         Ok(_) => {

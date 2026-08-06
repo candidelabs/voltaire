@@ -24,12 +24,7 @@ const PROTOCOL_PREFIX: &str = "/account_abstraction/req";
 const REQUEST_TIMEOUT: u64 = 15;
 
 /// Returns the maximum bytes that can be sent across the RPC.
-pub fn max_rpc_size(/*fork_context: &ForkContext,*/ max_chunk_size: usize) -> usize {
-    // match fork_context.current_fork() {
-    //     ForkName::Altair | ForkName::Base => max_chunk_size / 10,
-    //     ForkName::Merge => max_chunk_size,
-    //     ForkName::Capella => max_chunk_size,
-    // }
+pub fn max_rpc_size(max_chunk_size: usize) -> usize {
     max_chunk_size
 }
 
@@ -52,9 +47,9 @@ pub enum Protocol {
     #[strum(serialize = "pooled_user_op_hashes")]
     PooledUserOpHashes,
 
-    /// The `PooledUserOpsByHashV07` protocol name.
-    #[strum(serialize = "pooled_user_ops_by_hashV07")]
-    PooledUserOpsByHashV07,
+    /// The `PooledUserOpsByHashV07V08V09` protocol name.
+    #[strum(serialize = "pooled_user_ops_by_hashV07V08V09")]
+    PooledUserOpsByHashV07V08V09,
 
     /// The `PooledUserOpsByHashV06` protocol name.
     #[strum(serialize = "pooled_user_ops_by_hashV06")]
@@ -75,7 +70,7 @@ pub enum SupportedProtocol {
     PingV1,
     MetaDataV1,
     PooledUserOpHashesV1,
-    PooledUserOpsByHashV07,
+    PooledUserOpsByHashV07V08V09,
     PooledUserOpsByHashV06,
 }
 
@@ -87,7 +82,7 @@ impl SupportedProtocol {
             SupportedProtocol::PingV1 => "1",
             SupportedProtocol::MetaDataV1 => "1",
             SupportedProtocol::PooledUserOpHashesV1 => "1",
-            SupportedProtocol::PooledUserOpsByHashV07 => "1",
+            SupportedProtocol::PooledUserOpsByHashV07V08V09 => "1",
             SupportedProtocol::PooledUserOpsByHashV06 => "1",
         }
     }
@@ -99,7 +94,7 @@ impl SupportedProtocol {
             SupportedProtocol::PingV1 => Protocol::Ping,
             SupportedProtocol::MetaDataV1 => Protocol::MetaData,
             SupportedProtocol::PooledUserOpHashesV1 => Protocol::PooledUserOpHashes,
-            SupportedProtocol::PooledUserOpsByHashV07 => Protocol::PooledUserOpsByHashV07,
+            SupportedProtocol::PooledUserOpsByHashV07V08V09 => Protocol::PooledUserOpsByHashV07V08V09,
             SupportedProtocol::PooledUserOpsByHashV06 => Protocol::PooledUserOpsByHashV06,
         }
     }
@@ -111,7 +106,7 @@ impl SupportedProtocol {
             ProtocolId::new(Self::PingV1, Encoding::SSZSnappy),
             ProtocolId::new(Self::MetaDataV1, Encoding::SSZSnappy),
             ProtocolId::new(Self::PooledUserOpHashesV1, Encoding::SSZSnappy),
-            ProtocolId::new(Self::PooledUserOpsByHashV07, Encoding::SSZSnappy),
+            ProtocolId::new(Self::PooledUserOpsByHashV07V08V09, Encoding::SSZSnappy),
             ProtocolId::new(Self::PooledUserOpsByHashV06, Encoding::SSZSnappy),
         ]
     }
@@ -141,12 +136,6 @@ impl UpgradeInfo for RPCProtocol {
     /// The list of supported RPC protocols for Voltaire.
     fn protocol_info(&self) -> Self::InfoIter {
         let supported_protocols = SupportedProtocol::currently_supported();
-        // if self.enable_light_client_server {
-        //     supported_protocols.push(ProtocolId::new(
-        //         SupportedProtocol::LightClientBootstrapV1,
-        //         Encoding::SSZSnappy,
-        //     ));
-        // }
         supported_protocols
     }
 }
@@ -210,7 +199,7 @@ impl ProtocolId {
                 0,
                 10485761048576,
             ),
-            Protocol::PooledUserOpsByHashV07 =>  RpcLimits::new(
+            Protocol::PooledUserOpsByHashV07V08V09 =>  RpcLimits::new(
                 0,
                 10485761048576,
             ),
@@ -241,7 +230,7 @@ impl ProtocolId {
                 0,
                 1048576,
             ),
-            Protocol::PooledUserOpsByHashV07 => RpcLimits::new(
+            Protocol::PooledUserOpsByHashV07V08V09 => RpcLimits::new(
                 0,
                 1048576,
             ),
@@ -257,7 +246,7 @@ impl ProtocolId {
     pub fn has_context_bytes(&self) -> bool {
         match self.versioned_protocol {
             SupportedProtocol::PooledUserOpHashesV1
-            | SupportedProtocol::PooledUserOpsByHashV07
+            | SupportedProtocol::PooledUserOpsByHashV07V08V09
             | SupportedProtocol::PooledUserOpsByHashV06
             | SupportedProtocol::StatusV1
             | SupportedProtocol::PingV1
@@ -312,7 +301,6 @@ where
                     let ssz_snappy_codec = BaseInboundCodec::new(SSZSnappyInboundCodec::new(
                         protocol,
                         self.max_rpc_size,
-                        // self.fork_context.clone(),
                     ));
                     InboundCodec::SSZSnappy(ssz_snappy_codec)
                 }
@@ -370,7 +358,7 @@ impl InboundRequest {
             InboundRequest::Goodbye(_) => 0,
             InboundRequest::Ping(_) => 1,
             InboundRequest::MetaData(_) => 1,
-            InboundRequest::PooledUserOpHashes(req) => 10,
+            InboundRequest::PooledUserOpHashes(_) => 10,
             InboundRequest::PooledUserOpsByHash(_) => 1,
         }
     }
@@ -383,7 +371,7 @@ impl InboundRequest {
             InboundRequest::Ping(_) => SupportedProtocol::PingV1,
             InboundRequest::MetaData(_) => SupportedProtocol::MetaDataV1,
             InboundRequest::PooledUserOpHashes(_) => SupportedProtocol::PooledUserOpHashesV1,
-            InboundRequest::PooledUserOpsByHash(_) => SupportedProtocol::PooledUserOpsByHashV07,
+            InboundRequest::PooledUserOpsByHash(_) => SupportedProtocol::PooledUserOpsByHashV07V08V09,
         }
     }
 

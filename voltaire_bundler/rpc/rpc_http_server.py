@@ -13,10 +13,10 @@ from prometheus_client import Summary
 from voltaire_bundler.bundle.exceptions import (ExecutionException,
                                                  ValidationException)
 from voltaire_bundler.event_bus_manager.endpoint import Client, RequestEvent
-from voltaire_bundler.rpc.health import check_bundler_balance, check_nodes_health
+from voltaire_bundler.rpc.health import check_bundlers_balance, check_nodes_health
 from voltaire_bundler.rpc.jsonrpc import \
     RPCFault, RPCInvalidMethodParams, validate_and_load_json_rpc_request
-from voltaire_bundler.typing import Address
+from voltaire_bundler.custom_types import Address
 
 from aiohttp.abc import AbstractAccessLogger
 
@@ -346,7 +346,7 @@ async def handle(request: web.Request) -> web.Response:
 async def check_health(
     node_urls_to_check: list[str],
     target_chain_id_hex: str,
-    bundler: Address,
+    bundlers: list[Address],
     min_balance: int,
     _: web.Request
 ) -> web.Response:
@@ -358,8 +358,8 @@ async def check_health(
     results = dict()
     results["nodes_status"] = nodes_results
     if nodes_success:
-        bundler_balance_success, bundler_balance_results = await check_bundler_balance(
-            node_urls_to_check[0], bundler, min_balance)
+        bundler_balance_success, bundler_balance_results = await check_bundlers_balance(
+            node_urls_to_check[0], bundlers, min_balance)
         results["bundler_balance"] = bundler_balance_results
         all_ok = nodes_success and bundler_balance_success
 
@@ -374,11 +374,12 @@ async def check_health(
 async def run_rpc_http_server(
     node_urls_to_check: list[str],
     target_chain_id_hex: str,
-    bundler: Address,
+    bundlers: list[Address],
     min_balance: int,
     host: str = "localhost",
     rpc_cors_domain: str = "*",
     port: int = 3000,
+    rpc_path: str = "/rpc",
     is_debug: bool = False,
 ) -> None:
     if is_debug:
@@ -394,9 +395,9 @@ async def run_rpc_http_server(
         }
         METHODS.update(debug_methods)
 
-    logging.info(f"Starting HTTP RPC Server at: {host}:{port}/rpc")
+    logging.info(f"Starting HTTP RPC Server at: {host}:{port}{rpc_path}")
     app = web.Application()
-    app.router.add_post("/rpc", handle)
+    app.router.add_post(rpc_path, handle)
 
     app.router.add_post(
         "/health",
@@ -404,7 +405,7 @@ async def run_rpc_http_server(
             check_health,
             node_urls_to_check,
             target_chain_id_hex,
-            bundler,
+            bundlers,
             min_balance
         )
     )

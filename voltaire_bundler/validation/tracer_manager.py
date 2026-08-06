@@ -9,7 +9,7 @@ from voltaire_bundler.bundle.exceptions import (ValidationException,
 from voltaire_bundler.user_operation.user_operation_v7v8v9 import UserOperationV7V8V9
 from voltaire_bundler.user_operation.user_operation_v6 import UserOperationV6
 from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
-from voltaire_bundler.typing import Address
+from voltaire_bundler.custom_types import Address
 from voltaire_bundler.utils.load_bytecode import load_bytecode
 
 

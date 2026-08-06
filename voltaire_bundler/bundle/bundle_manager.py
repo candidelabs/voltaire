@@ -1,14 +1,16 @@
 import asyncio
 import copy
+from collections import defaultdict
 from datetime import datetime
 import logging
 import math
-from typing import Any, cast
+from typing import cast
 
 from eth_account import Account
 from eth_abi import encode
 
 from voltaire_bundler.cli_manager import ConditionalRpc
+from voltaire_bundler.gas.gas_price_cache import GasPriceCache
 from voltaire_bundler.user_operation.models import \
     FailedOp, FailedOpWithRevert
 from voltaire_bundler.bundle.exceptions import ExecutionException, ValidationException
@@ -16,10 +18,12 @@ from voltaire_bundler.mempool.mempool_manager_v6 import LocalMempoolManagerV6
 from voltaire_bundler.mempool.mempool_manager_v7 import LocalMempoolManagerV7
 from voltaire_bundler.mempool.mempool_manager_v8 import LocalMempoolManagerV8
 from voltaire_bundler.mempool.mempool_manager_v9 import LocalMempoolManagerV9
-from voltaire_bundler.typing import Address
+from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.user_operation_handler import \
-        decode_failed_op_event, decode_failed_op_with_revert_event, \
-        get_deposit_info, get_user_operation_logs_for_block_range
+        UserOperationHandler, decode_failed_op_event, \
+        decode_failed_op_with_revert_event, get_deposit_info, \
+        get_transaction_by_hash, get_user_operation_logs_for_block_range, \
+        get_user_operation_logs_for_many_hashes
 from voltaire_bundler.user_operation.user_operation_v6 import UserOperationV6
 from voltaire_bundler.user_operation.user_operation_v7v8v9 import UserOperationV7V8V9
 
@@ -30,12 +34,48 @@ from voltaire_bundler.utils.load_bytecode import load_bytecode
 
 from ..mempool.reputation_manager import ReputationManager
 
+# Per-userop floor on "old enough to be worth checking for inclusion".
+# Below this age the userop almost certainly hasn't been mined yet, so
+# the coalesced eth_getLogs would return no useful new data. Applied
+# per EP: a monitor set with no userop past this age skips its sweep
+# this tick. Short-circuits on the first match, so even a large monitor
+# set with a few stale entries returns immediately.
+MIN_INCLUSION_CHECK_AGE_S = 2.0
+
+
+async def _warm_inclusion_caches(
+    ethereum_node_urls: list[str],
+    user_operation_handler: UserOperationHandler,
+    transaction_hash: str,
+) -> None:
+    """Fire-and-forget warmup of ``transactions_cache`` and
+    ``transaction_receipts_cache`` once the monitor sees a userop's log
+    on-chain. By the time a client polls ``eth_getUserOperationByHash``
+    or ``eth_getUserOperationReceipt`` for this userop, both caches are
+    already warm, so the RPC handler avoids the eth_getTransactionByHash
+    and eth_getTransactionReceipt round trips against a live node.
+
+    Errors are logged and swallowed — nothing here is load-bearing; if
+    the warmup fails the caches fill lazily on the first client query."""
+    try:
+        await asyncio.gather(
+            get_transaction_by_hash(ethereum_node_urls, transaction_hash),
+            user_operation_handler.get_transaction_receipt(transaction_hash),
+        )
+    except Exception:
+        logging.exception(
+            "cache warmup after inclusion failed for tx %s",
+            transaction_hash,
+        )
+
 
 class BundlerManager:
     ethereum_node_urls: list[str]
     bundle_node_urls: list[str]
-    bundler_private_key: str
-    bundler_address: Address
+    # (address, private_key) per entrypoint label ("v6", "v7", "v8", "v9").
+    # Operators may set one EOA for all four (the default) or a distinct EOA
+    # per entrypoint via comma-separated --bundler_secret.
+    bundler_secrets_per_ep: dict[str, tuple[Address, str]]
     local_mempool_manager_v6: LocalMempoolManagerV6 | None
     local_mempool_manager_v7: LocalMempoolManagerV7
     local_mempool_manager_v8: LocalMempoolManagerV8
@@ -57,9 +97,14 @@ class BundlerManager:
     user_operations_to_monitor_v9: dict[str, UserOperationV7V8V9]
     user_operations_to_ban: dict[
         str, tuple[UserOperationV6 | UserOperationV7V8V9, str, Address]]
-    gas_price_percentage_multiplier: int
-    bundle_gas_estimation_multiplier: int
+    # Scoped per bundler EOA, not per EP label: two EPs configured with the
+    # same bundler_secret share a nonce space and therefore share the
+    # underpriced-replacement climb; two EPs on distinct EOAs must not have
+    # one's inclusion reset the other's in-flight multiplier.
+    gas_price_percentage_multiplier: dict[Address, int]
+    bundle_gas_estimation_multiplier: float
     entrypoint_v9_reentrant: str
+    gas_price_cache: GasPriceCache
 
     def __init__(
         self,
@@ -68,25 +113,26 @@ class BundlerManager:
         local_mempool_manager_v8: LocalMempoolManagerV8,
         local_mempool_manager_v9: LocalMempoolManagerV9,
         ethereum_node_urls: list[str],
+        ethereum_node_eth_get_logs_urls: list[str],
         bundle_node_urls: list[str],
-        bundler_private_key: str,
-        bundler_address: Address,
+        bundler_secrets_per_ep: dict[str, tuple[Address, str]],
         chain_id: int,
         is_legacy_mode: bool,
         conditional_rpc: ConditionalRpc | None,
         flashbots_protect_node_urls: list[str] | None,
         max_fee_per_gas_percentage_multiplier: int,
         max_priority_fee_per_gas_percentage_multiplier: int,
-        bundle_gas_estimation_multiplier: int,
+        bundle_gas_estimation_multiplier: float,
+        gas_price_cache: GasPriceCache,
     ):
         self.local_mempool_manager_v6 = local_mempool_manager_v6
         self.local_mempool_manager_v7 = local_mempool_manager_v7
         self.local_mempool_manager_v8 = local_mempool_manager_v8
         self.local_mempool_manager_v9 = local_mempool_manager_v9
         self.ethereum_node_urls = ethereum_node_urls
+        self.ethereum_node_eth_get_logs_urls = ethereum_node_eth_get_logs_urls
         self.bundle_node_urls = bundle_node_urls
-        self.bundler_private_key = bundler_private_key
-        self.bundler_address = bundler_address
+        self.bundler_secrets_per_ep = bundler_secrets_per_ep
         self.chain_id = chain_id
         self.is_legacy_mode = is_legacy_mode
         self.conditional_rpc = conditional_rpc
@@ -100,6 +146,11 @@ class BundlerManager:
         self.bundles_to_send_v9 = []
         self.bundles_to_send_v8 = []
         self.bundles_to_send_v7 = []
+        # Strong references to fire-and-forget inclusion-cache warmup
+        # tasks; the event loop holds tasks weakly, so without this a
+        # warmup could be garbage-collected mid-flight (and, being
+        # deduped via seen_warmup_tx_hashes, never retried).
+        self._warmup_tasks: set[asyncio.Task] = set()
         if self.local_mempool_manager_v6 is None:
             self.bundles_to_send_v6 = None
         else:
@@ -110,10 +161,14 @@ class BundlerManager:
         self.user_operations_to_monitor_v7 = {}
         self.user_operations_to_monitor_v6 = {}
 
-        self.gas_price_percentage_multiplier = 100
+        # Keyed by bundler EOA. Entries are added the first time an EOA's
+        # multiplier is bumped; before that, reads fall back to 100 via
+        # dict.get(addr, 100).
+        self.gas_price_percentage_multiplier = {}
         self.user_operations_to_ban = {}
         self.bundle_gas_estimation_multiplier = bundle_gas_estimation_multiplier
         self.entrypoint_v9_reentrant = load_bytecode("EntryPointV9Reentrant.json")
+        self.gas_price_cache = gas_price_cache
 
     async def send_next_bundle(self) -> None:
         await self.update_send_queue_and_monitor_queue()
@@ -193,23 +248,43 @@ class BundlerManager:
         self.user_operations_to_ban = {}
         await asyncio.gather(*useroperation_banning_ops)
 
+    @staticmethod
+    def _monitor_set_has_op_past_age(
+        monitor_set: dict,
+        now: datetime,
+        min_age_s: float = MIN_INCLUSION_CHECK_AGE_S,
+    ) -> bool:
+        """True if any userop in the monitor set has been waiting long
+        enough to be worth checking for inclusion. Returns False when the
+        set is empty or every userop is too young — skips the upstream
+        eth_getLogs RPC entirely on that branch.
+
+        Entries with last_add_to_mempool_date=None are skipped (not
+        treated as "old enough"): they're in an inconsistent state and
+        the sweep body would skip them anyway via the matching guard,
+        so triggering a full sweep on their account would be wasted RPC.
+        The mismatched-state op will be handled the next time something
+        repairs the timestamp (typically a re-add via the mempool)."""
+        for op in monitor_set.values():
+            last_add = op.last_add_to_mempool_date
+            if last_add is None:
+                continue
+            if (now - last_add).total_seconds() >= min_age_s:
+                return True
+        return False
+
     async def update_send_queue_and_monitor_queue(self) -> None:
-        tasks_arr = [
-            self.remove_included_and_readd_to_mempool_userops_monitoring(
-                self.user_operations_to_monitor_v9,
-                self.local_mempool_manager_v9.entrypoint,
-                self.local_mempool_manager_v9
-            ),
-            self.remove_included_and_readd_to_mempool_userops_monitoring(
-                self.user_operations_to_monitor_v8,
-                self.local_mempool_manager_v8.entrypoint,
-                self.local_mempool_manager_v8
-            ),
-            self.remove_included_and_readd_to_mempool_userops_monitoring(
-                self.user_operations_to_monitor_v7,
-                self.local_mempool_manager_v7.entrypoint,
-                self.local_mempool_manager_v7
-            ),
+        # The bundle-build tasks (get_user_operations_to_bundle for each
+        # EP version) ALWAYS run on every tick — they're the user-facing
+        # latency path. The monitor sweep tasks (inclusion check via
+        # coalesced eth_getLogs + stale-userop re-add) are gated PER EP
+        # by per-userop age: if no userop in that EP's monitor set is
+        # past MIN_INCLUSION_CHECK_AGE_S, skip the sweep this tick — the
+        # logs scan would return nothing useful and the re-add path is
+        # gated by its own 5s threshold anyway. Effect: busy mempools
+        # sweep often, quiet ones don't; sub-second bundle_interval
+        # doesn't translate to one eth_getLogs per tick.
+        bundle_tasks = [
             self.local_mempool_manager_v9.get_user_operations_to_bundle(
                 self.conditional_rpc is not None
             ),
@@ -218,40 +293,115 @@ class BundlerManager:
             ),
             self.local_mempool_manager_v7.get_user_operations_to_bundle(
                 self.conditional_rpc is not None
-            )
+            ),
         ]
         if self.local_mempool_manager_v6 is not None:
-            tasks_arr += [
+            bundle_tasks.append(
+                self.local_mempool_manager_v6.get_user_operations_to_bundle(
+                    self.conditional_rpc is not None
+                )
+            )
+
+        sweep_tasks: list = []
+        now = datetime.now()
+        if self._monitor_set_has_op_past_age(
+            self.user_operations_to_monitor_v9, now
+        ):
+            sweep_tasks.append(
+                self.remove_included_and_readd_to_mempool_userops_monitoring(
+                    self.user_operations_to_monitor_v9,
+                    self.local_mempool_manager_v9.entrypoint,
+                    self.local_mempool_manager_v9
+                )
+            )
+        if self._monitor_set_has_op_past_age(
+            self.user_operations_to_monitor_v8, now
+        ):
+            sweep_tasks.append(
+                self.remove_included_and_readd_to_mempool_userops_monitoring(
+                    self.user_operations_to_monitor_v8,
+                    self.local_mempool_manager_v8.entrypoint,
+                    self.local_mempool_manager_v8
+                )
+            )
+        if self._monitor_set_has_op_past_age(
+            self.user_operations_to_monitor_v7, now
+        ):
+            sweep_tasks.append(
+                self.remove_included_and_readd_to_mempool_userops_monitoring(
+                    self.user_operations_to_monitor_v7,
+                    self.local_mempool_manager_v7.entrypoint,
+                    self.local_mempool_manager_v7
+                )
+            )
+        if (
+            self.local_mempool_manager_v6 is not None
+            and self._monitor_set_has_op_past_age(
+                self.user_operations_to_monitor_v6, now
+            )
+        ):
+            sweep_tasks.append(
                 self.remove_included_and_readd_to_mempool_userops_monitoring(
                     self.user_operations_to_monitor_v6,
                     self.local_mempool_manager_v6.entrypoint,
                     self.local_mempool_manager_v6
-                ),
-                self.local_mempool_manager_v6.get_user_operations_to_bundle(
-                    self.conditional_rpc is not None
-                ),
-            ]
-        tasks = await asyncio.gather(*tasks_arr)
+                )
+            )
 
-        user_operations_to_bundle_v9 = cast(dict[str, UserOperationV7V8V9], tasks[3])
+        # Run bundle tasks + (optional) sweep tasks concurrently. The
+        # sweep coroutines mutate user_operations_to_monitor_*; the
+        # bundle coroutines don't touch those dicts, so this is safe.
+        # Sweeps are auxiliary — isolate their exceptions so a sweep
+        # failure doesn't drop the committed bundle output. Bundle-task
+        # exceptions still propagate (they're the user-facing latency
+        # path and must surface).
+        bundle_results = await asyncio.gather(*bundle_tasks)
+        if sweep_tasks:
+            sweep_results = await asyncio.gather(
+                *sweep_tasks, return_exceptions=True
+            )
+            for res in sweep_results:
+                if isinstance(res, BaseException):
+                    logging.error(
+                        "monitor sweep failed; bundle output unaffected",
+                        exc_info=res,
+                    )
+        user_operations_to_bundle_v9 = cast(dict[str, UserOperationV7V8V9], bundle_results[0])
         self.bundles_to_send_v9.append(user_operations_to_bundle_v9)
         self.user_operations_to_monitor_v9 |= copy.deepcopy(user_operations_to_bundle_v9)
 
-        user_operations_to_bundle_v8 = cast(dict[str, UserOperationV7V8V9], tasks[4])
+        user_operations_to_bundle_v8 = cast(dict[str, UserOperationV7V8V9], bundle_results[1])
         self.bundles_to_send_v8.append(user_operations_to_bundle_v8)
         self.user_operations_to_monitor_v8 |= copy.deepcopy(user_operations_to_bundle_v8)
 
-        user_operations_to_bundle_v7 = cast(dict[str, UserOperationV7V8V9], tasks[5])
+        user_operations_to_bundle_v7 = cast(dict[str, UserOperationV7V8V9], bundle_results[2])
         self.bundles_to_send_v7.append(user_operations_to_bundle_v7)
         self.user_operations_to_monitor_v7 |= copy.deepcopy(user_operations_to_bundle_v7)
 
         if self.local_mempool_manager_v6 is not None:
             if self.bundles_to_send_v6 is None:
                 self.bundles_to_send_v6 = []
-            user_operations_to_bundle_v6 = cast(dict[str, UserOperationV6], tasks[7])
+            user_operations_to_bundle_v6 = cast(dict[str, UserOperationV6], bundle_results[3])
             self.bundles_to_send_v6.append(user_operations_to_bundle_v6)
             self.user_operations_to_monitor_v6 |= copy.deepcopy(
                 user_operations_to_bundle_v6)
+
+    def _secret_for_mempool(
+        self,
+        mempool_manager: (
+            LocalMempoolManagerV9
+            | LocalMempoolManagerV8
+            | LocalMempoolManagerV7
+            | LocalMempoolManagerV6
+        ),
+    ) -> tuple[Address, str]:
+        if isinstance(mempool_manager, LocalMempoolManagerV9):
+            return self.bundler_secrets_per_ep["v9"]
+        if isinstance(mempool_manager, LocalMempoolManagerV8):
+            return self.bundler_secrets_per_ep["v8"]
+        if isinstance(mempool_manager, LocalMempoolManagerV7):
+            return self.bundler_secrets_per_ep["v7"]
+        return self.bundler_secrets_per_ep["v6"]
 
     async def send_bundle(
         self,
@@ -263,81 +413,105 @@ class BundlerManager:
         num_of_user_operations = len(user_operations)
         if num_of_user_operations == 0:
             return
+        bundler_address, bundler_private_key = self._secret_for_mempool(
+            mempool_manager)
         logging.info(
             f"Attempting to send bundle with {num_of_user_operations} user operations."
         )
 
         call_data_and_call_gas_limit_op = self.create_bundle_calldata_and_estimate_gas(
             user_operations,
-            self.bundler_address,
+            bundler_address,
             entrypoint,
             highest_verified_at_block
-        )
-
-        block_max_fee_per_gas_op = send_rpc_request_to_eth_client(
-            self.ethereum_node_urls, "eth_gasPrice", None, None, "result"
         )
 
         nonce_op = send_rpc_request_to_eth_client(
             self.ethereum_node_urls,
             "eth_getTransactionCount",
-            [self.bundler_address, "latest"], None, "result"
+            [bundler_address, "latest"], None, "result"
         )
 
-        tasks_arr = [
-            call_data_and_call_gas_limit_op,
-            block_max_fee_per_gas_op,
-            nonce_op,
-        ]
-
-        if not self.is_legacy_mode:
-            block_max_priority_fee_per_gas_op = send_rpc_request_to_eth_client(
-                self.ethereum_node_urls, "eth_maxPriorityFeePerGas",
-                None, None, "result"
-            )
-            tasks_arr.append(block_max_priority_fee_per_gas_op)
-
+        # Gas-price values come from the background-refreshed cache so each
+        # bundle round drops two RPCs (eth_gasPrice + eth_maxPriorityFeePerGas)
+        # off the upstream node. Snapshot is fetched in parallel with the
+        # bundle gas estimate + nonce so a stale-fallback refresh, if it
+        # happens, doesn't add wall-clock latency.
         try:
-            tasks = await asyncio.gather(*tasks_arr)
+            (
+                call_data_tuple,
+                nonce_result,
+                gas_price_snapshot,
+            ) = await asyncio.gather(
+                call_data_and_call_gas_limit_op,
+                nonce_op,
+                self.gas_price_cache.get_snapshot(),
+            )
         except ExecutionException as err:
             logging.error(f"Sending bundle failed with erro: {err.message}")
             return
+        except Exception:
+            # get_snapshot's synchronous-fallback path can raise non-Execution
+            # errors when the upstream node is unreachable or returns a
+            # malformed response (ValueError on int(..,16), KeyError on
+            # missing 'result', transport errors). Skipping the bundle round
+            # cleanly is preferable to leaking and aborting the entire cron
+            # task — the next tick will retry with a fresh snapshot.
+            logging.error(
+                "sending bundle failed: gas-price snapshot fetch errored",
+                exc_info=True,
+            )
+            return
 
-        call_data, gas_estimation_hex, merged_storage_map, auth_list = tasks[0]
+        call_data, gas_estimation_hex, merged_storage_map, auth_list = call_data_tuple
 
         if call_data is None or gas_estimation_hex is None:
             logging.debug(
                 "Sending bundle failed. failed call data or gas estimation.")
             return
-        
-        gas_estimation_int = (
-            int(gas_estimation_hex) * self.bundle_gas_estimation_multiplier
+
+        multiplier = self.bundle_gas_estimation_multiplier
+        if self.chain_id in (5031, 50312):
+            multiplier = max(multiplier, 1.5)
+
+        gas_estimation_int = math.ceil(
+            gas_estimation_hex * multiplier
         )
         gas_estimation_hex = hex(gas_estimation_int)
 
-        block_max_fee_per_gas = tasks[1]["result"]
-        nonce = tasks[2]["result"]
+        nonce = nonce_result["result"]
 
-        block_max_fee_per_gas_dec = int(block_max_fee_per_gas, 16)
+        gas_price_percentage_multiplier = (
+            self.gas_price_percentage_multiplier.get(bundler_address, 100)
+        )
+
+        block_max_fee_per_gas_dec = gas_price_snapshot.max_fee_per_gas
         block_max_fee_per_gas_dec_mod = math.ceil(
             block_max_fee_per_gas_dec
             * (self.max_fee_per_gas_percentage_multiplier / 100)
-            * (self.gas_price_percentage_multiplier / 100)
+            * (gas_price_percentage_multiplier / 100)
         )
         block_max_fee_per_gas_hex = hex(block_max_fee_per_gas_dec_mod)
 
-        block_max_priority_fee_per_gas_hex = "0x"
-        if not self.is_legacy_mode:
-            block_max_priority_fee_per_gas = tasks[3]["result"]
-            block_max_priority_fee_per_gas_dec = int(
-                    block_max_priority_fee_per_gas, 16)
+        block_max_priority_fee_per_gas_hex = "0x0"
+        # skip eth_maxPriorityFeePerGas in legacy mode and on HyperEVM —
+        # the cache also skips fetching it in these cases, so the snapshot
+        # value is None.
+        if not (
+            self.is_legacy_mode or
+            self.chain_id == 999 or self.chain_id == 998
+        ):
+            assert gas_price_snapshot.max_priority_fee_per_gas is not None
+            block_max_priority_fee_per_gas_dec = (
+                gas_price_snapshot.max_priority_fee_per_gas
+            )
             block_max_priority_fee_per_gas_dec_mod = math.ceil(
                 block_max_priority_fee_per_gas_dec
                 * (self.max_priority_fee_per_gas_percentage_multiplier / 100)
-                * (self.gas_price_percentage_multiplier / 100)
+                * (gas_price_percentage_multiplier / 100)
             )
 
-           # max priority fee per gas should be atleast 1
+            # max priority fee per gas should be atleast 1
             if block_max_priority_fee_per_gas_dec_mod <= 0:
                 block_max_priority_fee_per_gas_dec_mod = 1
 
@@ -358,7 +532,7 @@ class BundlerManager:
         if len(auth_list) == 0:
             txnDict = {
                 "chainId": self.chain_id,
-                "from": self.bundler_address,
+                "from": bundler_address,
                 "to": entrypoint,
                 "nonce": nonce,
                 "gas": gas_estimation_hex,
@@ -379,7 +553,7 @@ class BundlerManager:
                     }
                 )
             sign_store_txn = Account.sign_transaction(
-                txnDict, private_key=self.bundler_private_key
+                txnDict, private_key=bundler_private_key
             )
             raw_transaction = "0x" + sign_store_txn.raw_transaction.hex()
         else:
@@ -393,7 +567,7 @@ class BundlerManager:
                 value_hex="0x",
                 data=call_data,
                 authorization_list=auth_list,
-                eoa_private_key=self.bundler_private_key
+                eoa_private_key=bundler_private_key
             )
 
         if self.conditional_rpc is not None and merged_storage_map is not None:
@@ -417,7 +591,7 @@ class BundlerManager:
                     raw_transaction,
                     {"fast": True}
                 ],
-                (self.bundler_address, self.bundler_private_key)
+                (bundler_address, bundler_private_key)
             )
         else:
             result = await send_rpc_request_to_eth_client(
@@ -455,13 +629,16 @@ class BundlerManager:
                     # retry sending useroperations with higher gas price
                     # if the gas_price_percentage_multiplier reached 600,
                     # drop all user_operations
-                    if self.gas_price_percentage_multiplier <= 600:
-                        self.gas_price_percentage_multiplier += 30
+                    if gas_price_percentage_multiplier <= 600:
+                        gas_price_percentage_multiplier += 30
+                        self.gas_price_percentage_multiplier[
+                            bundler_address
+                        ] = gas_price_percentage_multiplier
                         logging.warning(
                             str(result["error"]["message"]) +
                             " increasing bundle gas price by 30% "
                             "- gas_price_percentage_multiplier now is "
-                            f"{self.gas_price_percentage_multiplier}%"
+                            f"{gas_price_percentage_multiplier}%"
                         )
 
                         await self.send_bundle(
@@ -512,7 +689,16 @@ class BundlerManager:
             transaction_hash = result["result"]
             logging.info(
                 "Bundle was sent with transaction hash : " + transaction_hash)
-            self.gas_price_percentage_multiplier = 100
+            # NOTE: do not reset gas_price_percentage_multiplier here.
+            # eth_sendRawTransaction returning a hash only means the node
+            # accepted the tx into its mempool — the previous bundle from
+            # this EOA is likely still pending at whatever price got us
+            # here, and resetting to 100% would force the next round to
+            # re-climb via ~15 recursive underpriced-replacement retries
+            # before it can replace the pending tx. The multiplier is
+            # reset instead when the monitor sweep confirms the userop
+            # landed on chain (or gives up on it), i.e. when we know the
+            # nonce actually advanced.
 
             self.update_monitor_status_transation_hash(
                 user_operations,
@@ -533,28 +719,129 @@ class BundlerManager:
             entrypoint: str,
             local_mempool: LocalMempoolManagerV6 | LocalMempoolManagerV7 | LocalMempoolManagerV8
     ) -> None:
-        logs_res_ops = []
-        for user_operation_hash, user_operation in user_operations_to_monitor.items():
-            assert user_operation.validated_at_block_hex is not None
-            earliest_block = user_operation.validated_at_block_hex
-            logs_res_op = get_user_operation_logs_for_block_range(
-                # not using the ethereum_node_eth_get_logs_urls as the
-                # block range can't be large and to role out the possibility
-                # that the logs node is slightly behind/out of sync
-                self.ethereum_node_urls,
-                user_operation_hash,
-                entrypoint,
-                earliest_block,
-                "latest"
-            )
-            logs_res_ops.append(logs_res_op)
-        user_operations_logs = await asyncio.gather(*logs_res_ops)
+        # One eth_getLogs across the entire monitored set instead of one per
+        # userop. Scans from the oldest monitored userop's validation block
+        # forward; the helper buckets results by topic[1] (userOpHash) and
+        # warms the per-userop logs cache for each hit.
+        # Routed through ethereum_node_eth_get_logs_urls (falls back to
+        # ethereum_node_urls when unset) so a dedicated logs node absorbs
+        # this sweep. A logs node briefly behind head can only produce a
+        # transient "still pending" miss — the next tick re-sweeps.
+        if user_operations_to_monitor:
+            validated_blocks = [
+                int(op.validated_at_block_hex, 16)
+                for op in user_operations_to_monitor.values()
+                if op.validated_at_block_hex is not None
+            ]
+            if validated_blocks:
+                # Resolve "latest" DIRECTLY from ethereum_node_eth_get_logs_urls
+                # instead of going through latest_block_cache. The cache is
+                # publish()-ed by validation paths that talk to
+                # ethereum_node_urls; when validation is busy the cache holds
+                # the eth-node's head, not the logs-node's. If the two nodes
+                # are different providers and the logs node is even one block
+                # behind, we'd query eth_getLogs with toBlock=<ethNodeHead>
+                # against a node that hasn't ingested that block, and most
+                # providers return an empty result (or "unknown block")
+                # rather than blocking. That would make every freshly-
+                # included userop look "still pending" until both nodes
+                # converge — which under load is roughly never — so the
+                # sweep never removes them from the monitor set, the 5 s
+                # gate re-adds them to the mempool, and client resubmits
+                # collide with "already in mempool" while validate_paymaster_deposit
+                # runs out of headroom.
+                #
+                # One extra eth_getBlockByNumber per sweep tick is cheap
+                # (bounded by MIN_INCLUSION_CHECK_AGE_S = 2 s per EP), and
+                # keeps toBlock consistent with the node the eth_getLogs
+                # will actually run against.
+                to_block_hex_for_scan: str
+                try:
+                    head_res = await asyncio.wait_for(
+                        send_rpc_request_to_eth_client(
+                            self.ethereum_node_eth_get_logs_urls,
+                            "eth_getBlockByNumber",
+                            ["latest", False],
+                        ),
+                        timeout=2.0,
+                    )
+                    head_hex = (
+                        head_res.get("result", {}).get("number")
+                        if isinstance(head_res, dict) else None
+                    )
+                    to_block_hex_for_scan = (
+                        head_hex if isinstance(head_hex, str) else "latest"
+                    )
+                except Exception:
+                    # Fall back to "latest" — the helper will resolve it via
+                    # the shared cache. That may be off-node, but skipping
+                    # the sweep entirely on a transient head-fetch failure
+                    # would be worse.
+                    logging.debug(
+                        "logs-node head fetch failed for coalesced sweep; "
+                        "falling back to shared latest_block_cache",
+                        exc_info=True,
+                    )
+                    to_block_hex_for_scan = "latest"
 
-        user_operations_hashes_to_remove_from_monitoring = []
-        for user_operation, user_operation_log in zip(
-            list(user_operations_to_monitor.values()), user_operations_logs
-        ):
-            assert user_operation.last_add_to_mempool_date is not None
+                user_operations_logs_by_hash = (
+                    await get_user_operation_logs_for_many_hashes(
+                        self.ethereum_node_eth_get_logs_urls,
+                        list(user_operations_to_monitor.keys()),
+                        entrypoint,
+                        hex(min(validated_blocks)),
+                        to_block_hex_for_scan,
+                    )
+                )
+            else:
+                # No monitored op has a known validation block (e.g. all are
+                # mid-validation right after a restart). Skip the coalesced
+                # scan this tick — the next tick will pick them up once
+                # validation has stamped validated_at_block_hex.
+                user_operations_logs_by_hash = {}
+        else:
+            user_operations_logs_by_hash = {}
+
+        # Hashes that get removed from monitoring no matter what: either
+        # successfully included on chain, or expired past the 20-attempt
+        # threshold (giving up).
+        unconditional_remove: list[str] = []
+        # Stale-but-not-yet-given-up monitor entries that we're going to
+        # try to re-add this tick. They're removed from monitoring ONLY if
+        # the re-add either succeeds OR fails with a known error. An
+        # unexpected exception (TypeError, transport error, etc.) leaves
+        # the userop in monitor so the next tick retries — without this
+        # split, c18aeb6's broad except silently deleted userops that
+        # the bundler had no business dropping.
+        stale_hashes_attempted: list[str] = []
+        readd_completed: set[str] = set()
+        user_operations_to_readd: list[UserOperationV6 | UserOperationV7V8V9] = []
+        # Multiple userops in one bundle share the inclusion tx hash, so
+        # dedupe before scheduling warmups to avoid redundant RPC round
+        # trips for the same transaction.
+        seen_warmup_tx_hashes: set[str] = set()
+        # Every userop in this monitor set belongs to the same EP → same
+        # bundler EOA, so resolve once and scope multiplier resets to it.
+        bundler_address = self._secret_for_mempool(local_mempool)[0]
+        for user_operation in list(user_operations_to_monitor.values()):
+            user_operation_log = user_operations_logs_by_hash.get(
+                user_operation.user_operation_hash
+            )
+            if user_operation.last_add_to_mempool_date is None:
+                # Inconsistent state — userop in monitor without a mempool-add
+                # timestamp. add_user_operation always stamps this BEFORE the
+                # op can reach the monitor set, so None here indicates either
+                # a future code path that bypasses the mempool (p2p restore,
+                # debug RPC) or a deepcopy edge case. Skip rather than asserting
+                # (under -O the assert is a no-op and the next-line subtraction
+                # would TypeError) — the next mempool roundtrip will populate
+                # the timestamp and the next sweep will pick it up.
+                logging.warning(
+                    "monitor entry %s has no last_add_to_mempool_date; "
+                    "skipping inclusion check this tick",
+                    user_operation.user_operation_hash,
+                )
+                continue
             time_diff_sec = (
                 datetime.now() - user_operation.last_add_to_mempool_date
             ).total_seconds()
@@ -564,16 +851,47 @@ class BundlerManager:
                     "was included onchain after adding to mempool for "
                     f"{user_operation.number_of_add_to_mempool_attempts} times"
                 )
-                user_operations_hashes_to_remove_from_monitoring.append(
+                unconditional_remove.append(
                     user_operation.user_operation_hash)
+                # This EP's bundler EOA landed a tx → its nonce advanced, so
+                # any leftover multiplier accumulated while we waited for
+                # this inclusion no longer applies. Reset only THIS EOA's
+                # entry; other EPs may still be climbing under different
+                # bundler_secrets.
+                self.gas_price_percentage_multiplier[bundler_address] = 100
+                # Preemptively warm the tx-by-hash and tx-receipt caches in
+                # the background so the next client poll for this userop
+                # finds them hot instead of paying two more RPC round trips.
+                # The log entry's transactionHash is the only thing we need.
+                log_entry = user_operation_log[0]
+                tx_hash = log_entry.get("transactionHash")
+                if tx_hash and tx_hash not in seen_warmup_tx_hashes:
+                    seen_warmup_tx_hashes.add(tx_hash)
+                    warmup_task = asyncio.create_task(
+                        _warm_inclusion_caches(
+                            self.ethereum_node_urls,
+                            local_mempool.user_operation_handler,
+                            tx_hash,
+                        )
+                    )
+                    self._warmup_tasks.add(warmup_task)
+                    warmup_task.add_done_callback(
+                        self._warmup_tasks.discard
+                    )
             elif user_operation.number_of_add_to_mempool_attempts > 20:
                 logging.warning(
                     f"user operation: {user_operation.user_operation_hash} "
                     "was not included onchain yet after readding to mempool 20 times"
                     "-drooping the userop from the monitoring system"
                 )
-                user_operations_hashes_to_remove_from_monitoring.append(
+                unconditional_remove.append(
                     user_operation.user_operation_hash)
+                # We're giving up on this userop, so any multiplier that
+                # accumulated while chasing its pending tx is stale — leaving
+                # it high would either overpay the next unrelated userop on
+                # this EOA or trip the <=600 cap on the very first retry and
+                # drop without climbing. Reset only this EOA's entry.
+                self.gas_price_percentage_multiplier[bundler_address] = 100
             elif time_diff_sec > 5:
                 logging.info(
                     f"user operation: {user_operation.user_operation_hash} "
@@ -581,19 +899,74 @@ class BundlerManager:
                     f"{user_operation.number_of_add_to_mempool_attempts} "
                     "-readding it to the mempool"
                 )
-                try:
-                    user_operations_hashes_to_remove_from_monitoring.append(
-                        user_operation.user_operation_hash)
-                    await local_mempool.add_user_operation(
-                        user_operation)
-                except (ValidationException, ExecutionException, ValueError) as exp:
-                    logging.info(
-                        "failed readding to the mempool "
-                        f"user operation: {user_operation.user_operation_hash} "
-                        f" - cause : {str(exp)} "
-                    )
-        for user_operation_hash in user_operations_hashes_to_remove_from_monitoring:
+                stale_hashes_attempted.append(
+                    user_operation.user_operation_hash)
+                user_operations_to_readd.append(user_operation)
+
+        if user_operations_to_readd:
+            # Parallelize ACROSS senders but stay serial WITHIN each sender.
+            # add_user_operation mutates per-sender state behind several
+            # awaits (validation, paymaster checks); two concurrent re-adds
+            # for the same sender could clobber each other's mempool insert.
+            # Different senders touch disjoint state, so they're safe to run
+            # concurrently — and that's where the wall-clock win is.
+            by_sender: dict[
+                str, list[UserOperationV6 | UserOperationV7V8V9]
+            ] = defaultdict(list)
+            for op in user_operations_to_readd:
+                by_sender[op.sender_address].append(op)
+
+            async def readd_chain(
+                ops: list[UserOperationV6 | UserOperationV7V8V9],
+            ) -> None:
+                for op in ops:
+                    try:
+                        await local_mempool.add_user_operation(op)
+                    except (
+                        ValidationException,
+                        ExecutionException,
+                        ValueError,
+                    ) as exp:
+                        logging.info(
+                            "failed readding to the mempool "
+                            f"user operation: {op.user_operation_hash} "
+                            f" - cause : {str(exp)} "
+                        )
+                    except Exception:
+                        # Unexpected failure (TypeError, KeyError, transport
+                        # errors not normalised to ValueError, etc.). Log
+                        # and KEEP the op in monitor for the next tick to
+                        # retry — don't add to readd_completed. Catching
+                        # this also prevents the exception from escaping
+                        # the gather and cancelling sibling re-adds.
+                        logging.exception(
+                            "unexpected error readding user operation: %s",
+                            op.user_operation_hash,
+                        )
+                        continue
+                    # Treat both successful re-add and known-failure (caught
+                    # above) as "done with this userop this tick" — both
+                    # paths fall through to here.
+                    readd_completed.add(op.user_operation_hash)
+
+            # return_exceptions=True belt-and-suspenders against a future
+            # change to readd_chain leaking an exception; without it, one
+            # sender's failure cancels every other sender's coroutine and
+            # the completion-tracking below would miss entries.
+            await asyncio.gather(
+                *(readd_chain(ops) for ops in by_sender.values()),
+                return_exceptions=True,
+            )
+
+        # Final removal list: unconditional removals (included on-chain
+        # or expired) plus stale ops whose re-add attempt actually
+        # completed. Stale ops with an unexpected failure stay in monitor
+        # for the next tick to retry.
+        for user_operation_hash in unconditional_remove:
             del user_operations_to_monitor[user_operation_hash]
+        for user_operation_hash in stale_hashes_attempted:
+            if user_operation_hash in readd_completed:
+                del user_operations_to_monitor[user_operation_hash]
 
     def update_monitor_status_transation_hash(
         self,
@@ -677,13 +1050,13 @@ class BundlerManager:
                 if user_operation.eip7702_auth is not None:
                     auth_list.append(user_operation.eip7702_auth)
             call_data = encode_handleops_calldata_v7v8v9(
-                user_operations_list, self.bundler_address
+                user_operations_list, bundler
             )
         else:
             for user_operation in user_operations:
                 user_operations_list.append(user_operation.to_list())
             call_data = encode_handleops_calldata_v6(
-                user_operations_list, self.bundler_address
+                user_operations_list, bundler
             )
 
         bundle_calldata_init_gas = calculate_bundle_calldata_init_gas(call_data)
@@ -692,6 +1065,8 @@ class BundlerManager:
             bundle_gas_limit += user_operation.get_max_gas_with_pre_verification_gas()
 
         bundle_gas_limit += 50_000 + bundle_calldata_init_gas
+        if self.chain_id in (5031, 50312):  # Somnia
+            bundle_gas_limit += 200_000 * len(user_operations)
 
         # arbitrum One or arbitrum sepolia
         if self.chain_id == 42161 or self.chain_id == 421614:
@@ -891,10 +1266,7 @@ class BundlerManager:
                 "useroperation without validated_at_block_hex")
 
         logs_res = await get_user_operation_logs_for_block_range(
-            # not using the ethereum_node_eth_get_logs_urls as the
-            # block range can't be large and to role out the possibility
-            # that the logs node is slightly behind/out of sync
-            self.ethereum_node_urls,
+            self.ethereum_node_eth_get_logs_urls,
             user_operation.user_operation_hash,
             entrypoint,
             earliest_block,

@@ -3,7 +3,7 @@ use libp2p::swarm::ConnectionId;
 use crate::rpc::{
     methods::{
         RPCCodedResponse, RPCResponse, ResponseTermination, StatusMessage,
-        PooledUserOpHashes,PooledUserOpsByHashV07,PooledUserOpsByHashV06, PooledUserOpHashesRequest, PooledUserOpsByHashRequest
+        PooledUserOpHashes,PooledUserOpsByHashV07V08V09,PooledUserOpsByHashV06, PooledUserOpHashesRequest, PooledUserOpsByHashRequest
     },
     OutboundRequest, SubstreamId,
 };
@@ -56,7 +56,7 @@ pub enum Response {
     /// A response to a get PooledUserOpHashes request.
     PooledUserOpHashes(Option<PooledUserOpHashes>),
     /// A response to a get PooledUserOpsByHash request.
-    PooledUserOpsByHashV07(Option<PooledUserOpsByHashV07>),
+    PooledUserOpsByHashV07V08V09(Option<PooledUserOpsByHashV07V08V09>),
     PooledUserOpsByHashV06(Option<PooledUserOpsByHashV06>),
 }
 
@@ -67,9 +67,9 @@ impl std::convert::From<Response> for RPCCodedResponse {
                 Some(b) => RPCCodedResponse::Success(RPCResponse::PooledUserOpHashes(b)),
                 None => RPCCodedResponse::StreamTermination(ResponseTermination::PooledUserOpHashes),
             },
-            Response::PooledUserOpsByHashV07(r) => match r {
-                Some(b) => RPCCodedResponse::Success(RPCResponse::PooledUserOpsByHashV07(b)),
-                None => RPCCodedResponse::StreamTermination(ResponseTermination::PooledUserOpsByHashV07),
+            Response::PooledUserOpsByHashV07V08V09(r) => match r {
+                Some(b) => RPCCodedResponse::Success(RPCResponse::PooledUserOpsByHashV07V08V09(b)),
+                None => RPCCodedResponse::StreamTermination(ResponseTermination::PooledUserOpsByHashV07V08V09),
             },
             Response::PooledUserOpsByHashV06(r) => match r {
                 Some(b) => RPCCodedResponse::Success(RPCResponse::PooledUserOpsByHashV06(b)),

@@ -10,7 +10,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 use tokio::time::Interval;
-// use types::EthSpec;
 
 /// Nanoseconds since a given time.
 // Maintained as u64 to reduce footprint
@@ -132,7 +131,7 @@ impl RPCRateLimiterBuilder {
             Protocol::MetaData => self.metadata_quota = q,
             Protocol::Goodbye => self.goodbye_quota = q,
             Protocol::PooledUserOpHashes => self.pooled_user_op_hashes_quota = q,
-            Protocol::PooledUserOpsByHashV07 => self.pooled_user_ops_by_hash_quota = q,
+            Protocol::PooledUserOpsByHashV07V08V09 => self.pooled_user_ops_by_hash_quota = q,
             Protocol::PooledUserOpsByHashV06 => self.pooled_user_ops_by_hash_quota = q,
         }
         self
@@ -220,7 +219,7 @@ impl RPCRateLimiter {
             .set_quota(Protocol::Status, status_quota)
             .set_quota(Protocol::Goodbye, goodbye_quota)
             .set_quota(Protocol::PooledUserOpHashes, pooled_user_op_hashes_quota)
-            .set_quota(Protocol::PooledUserOpsByHashV07, pooled_user_ops_by_hash_quota.clone())
+            .set_quota(Protocol::PooledUserOpsByHashV07V08V09, pooled_user_ops_by_hash_quota.clone())
             .set_quota(Protocol::PooledUserOpsByHashV06, pooled_user_ops_by_hash_quota)
             .build()
     }
@@ -246,7 +245,7 @@ impl RPCRateLimiter {
             Protocol::MetaData => &mut self.metadata_rl,
             Protocol::Goodbye => &mut self.goodbye_rl,
             Protocol::PooledUserOpHashes => &mut self.pooled_user_op_hashes_rl,
-            Protocol::PooledUserOpsByHashV07 => &mut self.pooled_user_ops_by_hash_rl,
+            Protocol::PooledUserOpsByHashV07V08V09 => &mut self.pooled_user_ops_by_hash_rl,
             Protocol::PooledUserOpsByHashV06 => &mut self.pooled_user_ops_by_hash_rl,
         };
         check(limiter)

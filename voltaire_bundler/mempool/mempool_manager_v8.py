@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from .mempool_manager import LocalMempoolManager
 from .mempool_info import DEFAULT_MEMPOOL_INFO
-from voltaire_bundler.typing import Address, MempoolId
+from voltaire_bundler.custom_types import Address, MempoolId
 from voltaire_bundler.user_operation.user_operation_handler_v7v8v9 import \
     UserOperationHandlerV7V8V9
 
@@ -23,12 +23,14 @@ class LocalMempoolManagerV8(LocalMempoolManager):
         chain_id: int,
         is_unsafe: bool,
         enforce_gas_price_tolerance: int,
+        enforce_pre_verification_gas_tolerance: int,
         is_legacy_mode: bool,
         ethereum_node_debug_trace_call_urls: list[str],
         reputation_whitelist: list[str],
         reputation_blacklist: list[str],
         min_stake: int,
-        min_unstake_delay: int
+        min_unstake_delay: int,
+        enable_banning: bool,
     ):
         self.validation_manager = ValidationManagerV7V8V9(
             user_operation_handler,
@@ -38,16 +40,18 @@ class LocalMempoolManagerV8(LocalMempoolManager):
             is_unsafe,
             is_legacy_mode,
             enforce_gas_price_tolerance,
+            enforce_pre_verification_gas_tolerance,
             ethereum_node_debug_trace_call_urls,
         )
         self.user_operation_handler = user_operation_handler
         self.reputation_manager = ReputationManager(
-            reputation_whitelist, reputation_blacklist)
+            reputation_whitelist, reputation_blacklist, enable_banning)
         self.ethereum_node_urls = ethereum_node_urls
         self.bundler_address = bundler_address
         self.chain_id = chain_id
         self.is_unsafe = is_unsafe
         self.enforce_gas_price_tolerance = enforce_gas_price_tolerance
+        self.enforce_pre_verification_gas_tolerance = enforce_pre_verification_gas_tolerance
         self.senders_to_senders_mempools = {}
         self.paymasters_and_factories_to_ops_hashes_in_mempool = {}
         self.verified_useroperations_standard_mempool_gossip_queue = []

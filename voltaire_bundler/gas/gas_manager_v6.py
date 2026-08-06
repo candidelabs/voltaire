@@ -7,10 +7,11 @@ from eth_abi import decode, encode
 from voltaire_bundler.bundle.exceptions import ExecutionException, \
         ExecutionExceptionCode, ValidationException, ValidationExceptionCode
 from voltaire_bundler.gas.gas_manager import GasManager, calculate_deposit_slot_index, deep_union
-from voltaire_bundler.typing import Address
+from voltaire_bundler.gas.gas_price_cache import GasPriceCache
+from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.models import FailedOp
 from voltaire_bundler.user_operation.user_operation_handler import \
-        decode_failed_op_event
+        decode_failed_op_event, decode_revert_bytes
 from voltaire_bundler.utils.load_bytecode import load_bytecode
 from ..user_operation.user_operation_v6 import UserOperationV6
 from voltaire_bundler.user_operation.user_operation_v6 import \
@@ -23,11 +24,9 @@ MIN_CALL_GAS_LIMIT = 21_000
 
 class GasManagerV6(GasManager):
     ethereum_node_urls: list[str]
-    chain_id: str
+    chain_id: int
     bundler_address: Address
     is_legacy_mode: bool
-    max_fee_per_gas_percentage_multiplier: int
-    max_priority_fee_per_gas_percentage_multiplier: int
     estimate_gas_with_override_enabled: bool
     max_verification_gas: int
     max_call_data_gas: int
@@ -39,24 +38,18 @@ class GasManagerV6(GasManager):
         chain_id,
         bundler_address,
         is_legacy_mode,
-        max_fee_per_gas_percentage_multiplier: int,
-        max_priority_fee_per_gas_percentage_multiplier: int,
         max_verification_gas,
         max_call_data_gas,
+        gas_price_cache: GasPriceCache,
     ):
         self.ethereum_node_urls = ethereum_node_urls
         self.chain_id = chain_id
         self.bundler_address = bundler_address
         self.is_legacy_mode = is_legacy_mode
-        self.max_fee_per_gas_percentage_multiplier = (
-            max_fee_per_gas_percentage_multiplier
-        )
-        self.max_priority_fee_per_gas_percentage_multiplier = (
-            max_priority_fee_per_gas_percentage_multiplier
-        )
         self.estimate_gas_with_override_enabled = True
         self.max_verification_gas = max_verification_gas
         self.max_call_data_gas = max_call_data_gas
+        self.gas_price_cache = gas_price_cache
         self.entrypoint_code_override = load_bytecode(
             "EntryPointSimulationsV6WithBinarySearch.json")
 
@@ -88,11 +81,20 @@ class GasManagerV6(GasManager):
         if input_verification_gas_limit == 0:
             # 10_000 buffer overhead
             result_verification_gas_limit = estimated_verification_gas_limit + 10_000
+            if self.chain_id in (137, 80002, 1337):
+                result_verification_gas_limit = math.ceil(
+                    result_verification_gas_limit*1.1
+                )
+            elif self.chain_id in (5031, 50312):  # Somnia
+                result_verification_gas_limit = estimated_verification_gas_limit + 600_000
+                result_verification_gas_limit = math.ceil(
+                    result_verification_gas_limit*2
+                )
         else:
             result_verification_gas_limit = input_verification_gas_limit
 
         if input_call_gas_limit == 0:
-            result_call_gas_limit = estimated_call_gas_limit
+            result_call_gas_limit = estimated_call_gas_limit + 3_000
         else:
             result_call_gas_limit = input_call_gas_limit
 
@@ -154,7 +156,7 @@ class GasManagerV6(GasManager):
                 error_message = failed_op_params_res[0]
                 raise ExecutionException(
                     ExecutionExceptionCode.UserOperationReverted,
-                    str(bytes([b for b in error_message if b != 0]))  # remove zero bytes from error message
+                    decode_revert_bytes(bytes(error_message)),
                 )
         # this should not be reached
         logging.critical(
@@ -181,7 +183,7 @@ class GasManagerV6(GasManager):
             ],
             [
                 user_operation.to_list(),
-                [min_gas, max_gas, 10_000, is_continious, is_check_once]
+                [min_gas, max_gas, 10, is_continious, is_check_once]
             ],
         )
 
@@ -260,7 +262,7 @@ class GasManagerV6(GasManager):
         error_selector = str(error_data[:10])
         error_params = error_data[10:]
 
-        error_params_api = []
+        error_params_api: list[str] = []
         if error_selector == "0xdeb13018":  # SimulationResult
             error_params_api = [
                 "uint256",  # verificationGasLimit
@@ -294,12 +296,13 @@ class GasManagerV6(GasManager):
                 reason[0],
             )
         else:
+            revert_bytes = bytes.fromhex(error_selector[2:] + error_params)
             raise ValidationException(
                 ValidationExceptionCode.SimulateValidation,
-                error_params,
+                decode_revert_bytes(revert_bytes),
             )
-        error_params_decoded = decode(
-                error_params_api, bytes.fromhex(error_params))
+        error_params_decoded = list(decode(
+                error_params_api, bytes.fromhex(error_params)))
 
         return error_selector, error_params_decoded
 
@@ -315,7 +318,10 @@ class GasManagerV6(GasManager):
             )
 
         fixed = 21000
-        per_user_operation = 18300
+        if self.chain_id == 5031 or self.chain_id == 50312:  # Somnia chain
+            per_user_operation = 18300 + 200_000
+        else:
+            per_user_operation = 18300
         per_user_operation_word = 4
         zero_byte = 4
         non_zero_byte = 16

@@ -16,7 +16,7 @@ from voltaire_bundler.user_operation.models import StakeInfo
 from voltaire_bundler.user_operation.user_operation_handler import UserOperationHandler, get_deposit_info
 from voltaire_bundler.event_bus_manager.endpoint import RequestEvent
 from voltaire_bundler.validation.validation_manager import ValidationManager
-from voltaire_bundler.typing import Address, MempoolId
+from voltaire_bundler.custom_types import Address, MempoolId
 from voltaire_bundler.user_operation.user_operation import UserOperation
 from voltaire_bundler.utils.eth_client_utils import get_block_info, send_rpc_request_to_eth_client
 
@@ -37,6 +37,7 @@ class LocalMempoolManager():
     senders_to_senders_mempools: dict[Address, SenderMempool]
     is_unsafe: bool
     enforce_gas_price_tolerance: int
+    enforce_pre_verification_gas_tolerance: int
     paymasters_and_factories_to_ops_hashes_in_mempool: dict[Address, set[str]]
     verified_useroperations_standard_mempool_gossip_queue: List[Any]
     canonical_mempool_id: MempoolId
@@ -45,7 +46,6 @@ class LocalMempoolManager():
     latest_paymaster_deposits_cache_block: int
     min_stake: int
     min_unstake_delay: int
-    max_compined_bundle_user_operations_gas_limit: int = 15_000_000
     MAX_OPS_PER_REQUEST = 4096
 
     def clear_user_operations(self) -> None:
@@ -70,6 +70,7 @@ class LocalMempoolManager():
                 self.user_operation_handler.gas_manager.verify_preverification_gas_and_verification_gas_limit(
                     user_operation,
                     self.entrypoint,
+                    self.enforce_pre_verification_gas_tolerance,
                 ),
                 self.user_operation_handler.gas_manager.verify_gas_fees_and_get_price(
                     user_operation, self.enforce_gas_price_tolerance
@@ -201,12 +202,24 @@ class LocalMempoolManager():
                 self.user_operation_handler.gas_manager.verify_preverification_gas_and_verification_gas_limit(
                     user_operation,
                     self.entrypoint,
+                    self.enforce_pre_verification_gas_tolerance,
                 ),
                 self.user_operation_handler.gas_manager.verify_gas_fees_and_get_price(
                     user_operation, self.enforce_gas_price_tolerance
                 )
             )
-            user_operation.validated_at_block_hex = verified_at_block_hash
+            # NOTE: validated_at_block_hex was previously set to
+            # verified_at_block_hash here — a 66-char block *hash*, but the
+            # field is consumed as a block *number* hex string by the
+            # coalesced monitor sweep (int(x, 16)). That produced ~2^256
+            # values, and if all monitored userops came in via p2p, min()
+            # would pick a "block number" astronomically past the chain
+            # head, tripping the to_block_int < from_block_int guard in
+            # get_user_operation_logs_for_many_hashes and skipping the
+            # sweep entirely — so p2p userops could only exit the monitor
+            # set by hitting the 20-attempt cap. The correct block-number
+            # hex is available as validated_at_block_number from
+            # validate_user_operation below; assign it after that returns.
         except ValidationException:
             return "No"
 
@@ -255,6 +268,12 @@ class LocalMempoolManager():
                 return "No"
             else:
                 self.seen_user_operation_hashs.add(user_operation_hash)
+
+            # Stamp the block-number hex (NOT the hash) so the coalesced
+            # monitor sweep can compute a sane min() fromBlock. The regular
+            # add_user_operation path sets this from the same value; keep
+            # both paths in sync.
+            user_operation.validated_at_block_hex = validated_at_block_number
 
         except ValidationException:
             try:
@@ -342,20 +361,51 @@ class LocalMempoolManager():
     ) -> dict[str, UserOperation]:
         bundle = {}
         senders_lowercase = [x.lower() for x in self.senders_to_senders_mempools.keys()]
-        validate_user_operations_ops = []
-        user_operations = []
+
+        if self.chain_id in (5031, 50312):  # Somnia
+            max_compined_bundle_user_operations_gas_limit = 500_000_000
+        else:
+            max_compined_bundle_user_operations_gas_limit = 15_000_000
+
+        # Collect candidate userops in fee-order (one per sender, head of
+        # queue). This is just dict iteration — no RPC.
+        candidates: list = []
         for sender_address in list(self.senders_to_senders_mempools):
             sender_mempool = self.senders_to_senders_mempools[sender_address]
             if len(sender_mempool.user_operation_hashs_to_verified_user_operation) > 0:
                 user_operation_hash = next(
                     iter(sender_mempool.user_operation_hashs_to_verified_user_operation)
                 )
-                user_operation = sender_mempool.user_operation_hashs_to_verified_user_operation[
-                    user_operation_hash].user_operation
-                user_operations.append(user_operation)
-                validate_user_operations_ops.append(
-                    self.validate_user_operation_to_bundle(user_operation)
+                candidates.append(
+                    sender_mempool.user_operation_hashs_to_verified_user_operation[
+                        user_operation_hash
+                    ].user_operation
                 )
+
+        # Pre-filter by the gas-cap BEFORE validation. Each userop's max
+        # gas is derived from already-known fields (callGasLimit +
+        # verificationGasLimit + ...), no RPC needed. Validation
+        # (eth_call + debug_traceCall in safe mode) is the expensive piece —
+        # running it for ops past the cap is wasted upstream load. If a
+        # validated op later gets dropped (storage conflict, paymaster
+        # rejection), the bundle ships slightly smaller; the dropped op is
+        # reconsidered on the next tick.
+        #
+        # Skip over-cap ops individually (don't truncate on the first one):
+        # a single oversized op in the middle of fee-order candidates
+        # shouldn't starve later smaller ops that still fit.
+        accumulated = 0
+        user_operations: list[UserOperation] = []
+        for op in candidates:
+            op_max = op.get_max_gas_without_pre_verification_gas()
+            if accumulated + op_max > max_compined_bundle_user_operations_gas_limit:
+                continue
+            accumulated += op_max
+            user_operations.append(op)
+
+        validate_user_operations_ops = [
+            self.validate_user_operation_to_bundle(op) for op in user_operations
+        ]
         validation_results = await asyncio.gather(*validate_user_operations_ops)
 
         new_code_hash_ops = []
@@ -366,7 +416,7 @@ class LocalMempoolManager():
                 )
             )
         new_code_hash_results = await asyncio.gather(*new_code_hash_ops)
-        compined_gas_limit = 0
+
         for (
             user_operation,
             (is_valid, associated_addresses, storage_map),
@@ -380,20 +430,6 @@ class LocalMempoolManager():
             sender_mempool = self.senders_to_senders_mempools[sender_address]
             user_operation_hash = user_operation.user_operation_hash
             if is_valid:
-                user_operation_max_gas = user_operation.get_max_gas_without_pre_verification_gas()
-                if (
-                    (compined_gas_limit + user_operation_max_gas) >
-                    self.max_compined_bundle_user_operations_gas_limit
-                ):
-                    logging.debug(
-                        "user operation skipped for bundling because "
-                        "because max bundle gas limit was reached. "
-                        f"user operation max gas: {user_operation_max_gas}, "
-                        f"compined cas limit: {compined_gas_limit + user_operation_max_gas}, "
-                        f"max compined bundle gas limit: {self.max_compined_bundle_user_operations_gas_limit}"
-                    )
-                    continue
-
                 if storage_map is not None:
                     to_bundle = True
                     for storage_address_lowercase in storage_map.keys():
@@ -433,7 +469,6 @@ class LocalMempoolManager():
                     )
                 continue
 
-            compined_gas_limit += user_operation_max_gas
             bundle[user_operation_hash] = user_operation
             del sender_mempool.user_operation_hashs_to_verified_user_operation[
                 user_operation_hash]
@@ -798,9 +833,29 @@ class LocalMempoolManager():
             user_op_max_cost = user_operation.get_max_cost()
 
         remaining_deposit -= user_op_max_cost
+        # Reject up front when the candidate alone already exceeds the
+        # on-chain deposit. Without this, the check only fires inside
+        # the loop over existing mempool userops — so an underfunded op
+        # slips through whenever no in-flight op happens to use this
+        # paymaster (the common case for a fresh or unpopular paymaster).
+        if remaining_deposit < 0:
+            raise ValidationException(
+                ValidationExceptionCode.PaymasterDepositTooLow,
+                "paymaster deposit too low for all mempool UserOps",
+            )
+        # Only count in-flight userops that draw from the SAME paymaster's
+        # deposit. Summing every mempool userop's max_cost regardless of
+        # paymaster (previous behaviour) tips the check negative as soon
+        # as any userops queue up, so unrelated senders — or a userop with
+        # no paymaster at all — can starve a well-funded paymaster.
         for sender_address in list(self.senders_to_senders_mempools):
             sender = self.senders_to_senders_mempools[sender_address]
             for verified_user_operation in sender.user_operation_hashs_to_verified_user_operation.values():
+                if (
+                    verified_user_operation.user_operation.paymaster_address_lowercase
+                    != paymaster
+                ):
+                    continue
                 user_op_max_cost = verified_user_operation.user_operation.get_max_cost()
                 remaining_deposit -= user_op_max_cost
                 if remaining_deposit < 0:

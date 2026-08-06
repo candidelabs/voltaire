@@ -1,7 +1,5 @@
 use super::client::Client;
 use super::score::{PeerAction, Score, ScoreState};
-// use super::sync_status::SyncStatus;
-// use crate::discovery::Eth2Enr;
 use crate::{rpc::MetaData, types::Subnet};
 use discv5::Enr;
 use libp2p::core::multiaddr::{Multiaddr, Protocol};
@@ -80,23 +78,6 @@ impl PeerInfo {
         }
     }
 
-    // /// Returns if the peer is subscribed to a given `Subnet` from the metadata attnets/syncnets field.
-    // pub fn (&self, subnet: &Subnet) -> bool {
-    //     if let Some(meta_data) = &self.meta_data {
-    //         match subnet {
-    //             Subnet::Mempool(id) => {
-    //                 return meta_data.mempool_nets.get(**id as usize).unwrap_or(false)
-    //             }
-    //             // Subnet::SyncCommittee(id) => {
-    //             //     return meta_data
-    //             //         .syncnets()
-    //             //         .map_or(false, |s| s.get(**id as usize).unwrap_or(false))
-    //             // }
-    //         }
-    //     }
-    //     false
-    // }
-
     /// Obtains the client of the peer.
     pub fn client(&self) -> &Client {
         &self.client
@@ -111,11 +92,6 @@ impl PeerInfo {
     pub fn connection_direction(&self) -> Option<&ConnectionDirection> {
         self.connection_direction.as_ref()
     }
-
-    // /// Returns the sync status of the peer.
-    // pub fn sync_status(&self) -> &SyncStatus {
-    //     &self.sync_status
-    // }
 
     /// Returns the metadata for the peer if currently known.
     pub fn meta_data(&self) -> Option<&MetaData> {
@@ -141,88 +117,7 @@ impl PeerInfo {
     /// An iterator over all the subnets this peer is subscribed to.
     pub fn subnets(&self) -> impl Iterator<Item = &Subnet> {
         self.subnets.iter()
-    }
-
-    // /// Returns the number of long lived subnets a peer is subscribed to.
-    // // NOTE: This currently excludes sync committee subnets
-    // pub fn long_lived_subnet_count(&self) -> usize {
-    //     if let Some(meta_data) = self.meta_data.as_ref() {
-    //         return meta_data.mempool_nets.num_set_bits();
-    //     } else if let Some(enr) = self.enr.as_ref() {
-    //         if let Ok(attnets) = enr.mempools_bitfield() {
-    //             return attnets.num_set_bits();
-    //         }
-    //     }
-    //     0
-    // }
-
-    // /// Returns an iterator over the long-lived subnets if it has any.
-    // pub fn long_lived_subnets(&self) -> Vec<Subnet> {
-    //     let mut long_lived_subnets = Vec::new();
-    //     // Check the meta_data
-    //     if let Some(meta_data) = self.meta_data.as_ref() {
-    //         for subnet in 0..=meta_data.mempool_nets.highest_set_bit().unwrap_or(0) {
-    //             if meta_data.mempool_nets.get(subnet).unwrap_or(false) {
-    //                 long_lived_subnets.push(Subnet::Mempool((subnet as u64).into()));
-    //             }
-    //         }
-
-    //         // if let Ok(syncnet) = meta_data.syncnets() {
-    //         //     for subnet in 0..=syncnet.highest_set_bit().unwrap_or(0) {
-    //         //         if syncnet.get(subnet).unwrap_or(false) {
-    //         //             long_lived_subnets.push(Subnet::SyncCommittee((subnet as u64).into()));
-    //         //         }
-    //         //     }
-    //         // }
-    //     } else if let Some(enr) = self.enr.as_ref() {
-    //         if let Ok(attnets) = enr.mempools_bitfield() {
-    //             for subnet in 0..=attnets.highest_set_bit().unwrap_or(0) {
-    //                 if attnets.get(subnet).unwrap_or(false) {
-    //                     long_lived_subnets.push(Subnet::Mempool((subnet as u64).into()));
-    //                 }
-    //             }
-    //         }
-
-    //         // if let Ok(syncnets) = enr.sync_committee_bitfield::<T>() {
-    //         //     for subnet in 0..=syncnets.highest_set_bit().unwrap_or(0) {
-    //         //         if syncnets.get(subnet).unwrap_or(false) {
-    //         //             long_lived_subnets.push(Subnet::SyncCommittee((subnet as u64).into()));
-    //         //         }
-    //         //     }
-    //         // }
-    //     }
-    //     long_lived_subnets
-    // }
-
-    // /// Returns if the peer is subscribed to a given `Subnet` from the gossipsub subscriptions.
-    // pub fn on_subnet_gossipsub(&self, subnet: &Subnet) -> bool {
-    //     self.subnets.contains(subnet)
-    // }
-
-    // /// Returns true if the peer is connected to a long-lived subnet.
-    // pub fn has_long_lived_subnet(&self) -> bool {
-    //     // Check the meta_data
-    //     if let Some(meta_data) = self.meta_data.as_ref() {
-    //         if !meta_data.mempool_nets.is_zero() && !self.subnets.is_empty() {
-    //             return true;
-    //         }
-    //         // if let Ok(sync) = meta_data.syncnets() {
-    //         //     if !sync.is_zero() {
-    //         //         return true;
-    //         //     }
-    //         // }
-    //     }
-
-    //     // We may not have the metadata but may have an ENR. Lets check that
-    //     if let Some(enr) = self.enr.as_ref() {
-    //         if let Ok(attnets) = enr.mempools_bitfield() {
-    //             if !attnets.is_zero() && !self.subnets.is_empty() {
-    //                 return true;
-    //             }
-    //         }
-    //     }
-    //     false
-    // }
+    }    
 
     /// Returns the seen addresses of the peer.
     pub fn seen_multiaddrs(&self) -> impl Iterator<Item = &Multiaddr> + '_ {
@@ -246,11 +141,6 @@ impl PeerInfo {
     pub fn connection_status(&self) -> &PeerConnectionStatus {
         &self.connection_status
     }
-
-    // /// Reports if this peer has some future validator duty in which case it is valuable to keep it.
-    // pub fn has_future_duty(&self) -> bool {
-    //     self.min_ttl.map_or(false, |i| i >= Instant::now())
-    // }
 
     /// Returns score of the peer.
     pub fn score(&self) -> &Score {
@@ -318,12 +208,6 @@ impl PeerInfo {
 
     /* Mutable Functions */
 
-    // /// Updates the sync status. Returns true if the status was changed.
-    // // VISIBILITY: Both the peer manager the network sync is able to update the sync state of a peer
-    // pub fn update_sync_status(&mut self, sync_status: SyncStatus) -> bool {
-    //     self.sync_status.update(sync_status)
-    // }
-
     /// Sets the client of the peer.
     // VISIBILITY: The peer manager is able to set the client
     pub(in crate::peer_manager) fn set_client(&mut self, client: Client) {
@@ -360,16 +244,6 @@ impl PeerInfo {
     pub(super) fn set_min_ttl(&mut self, min_ttl: Instant) {
         self.min_ttl = Some(min_ttl)
     }
-
-    // /// Adds a known subnet for the peer.
-    // pub(super) fn insert_subnet(&mut self, subnet: Subnet) {
-    //     self.subnets.insert(subnet);
-    // }
-
-    // /// Removes a subnet from the peer.
-    // pub(super) fn remove_subnet(&mut self, subnet: &Subnet) {
-    //     self.subnets.remove(subnet);
-    // }
 
     /// Removes all subnets from the peer.
     pub(super) fn clear_subnets(&mut self) {

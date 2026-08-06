@@ -3,8 +3,15 @@ import logging
 from eth_utils import to_checksum_address
 from eth_abi import decode
 from voltaire_bundler.bundle.exceptions import UserOpFoundException
-from voltaire_bundler.user_operation.user_operation_handler import UserOperationHandler, del_user_operation_logs_cache_entry, get_transaction_by_hash
+from voltaire_bundler.user_operation.user_operation_handler import (
+    HANDLE_OPS_SELECTOR_V6,
+    UserOperationHandler,
+    del_transaction_caches_entries,
+    del_user_operation_logs_cache_entry,
+    get_transaction_by_hash,
+)
 from ..gas.gas_manager_v6 import GasManagerV6
+from ..gas.gas_price_cache import GasPriceCache
 
 
 class UserOperationHandlerV6(UserOperationHandler):
@@ -16,12 +23,12 @@ class UserOperationHandlerV6(UserOperationHandler):
         bundler_address,
         is_legacy_mode,
         ethereum_node_eth_get_logs_urls,
-        max_fee_per_gas_percentage_multiplier: int,
-        max_priority_fee_per_gas_percentage_multiplier: int,
         max_verification_gas: int,
         max_call_data_gas: int,
         logs_incremental_range: int,
         logs_number_of_ranges: int,
+        logs_fallback_recent_window: int,
+        gas_price_cache: GasPriceCache,
     ):
         self.ethereum_node_urls = ethereum_node_urls
         self.bundler_address = bundler_address
@@ -32,19 +39,21 @@ class UserOperationHandlerV6(UserOperationHandler):
             chain_id,
             bundler_address,
             is_legacy_mode,
-            max_fee_per_gas_percentage_multiplier,
-            max_priority_fee_per_gas_percentage_multiplier,
             max_verification_gas,
             max_call_data_gas,
+            gas_price_cache,
         )
         self.logs_incremental_range = logs_incremental_range
         self.logs_number_of_ranges = logs_number_of_ranges
+        self.logs_fallback_recent_window = logs_fallback_recent_window
 
     async def get_user_operation_by_hash(
-        self, user_operation_hash: str, entrypoint: str
+        self, user_operation_hash: str,
+        entrypoint: str,
+        validated_at_block_hex: str | None
     ) -> tuple | None:
         event_log_info = await self.get_user_operation_event_log_info(
-            user_operation_hash, entrypoint
+            user_operation_hash, entrypoint, validated_at_block_hex
         )
         if event_log_info is None:
             return None
@@ -73,8 +82,12 @@ class UserOperationHandlerV6(UserOperationHandler):
                 f"for user operation hash: {user_operation_hash}. Retrying."
             )
             del_user_operation_logs_cache_entry(user_operation_hash, entrypoint)
+            # Evict all three caches together: a stale receipt cached for
+            # the vanished tx would otherwise pair orphaned block data with
+            # the refetched logs.
+            del_transaction_caches_entries(transaction_hash)
             event_log_info = await self.get_user_operation_event_log_info(
-                user_operation_hash, entrypoint
+                user_operation_hash, entrypoint, validated_at_block_hex
             )
             if event_log_info is None:
                 return None
@@ -109,7 +122,11 @@ class UserOperationHandlerV6(UserOperationHandler):
         block_number = transaction["blockNumber"]
         transaction_input = transaction["input"]
 
-        user_operations_lists = decode_handle_op_input(transaction_input)
+        handle_ops_calldata = await self._find_handle_ops_calldata(
+            transaction_hash, transaction_input,
+            HANDLE_OPS_SELECTOR_V6, entrypoint,
+        )
+        user_operations_lists = decode_handle_op_input(handle_ops_calldata)
 
         for user_operation_list in user_operations_lists:
             if (
@@ -131,9 +148,10 @@ class UserOperationHandlerV6(UserOperationHandler):
         user_operation_hash: str,
         entrypoint: str,
         senders_mempools,
+        validated_at_block_hex: str | None
     ) -> dict | None:
         user_operation_by_hash = await self.get_user_operation_by_hash(
-            user_operation_hash, entrypoint
+            user_operation_hash, entrypoint, validated_at_block_hex
         )
         if user_operation_by_hash is None:
             user_operation_by_hash_json = self.get_user_operation_by_hash_from_local_mempool(

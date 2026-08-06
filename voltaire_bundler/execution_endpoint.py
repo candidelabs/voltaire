@@ -1,8 +1,10 @@
 import asyncio
 import logging
+import time
 import traceback
 import math
 import os
+import sys
 from typing import Any, Optional, cast
 
 from voltaire_bundler.bundle.exceptions import \
@@ -11,7 +13,7 @@ from voltaire_bundler.bundle.exceptions import \
 from voltaire_bundler.cli_manager import ConditionalRpc
 from voltaire_bundler.event_bus_manager.endpoint import Client, Endpoint
 from voltaire_bundler.mempool.mempool_manager import encode_address, encode_uint256
-from voltaire_bundler.typing import Address
+from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.user_operation_handler import \
         get_deposit_info
 from voltaire_bundler.user_operation.user_operation_v6 import \
@@ -26,6 +28,9 @@ from voltaire_bundler.user_operation.user_operation_handler_v7v8v9 import \
     UserOperationHandlerV7V8V9
 from voltaire_bundler.user_operation.user_operation_handler import \
     fell_user_operation_optional_parameters_for_estimateUserOperationGas
+from voltaire_bundler.gas.gas_price_cache import GasPriceCache
+from voltaire_bundler.utils.cache import PersistentFIFOCache
+from voltaire_bundler.utils.deployed_simulations import check_deployed_simulations
 from voltaire_bundler.utils.eth_client_utils import get_block_info, send_rpc_request_to_eth_client
 
 from .bundle.bundle_manager import BundlerManager
@@ -37,6 +42,39 @@ from .mempool.reputation_manager import ReputationManager
 
 user_operation_by_hash_cache: dict[str, dict] = {}
 user_operation_receipt_cache: dict[str, dict] = {}
+
+# Composite-key cache: "{entrypoint_lowercase}:{userOpHash}" -> validated_at_block_hex.
+# Flattening the previous per-entrypoint nested dict keeps the cache interface
+# uniform across all four caches; the on-disk tier stores one row per entry
+# with the composite primary key.
+user_operation_seen_cache = PersistentFIFOCache(name="user_operation_seen")
+
+_SEEN_CACHE_ENTRYPOINTS = (
+    LocalMempoolManagerV6.entrypoint_lowercase,
+    LocalMempoolManagerV7.entrypoint_lowercase,
+    LocalMempoolManagerV8.entrypoint_lowercase,
+    LocalMempoolManagerV9.entrypoint_lowercase,
+)
+
+
+async def search_user_operation_seen_cache(
+    user_operation_hash: str,
+) -> tuple[str, str] | None:
+    """Return ``(validated_at_block_hex, entrypoint_lowercase)`` if the hash
+    has been seen, else ``None``. One bulk cache lookup covers all four
+    entrypoint versions; hits are resolved in entrypoint priority order."""
+    keys = [
+        f"{ep}:{user_operation_hash}" for ep in _SEEN_CACHE_ENTRYPOINTS
+    ]
+    found = await user_operation_seen_cache.get_many(keys)
+    # Re-walk in entrypoint priority order so we return the same answer as
+    # the previous one-at-a-time loop if a hash somehow lives under more
+    # than one entrypoint key.
+    for entrypoint_lowercase in _SEEN_CACHE_ENTRYPOINTS:
+        key = f"{entrypoint_lowercase}:{user_operation_hash}"
+        if key in found:
+            return found[key], entrypoint_lowercase
+    return None
 
 
 class ExecutionEndpoint(Endpoint):
@@ -59,18 +97,18 @@ class ExecutionEndpoint(Endpoint):
         self,
         ethereum_node_urls: list[str],
         bundle_node_urls: list[str],
-        bundler_private_key: str,
-        bundler_address: Address,
+        bundler_secrets_per_ep: dict[str, tuple[Address, str]],
         chain_id: int,
         is_unsafe: bool,
         is_debug: bool,
         is_legacy_mode: bool,
         conditional_rpc: ConditionalRpc | None,
         flashbots_protect_node_urls: list[str] | None,
-        bundle_interval: int,
+        bundle_interval: float,
         max_fee_per_gas_percentage_multiplier: int,
         max_priority_fee_per_gas_percentage_multiplier: int,
         enforce_gas_price_tolerance: int,
+        enforce_pre_verification_gas_tolerance: int,
         ethereum_node_debug_trace_call_urls: list[str],
         ethereum_node_eth_get_logs_urls: list[str],
         disable_p2p: bool,
@@ -84,69 +122,87 @@ class ExecutionEndpoint(Endpoint):
         is_eip7702: bool,
         min_stake: int,
         min_unstake_delay: int,
-        bundle_gas_estimation_multiplier: int,
+        bundle_gas_estimation_multiplier: float,
+        enable_banning: bool,
+        logs_fallback_recent_window: int,
+        gas_price_cache: GasPriceCache,
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_urls = ethereum_node_urls
         self.chain_id = chain_id
 
+        bundler_address_v6, _ = bundler_secrets_per_ep["v6"]
+        bundler_address_v7, _ = bundler_secrets_per_ep["v7"]
+        bundler_address_v8, _ = bundler_secrets_per_ep["v8"]
+        bundler_address_v9, _ = bundler_secrets_per_ep["v9"]
+
+        # The shared v7/v8/v9 user-operation handler only uses ``bundler_address``
+        # as the ``from`` for simulation eth_calls — the balance is state-
+        # overridden to a sentinel value, so any of the three EOAs works.
+        # Pass the v7 address to keep behavior deterministic.
         self.user_operation_handler_v7v8v9 = UserOperationHandlerV7V8V9(
             chain_id,
             ethereum_node_urls,
-            bundler_address,
+            bundler_address_v7,
             is_legacy_mode,
             ethereum_node_eth_get_logs_urls,
-            max_fee_per_gas_percentage_multiplier,
-            max_priority_fee_per_gas_percentage_multiplier,
             max_verification_gas,
             max_call_data_gas,
             logs_incremental_range,
             logs_number_of_ranges,
+            logs_fallback_recent_window,
+            gas_price_cache,
         )
 
         self.local_mempool_manager_v9 = LocalMempoolManagerV9(
             self.user_operation_handler_v7v8v9,
             ethereum_node_urls,
-            bundler_address,
+            bundler_address_v9,
             chain_id,
             is_unsafe,
             enforce_gas_price_tolerance,
+            enforce_pre_verification_gas_tolerance,
             is_legacy_mode,
             ethereum_node_debug_trace_call_urls,
             reputation_whitelist,
             reputation_blacklist,
             min_stake,
-            min_unstake_delay
+            min_unstake_delay,
+            enable_banning,
         )
 
         self.local_mempool_manager_v8 = LocalMempoolManagerV8(
             self.user_operation_handler_v7v8v9,
             ethereum_node_urls,
-            bundler_address,
+            bundler_address_v8,
             chain_id,
             is_unsafe,
             enforce_gas_price_tolerance,
+            enforce_pre_verification_gas_tolerance,
             is_legacy_mode,
             ethereum_node_debug_trace_call_urls,
             reputation_whitelist,
             reputation_blacklist,
             min_stake,
-            min_unstake_delay
+            min_unstake_delay,
+            enable_banning,
         )
 
         self.local_mempool_manager_v7 = LocalMempoolManagerV7(
             self.user_operation_handler_v7v8v9,
             ethereum_node_urls,
-            bundler_address,
+            bundler_address_v7,
             chain_id,
             is_unsafe,
             enforce_gas_price_tolerance,
+            enforce_pre_verification_gas_tolerance,
             is_legacy_mode,
             ethereum_node_debug_trace_call_urls,
             reputation_whitelist,
             reputation_blacklist,
             min_stake,
-            min_unstake_delay
+            min_unstake_delay,
+            enable_banning,
         )
 
         if disable_v6:
@@ -156,30 +212,32 @@ class ExecutionEndpoint(Endpoint):
             self.user_operation_handler_v6 = UserOperationHandlerV6(
                 chain_id,
                 ethereum_node_urls,
-                bundler_address,
+                bundler_address_v6,
                 is_legacy_mode,
                 ethereum_node_eth_get_logs_urls,
-                max_fee_per_gas_percentage_multiplier,
-                max_priority_fee_per_gas_percentage_multiplier,
                 max_verification_gas,
                 max_call_data_gas,
                 logs_incremental_range,
                 logs_number_of_ranges,
+                logs_fallback_recent_window,
+                gas_price_cache,
             )
 
             self.local_mempool_manager_v6 = LocalMempoolManagerV6(
                 self.user_operation_handler_v6,
                 ethereum_node_urls,
-                bundler_address,
+                bundler_address_v6,
                 chain_id,
                 is_unsafe,
                 enforce_gas_price_tolerance,
+                enforce_pre_verification_gas_tolerance,
                 is_legacy_mode,
                 ethereum_node_debug_trace_call_urls,
                 reputation_whitelist,
                 reputation_blacklist,
                 min_stake,
-                min_unstake_delay
+                min_unstake_delay,
+                enable_banning,
             )
 
         self.bundle_manager = BundlerManager(
@@ -188,9 +246,9 @@ class ExecutionEndpoint(Endpoint):
             self.local_mempool_manager_v8,
             self.local_mempool_manager_v9,
             ethereum_node_urls,
+            ethereum_node_eth_get_logs_urls,
             bundle_node_urls,
-            bundler_private_key,
-            bundler_address,
+            bundler_secrets_per_ep,
             chain_id,
             is_legacy_mode,
             conditional_rpc,
@@ -198,6 +256,7 @@ class ExecutionEndpoint(Endpoint):
             max_fee_per_gas_percentage_multiplier,
             max_priority_fee_per_gas_percentage_multiplier,
             bundle_gas_estimation_multiplier,
+            gas_price_cache,
         )
         self.peer_ids_to_cursor = dict()
         self.peer_ids_to_user_ops_hashes_queue = dict()
@@ -207,44 +266,69 @@ class ExecutionEndpoint(Endpoint):
 
         asyncio.ensure_future(self.execute_cron_job(is_debug, bundle_interval))
 
-    async def execute_cron_job(self, is_debug: bool, bundle_interval: int) -> None:
+    async def execute_cron_job(self, is_debug: bool, bundle_interval: float) -> None:
         if not self.disable_p2p:
-            heartbeat_counter = 0
-            heartbeat_interval = 0.1  # decisecond
-            deciseconds_per_bundle = math.floor(
-                bundle_interval / heartbeat_interval
-            )
+            # The p2p branch has to service gossip at a much finer
+            # cadence than bundling, so we keep the 100 ms heartbeat
+            # sleep for the loop. Bundle scheduling is decoupled from
+            # the heartbeat via a monotonic deadline: heartbeat-count
+            # math truncated the configured float interval to whole
+            # 100 ms buckets (e.g. 150 ms → 100 ms) and accumulated
+            # drift from gossip + bundle work time on top of that.
+            heartbeat_interval = 0.1
 
             p2pClient: Client = Client("p2p_endpoint")
-            while not os.path.exists("p2p_endpoint.ipc"):
+            p2p_file = ("p2p_endpoint.port"
+                        if sys.platform == "win32"
+                        else "p2p_endpoint.ipc")
+            while not os.path.exists(p2p_file):
                 await asyncio.sleep(1)
 
             await self.send_pooled_user_op_hashes_to_all_peers()
 
+            next_bundle_at = time.monotonic()
             while True:
                 try:
                     await self.update_p2p_gossip(p2pClient)
                     await self.update_p2p_peer_ids_to_user_ops_hashes_queue(p2pClient)
-                    if (not is_debug) and (
-                        heartbeat_counter % deciseconds_per_bundle == 0
-                    ):
+                    if (not is_debug) and time.monotonic() >= next_bundle_at:
                         await self.bundle_manager.send_next_bundle()
+                        # Advance by exactly bundle_interval so cadence
+                        # stays fixed-rate. If work overran so far that
+                        # the deadline is already in the past, snap it
+                        # forward to avoid a catch-up burst.
+                        next_bundle_at += bundle_interval
+                        now = time.monotonic()
+                        if next_bundle_at < now:
+                            next_bundle_at = now + bundle_interval
                 except (ValidationException, ExecutionException) as excp:
                     logging.exception(excp.message)
-                except:
+                except Exception:
+                    # Deliberately catch Exception, not bare `except`, so
+                    # asyncio.CancelledError propagates and shutdown works.
                     logging.error(traceback.format_exc())
-                heartbeat_counter = heartbeat_counter + 1
                 await asyncio.sleep(heartbeat_interval)
         elif not is_debug:
             while True:
+                # Sleep the REMAINDER of the interval, not the full interval,
+                # so each cycle is `bundle_interval` end-to-end rather than
+                # `bundle_duration + bundle_interval`. Without this, a tick
+                # whose work exceeds bundle_interval drags every subsequent
+                # tick later — and the monitor re-add loop downstream gets
+                # progressively more userops past the 5s staleness threshold,
+                # compounding the slip.
+                t0 = time.monotonic()
                 try:
                     await self.bundle_manager.send_next_bundle()
                 except (ValidationException, ExecutionException) as excp:
                     logging.exception(excp.message)
-                except:
+                except Exception:
+                    # Deliberately catch Exception, not bare `except`, so
+                    # asyncio.CancelledError propagates and shutdown works.
                     logging.error(traceback.format_exc())
 
-                await asyncio.sleep(bundle_interval)
+                elapsed = time.monotonic() - t0
+                await asyncio.sleep(max(0.0, bundle_interval - elapsed))
 
     async def send_pooled_user_op_hashes_to_all_peers(self) -> None:
         pass
@@ -291,7 +375,31 @@ class ExecutionEndpoint(Endpoint):
 
                 self.peer_ids_to_user_ops_hashes_queue[peer_id] = []
 
+    async def init_deployed_simulations(self) -> None:
+        """Check at boot if the simulation contracts are pre-deployed at
+        their canonical deterministic addresses (logging the result per
+        contract) and, if so, have the validation managers use a tiny
+        delegatecall-proxy code override pointing at the deployed contract
+        instead of the full ~40KB simulation bytecode on every eth_call."""
+        deployed_overrides = await check_deployed_simulations(
+            self.ethereum_node_urls, self.chain_id, self.disable_v6
+        )
+        if not deployed_overrides:
+            return
+        validation_managers = [
+            self.local_mempool_manager_v9.validation_manager,
+            self.local_mempool_manager_v8.validation_manager,
+            self.local_mempool_manager_v7.validation_manager,
+        ]
+        if self.local_mempool_manager_v6 is not None:
+            validation_managers.append(
+                self.local_mempool_manager_v6.validation_manager)
+        for validation_manager in validation_managers:
+            validation_manager.deployed_simulations_overrides.update(
+                deployed_overrides)
+
     async def start_execution_endpoint(self) -> None:
+        await self.init_deployed_simulations()
         self.add_events_and_response_functions_by_prefix(
             prefix="_event_", decorator_func=exception_handler_decorator
         )
@@ -466,7 +574,10 @@ class ExecutionEndpoint(Endpoint):
                 "Unsupported entrypoint",
             )
 
-        MAX_GAS_PER_USER_OPERATION = 15_000_000
+        if self.chain_id in (5031, 50312):  # Somnia
+            MAX_GAS_PER_USER_OPERATION = 50_000_000
+        else:
+            MAX_GAS_PER_USER_OPERATION = 15_000_000
         max_gas = user_operation.get_max_gas_without_pre_verification_gas()
         if max_gas > MAX_GAS_PER_USER_OPERATION:
             raise ValidationException(
@@ -478,6 +589,12 @@ class ExecutionEndpoint(Endpoint):
         (user_operation_hash, verified_at_block_hash, valid_mempools) = (
             await local_mempool.add_user_operation(user_operation)
         )
+        if user_operation.validated_at_block_hex is not None:
+            user_operation_seen_cache.set(
+                f"{input_entrypoint}:{user_operation_hash}",
+                user_operation.validated_at_block_hex,
+            )
+
         if not self.disable_p2p:
             if (input_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase):
                 user_operation_json = user_operation.get_user_operation_json()
@@ -516,48 +633,73 @@ class ExecutionEndpoint(Endpoint):
         if user_operation_hash in user_operation_by_hash_cache:
             return user_operation_by_hash_cache[user_operation_hash]
 
+        search_result = await search_user_operation_seen_cache(user_operation_hash)
+        if search_result is not None:
+            cached_block_hex, cached_entrypoint = search_result
+        else:
+            cached_block_hex, cached_entrypoint = None, None
+
+        # The seen-cache survives restarts, so a hit can point at v0.6
+        # even when this process started with --disable_v6. Drop the hint
+        # in that case so we still fan out to the enabled handlers instead
+        # of building an empty task set (which would crash asyncio.wait).
+        if (
+            cached_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase
+            and self.user_operation_handler_v6 is None
+        ):
+            cached_entrypoint = None
+
         user_operation_by_hash_json_ops = []
-        if (self.local_mempool_manager_v6 is not None and
-                self.user_operation_handler_v6 is not None):
+        if (
+            self.local_mempool_manager_v6 is not None and
+            self.user_operation_handler_v6 is not None and
+            (cached_entrypoint is None or cached_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase)
+        ):
             user_operation_by_hash_json_ops.append(
                 asyncio.create_task(
                     self.user_operation_handler_v6.get_user_operation_by_hash_rpc(
                         user_operation_hash,
                         LocalMempoolManagerV6.entrypoint,
                         self.local_mempool_manager_v6.senders_to_senders_mempools.values(),
+                        cached_block_hex,
+                    )
+                )
+            )
+        if cached_entrypoint is None or cached_entrypoint == LocalMempoolManagerV9.entrypoint_lowercase:
+            user_operation_by_hash_json_ops.append(
+                asyncio.create_task(
+                    self.user_operation_handler_v7v8v9.get_user_operation_by_hash_rpc(
+                        user_operation_hash,
+                        LocalMempoolManagerV9.entrypoint,
+                        self.local_mempool_manager_v9.senders_to_senders_mempools.values(),
+                        cached_block_hex,
                     )
                 )
             )
 
-        user_operation_by_hash_json_ops.append(
-            asyncio.create_task(
-                self.user_operation_handler_v7v8v9.get_user_operation_by_hash_rpc(
-                    user_operation_hash,
-                    LocalMempoolManagerV9.entrypoint,
-                    self.local_mempool_manager_v9.senders_to_senders_mempools.values(),
+        if cached_entrypoint is None or cached_entrypoint == LocalMempoolManagerV8.entrypoint_lowercase:
+            user_operation_by_hash_json_ops.append(
+                asyncio.create_task(
+                    self.user_operation_handler_v7v8v9.get_user_operation_by_hash_rpc(
+                        user_operation_hash,
+                        LocalMempoolManagerV8.entrypoint,
+                        self.local_mempool_manager_v8.senders_to_senders_mempools.values(),
+                        cached_block_hex,
+                    )
                 )
             )
-        )
 
-        user_operation_by_hash_json_ops.append(
-            asyncio.create_task(
-                self.user_operation_handler_v7v8v9.get_user_operation_by_hash_rpc(
-                    user_operation_hash,
-                    LocalMempoolManagerV8.entrypoint,
-                    self.local_mempool_manager_v8.senders_to_senders_mempools.values(),
+        if cached_entrypoint is None or cached_entrypoint == LocalMempoolManagerV7.entrypoint_lowercase:
+            user_operation_by_hash_json_ops.append(
+                asyncio.create_task(
+                    self.user_operation_handler_v7v8v9.get_user_operation_by_hash_rpc(
+                        user_operation_hash,
+                        LocalMempoolManagerV7.entrypoint,
+                        self.local_mempool_manager_v7.senders_to_senders_mempools.values(),
+                        cached_block_hex,
+                    )
                 )
             )
-        )
-
-        user_operation_by_hash_json_ops.append(
-            asyncio.create_task(
-                self.user_operation_handler_v7v8v9.get_user_operation_by_hash_rpc(
-                    user_operation_hash,
-                    LocalMempoolManagerV7.entrypoint,
-                    self.local_mempool_manager_v7.senders_to_senders_mempools.values(),
-                )
-            )
-        )
         done, _ = await asyncio.wait(
             user_operation_by_hash_json_ops,
             return_when=asyncio.FIRST_EXCEPTION
@@ -631,33 +773,58 @@ class ExecutionEndpoint(Endpoint):
         if user_operation_hash in user_operation_receipt_cache:
             return user_operation_receipt_cache[user_operation_hash]
 
+        search_result = await search_user_operation_seen_cache(user_operation_hash)
+        if search_result is not None:
+            cached_block_hex, cached_entrypoint = search_result
+        else:
+            cached_block_hex, cached_entrypoint = None, None
+
+        # See _event_rpc_getUserOperationByHash: ignore a cached v0.6 hint
+        # when v6 is disabled in this process so we don't end up with an
+        # empty task set.
+        if (
+            cached_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase
+            and self.user_operation_handler_v6 is None
+        ):
+            cached_entrypoint = None
+
         user_operation_receipt_info_json_ops = []
-        if self.user_operation_handler_v6 is not None:
+        if (
+            self.user_operation_handler_v6 is not None and
+            (cached_entrypoint is None or cached_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase)
+        ):
             user_operation_receipt_info_json_ops.append(asyncio.create_task(
                     self.user_operation_handler_v6.get_user_operation_receipt_rpc(
                         user_operation_hash,
                         LocalMempoolManagerV6.entrypoint,
+                        cached_block_hex,
                     ))
                 )
 
-        user_operation_receipt_info_json_ops.append(asyncio.create_task(
-            self.user_operation_handler_v7v8v9.get_user_operation_receipt_rpc(
-                user_operation_hash,
-                LocalMempoolManagerV9.entrypoint,
-            ))
-        )
-        user_operation_receipt_info_json_ops.append(asyncio.create_task(
-            self.user_operation_handler_v7v8v9.get_user_operation_receipt_rpc(
-                user_operation_hash,
-                LocalMempoolManagerV8.entrypoint,
-            ))
-        )
-        user_operation_receipt_info_json_ops.append(asyncio.create_task(
-            self.user_operation_handler_v7v8v9.get_user_operation_receipt_rpc(
-                user_operation_hash,
-                LocalMempoolManagerV7.entrypoint,
-            ))
-        )
+        if cached_entrypoint is None or cached_entrypoint == LocalMempoolManagerV9.entrypoint_lowercase:
+            user_operation_receipt_info_json_ops.append(asyncio.create_task(
+                self.user_operation_handler_v7v8v9.get_user_operation_receipt_rpc(
+                    user_operation_hash,
+                    LocalMempoolManagerV9.entrypoint,
+                    cached_block_hex,
+                ))
+            )
+        if cached_entrypoint is None or cached_entrypoint == LocalMempoolManagerV8.entrypoint_lowercase:
+            user_operation_receipt_info_json_ops.append(asyncio.create_task(
+                self.user_operation_handler_v7v8v9.get_user_operation_receipt_rpc(
+                    user_operation_hash,
+                    LocalMempoolManagerV8.entrypoint,
+                    cached_block_hex,
+                ))
+            )
+        if cached_entrypoint is None or cached_entrypoint == LocalMempoolManagerV7.entrypoint_lowercase:
+            user_operation_receipt_info_json_ops.append(asyncio.create_task(
+                self.user_operation_handler_v7v8v9.get_user_operation_receipt_rpc(
+                    user_operation_hash,
+                    LocalMempoolManagerV7.entrypoint,
+                    cached_block_hex,
+                ))
+            )
         done, _ = await asyncio.wait(
             user_operation_receipt_info_json_ops,
             return_when=asyncio.FIRST_EXCEPTION
@@ -686,20 +853,43 @@ class ExecutionEndpoint(Endpoint):
         return "ok"
 
     async def _event_voltaire_feesPerGas(self, _) -> dict:
-        max_fee_per_gas, max_priority_fee_per_gas = await asyncio.gather(
-            send_rpc_request_to_eth_client(
-                self.ethereum_node_urls, "eth_gasPrice",
-                None, None, "result"
-            ),
-            send_rpc_request_to_eth_client(
-                self.ethereum_node_urls, "eth_maxPriorityFeePerGas",
-                None, None, "result"
-            )
+        max_fee_per_gas_op = send_rpc_request_to_eth_client(
+            self.ethereum_node_urls, "eth_gasPrice", None, None, "result"
         )
+
+        # Computed once and reused below: this flag decides BOTH whether
+        # tasks_arr gets the priority-fee task AND whether tasks[1] is
+        # read after the gather — keeping the two in a single predicate
+        # makes the one-task case unable to index past the list.
+        skip_priority_fee = (
+            self.chain_id == 999 or self.chain_id == 998 or  # HyperEVM
+            self.chain_id == 42161 or self.chain_id == 421614  # Arbitrum
+        )
+
+        tasks_arr = [max_fee_per_gas_op]
+
+        # skip eth_maxPriorityFeePerGas on HyperEVM and Arbitrum
+        if not skip_priority_fee:
+            max_priority_fee_per_gas_op = send_rpc_request_to_eth_client(
+                self.ethereum_node_urls, "eth_maxPriorityFeePerGas", None, None, "result"
+            )
+            tasks_arr.append(max_priority_fee_per_gas_op)
+
+        tasks: Any = await asyncio.gather(*tasks_arr)
+
+        max_fee_per_gas_hex = tasks[0]["result"]
+
+        # HyperEVM and Arbitrum: eth_maxPriorityFeePerGas was skipped above,
+        # so tasks only has one element; default the priority fee to 0.
+        if skip_priority_fee:
+            max_priority_fee_per_gas_with_buffer = "0x0"
+        else:
+            max_priority_fee_per_gas_hex = tasks[1]["result"]
+            max_priority_fee_per_gas_with_buffer = hex(math.ceil(
+                int(max_priority_fee_per_gas_hex, 16) * 1.2))  # 20% buffer
+
         max_fee_per_gas_with_buffer = hex(math.ceil(
-            int(max_fee_per_gas["result"], 16) * 1.2))  # 20% buffer
-        max_priority_fee_per_gas_with_buffer = hex(math.ceil(
-            int(max_priority_fee_per_gas["result"], 16) * 1.2))  # 20% buffer
+            int(max_fee_per_gas_hex, 16) * 1.2))  # 20% buffer
 
         return {
             "maxFeePerGas": max_fee_per_gas_with_buffer,

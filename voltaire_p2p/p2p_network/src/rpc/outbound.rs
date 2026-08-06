@@ -16,7 +16,7 @@ use tokio_util::{
     codec::Framed,
     compat::{Compat, FuturesAsyncReadCompatExt},
 };
-// use types::{EthSpec, ForkContext};
+
 /* Outbound request */
 
 // Combines all the RPC requests into a single enum to implement `UpgradeInfo` and
@@ -66,14 +66,16 @@ impl OutboundRequest {
                 SupportedProtocol::PooledUserOpHashesV1,
                 Encoding::SSZSnappy,
             )],
-            OutboundRequest::PooledUserOpsByHash(_) => vec![ProtocolId::new(
-                SupportedProtocol::PooledUserOpsByHashV07,
-                Encoding::SSZSnappy,
-            )],
-            OutboundRequest::PooledUserOpsByHash(_) => vec![ProtocolId::new(
-                SupportedProtocol::PooledUserOpsByHashV06,
-                Encoding::SSZSnappy,
-            )],
+            OutboundRequest::PooledUserOpsByHash(_) => vec![
+                ProtocolId::new(
+                    SupportedProtocol::PooledUserOpsByHashV07V08V09,
+                    Encoding::SSZSnappy,
+                ),
+                ProtocolId::new(
+                    SupportedProtocol::PooledUserOpsByHashV06,
+                    Encoding::SSZSnappy,
+                ),
+            ],
             OutboundRequest::Ping(_) => vec![ProtocolId::new(
                 SupportedProtocol::PingV1,
                 Encoding::SSZSnappy,
@@ -91,8 +93,8 @@ impl OutboundRequest {
         match self {
             OutboundRequest::Status(_) => 1,
             OutboundRequest::Goodbye(_) => 0,
-            OutboundRequest::PooledUserOpHashes(req) => 10,
-            OutboundRequest::PooledUserOpsByHash(req) => 10,
+            OutboundRequest::PooledUserOpHashes(_) => 10,
+            OutboundRequest::PooledUserOpsByHash(_) => 10,
             OutboundRequest::Ping(_) => 1,
             OutboundRequest::MetaData(_) => 1,
         }
@@ -104,9 +106,9 @@ impl OutboundRequest {
             OutboundRequest::Status(_) => SupportedProtocol::StatusV1,
             OutboundRequest::Goodbye(_) => SupportedProtocol::GoodbyeV1,
             OutboundRequest::PooledUserOpHashes(_) => SupportedProtocol::PooledUserOpHashesV1,
-            OutboundRequest::PooledUserOpsByHash(_) => SupportedProtocol::PooledUserOpsByHashV07,
+            OutboundRequest::PooledUserOpsByHash(_) => SupportedProtocol::PooledUserOpsByHashV07V08V09,
             OutboundRequest::Ping(_) => SupportedProtocol::PingV1,
-            OutboundRequest::MetaData(req) => SupportedProtocol::MetaDataV1,
+            OutboundRequest::MetaData(_) => SupportedProtocol::MetaDataV1,
         }
     }
 
@@ -117,7 +119,7 @@ impl OutboundRequest {
             // this only gets called after `multiple_responses()` returns true. Therefore, only
             // variants that have `multiple_responses()` can have values.
             OutboundRequest::PooledUserOpHashes(_) => ResponseTermination::PooledUserOpHashes,
-            OutboundRequest::PooledUserOpsByHash(_) => ResponseTermination::PooledUserOpsByHashV07,
+            OutboundRequest::PooledUserOpsByHash(_) => ResponseTermination::PooledUserOpsByHashV07V08V09,
             OutboundRequest::Status(_) => unreachable!(),
             OutboundRequest::Goodbye(_) => unreachable!(),
             OutboundRequest::Ping(_) => unreachable!(),
@@ -148,7 +150,6 @@ where
                 let ssz_snappy_codec = BaseOutboundCodec::new(SSZSnappyOutboundCodec::new(
                     protocol,
                     self.max_rpc_size,
-                    // self.fork_context.clone(),
                 ));
                 OutboundCodec::SSZSnappy(ssz_snappy_codec)
             }

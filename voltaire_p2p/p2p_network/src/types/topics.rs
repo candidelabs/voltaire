@@ -9,8 +9,9 @@ pub const TOPIC_PREFIX: &str = "account_abstraction";
 pub const SSZ_SNAPPY_ENCODING_POSTFIX: &str = "ssz_snappy";
 pub const USER_OPS_WITH_ENTRY_POINT: &str = "user_operation";
 
+#[allow(dead_code)]
 pub const BASE_CORE_TOPICS: [GossipKind; 2] = [
-    GossipKind::VerifiedUserOperationV07,
+    GossipKind::VerifiedUserOperationV07V08V09,
     GossipKind::VerifiedUserOperationV06,
 ];
 
@@ -32,15 +33,15 @@ pub struct GossipTopic {
 #[strum(serialize_all = "snake_case")]
 pub enum GossipKind {
     /// Topic for publishing UserOperations.
-    VerifiedUserOperationV07,
+    VerifiedUserOperationV07V08V09,
     VerifiedUserOperationV06,
 }
 
 impl std::fmt::Display for GossipKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            GossipKind::VerifiedUserOperationV07 =>{
-                write!(f, "VerifiedUserOperationV07")
+            GossipKind::VerifiedUserOperationV07V08V09 =>{
+                write!(f, "VerifiedUserOperationV07V08V09")
             },
             GossipKind::VerifiedUserOperationV06 => {
                 write!(f, "VerifiedUserOperationV06")
@@ -81,7 +82,7 @@ impl GossipTopic {
         &self.kind
     }
 
-    pub fn decode(topic: &str,topic_v07: &GossipTopic, topic_v06: &GossipTopic) -> Result<Self, String> {
+    pub fn decode(topic: &str,topic_v07v08v09: &GossipTopic, topic_v06: &GossipTopic) -> Result<Self, String> {
         let topic_parts: Vec<&str> = topic.split('/').collect();
         if topic_parts.len() == 5 && topic_parts[1] == TOPIC_PREFIX {
             let mempool_id:String = topic_parts[2].into();
@@ -92,8 +93,8 @@ impl GossipTopic {
             };
             let kind = if topic_parts[2] == topic_v06.mempool_id{
                 GossipKind::VerifiedUserOperationV06
-            } else if topic_parts[2] == topic_v07.mempool_id{
-                GossipKind::VerifiedUserOperationV07
+            } else if topic_parts[2] == topic_v07v08v09.mempool_id{
+                GossipKind::VerifiedUserOperationV07V08V09
             }else{
                 return Err(format!("Unknown mempool id: {}", topic_parts[2]));
             };
@@ -136,7 +137,7 @@ impl std::fmt::Display for GossipTopic {
         };
 
         let kind = match self.kind {
-            GossipKind::VerifiedUserOperationV07 => USER_OPS_WITH_ENTRY_POINT,
+            GossipKind::VerifiedUserOperationV07V08V09 => USER_OPS_WITH_ENTRY_POINT,
             GossipKind::VerifiedUserOperationV06 => USER_OPS_WITH_ENTRY_POINT,
         };
         write!(

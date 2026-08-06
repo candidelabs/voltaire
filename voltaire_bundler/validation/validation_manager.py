@@ -16,7 +16,14 @@ class ValidationManager(ABC, Generic[UserOperationType]):
     is_unsafe: bool
     is_legacy_mode: bool
     enforce_gas_price_tolerance: int
+    enforce_pre_verification_gas_tolerance: int
     ethereum_node_debug_trace_call_urls: list[str]
+    # entrypoint address (lowercase) -> delegatecall-proxy code override
+    # pointing at a pre-deployed simulation contract. Populated at boot by
+    # ExecutionEndpoint.init_deployed_simulations for the simulation
+    # contracts found deployed on-chain; empty means always use the full
+    # bytecode state override.
+    deployed_simulations_overrides: dict[str, str]
 
     @abstractmethod
     async def validate_user_operation(
@@ -46,12 +53,13 @@ class ValidationManager(ABC, Generic[UserOperationType]):
         sig_failed: bool | None,
         valid_until: int,
         valid_after: int,
-        latest_block_timestamp: int
+        latest_block_timestamp: int,
+        source: str = "account or paymaster",
     ) -> None:
         if sig_failed:
             raise ValidationException(
                 ValidationExceptionCode.InvalidSignature,
-                "Invalid UserOp signature or paymaster signature",
+                f"Invalid {source} signature",
             )
 
         if valid_after is None or latest_block_timestamp < valid_after:

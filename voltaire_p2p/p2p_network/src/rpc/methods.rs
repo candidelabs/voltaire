@@ -1,6 +1,6 @@
 //! Available RPC methods types and ids.
 
-use crate::types::UserOperationV07;
+use crate::types::UserOperationV07V08V09;
 use crate::types::UserOperationV06;
 
 use ethereum_types::H256;
@@ -229,9 +229,9 @@ impl PooledUserOpHashesRequest {
 /// The STATUS request/response handshake message.
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[ssz(struct_behaviour = "transparent")]
-pub struct PooledUserOpsByHashV07 {
+pub struct PooledUserOpsByHashV07V08V09 {
     /// The fork version of the chain we are broadcasting.
-    pub list: VariableList<UserOperationV07, MaxOpsPerRequest>,
+    pub list: VariableList<UserOperationV07V08V09, MaxOpsPerRequest>,
 }
 
 /// The STATUS request/response handshake message.
@@ -244,7 +244,7 @@ pub struct PooledUserOpsByHashV06 {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PooledUserOpsByHash {
-    PooledUserOpsByHashV07(PooledUserOpsByHashV07),
+    PooledUserOpsByHashV07V08V09(PooledUserOpsByHashV07V08V09),
     PooledUserOpsByHashV06(PooledUserOpsByHashV06)
 }
 
@@ -273,7 +273,7 @@ pub enum RPCResponse {
     PooledUserOpHashes(PooledUserOpHashes),
 
     /// A PooledUserOpsByHash response to a PooledUserOpsByHash request.
-    PooledUserOpsByHashV07(PooledUserOpsByHashV07),
+    PooledUserOpsByHashV07V08V09(PooledUserOpsByHashV07V08V09),
 
     /// A PooledUserOpsByHash response to a PooledUserOpsByHash request.
      PooledUserOpsByHashV06(PooledUserOpsByHashV06),
@@ -291,8 +291,8 @@ pub enum ResponseTermination {
     /// PooledUserOpHashes stream termination.
     PooledUserOpHashes,
 
-    /// PooledUserOpsByHashV07 stream termination.
-    PooledUserOpsByHashV07,
+    /// PooledUserOpsByHashV07V08V09 stream termination.
+    PooledUserOpsByHashV07V08V09,
 
     /// PooledUserOpsByHashV06 stream termination.
     PooledUserOpsByHashV06,
@@ -356,7 +356,7 @@ impl RPCCodedResponse {
             RPCCodedResponse::Success(resp) => match resp {
                 RPCResponse::Status(_) => false,
                 RPCResponse::PooledUserOpHashes(_) => false,
-                RPCResponse::PooledUserOpsByHashV07(_) => false,
+                RPCResponse::PooledUserOpsByHashV07V08V09(_) => false,
                 RPCResponse::PooledUserOpsByHashV06(_) => false,
                 RPCResponse::Pong(_) => false,
                 RPCResponse::MetaData(_) => false,
@@ -391,7 +391,7 @@ impl RPCResponse {
         match self {
             RPCResponse::Status(_) => Protocol::Status,
             RPCResponse::PooledUserOpHashes(_) => Protocol::PooledUserOpHashes,
-            RPCResponse::PooledUserOpsByHashV07(_) => Protocol::PooledUserOpsByHashV07,
+            RPCResponse::PooledUserOpsByHashV07V08V09(_) => Protocol::PooledUserOpsByHashV07V08V09,
             RPCResponse::PooledUserOpsByHashV06(_) => Protocol::PooledUserOpsByHashV06,
             RPCResponse::Pong(_) => Protocol::Ping,
             RPCResponse::MetaData(_) => Protocol::MetaData,
@@ -431,8 +431,8 @@ impl std::fmt::Display for RPCResponse {
             RPCResponse::PooledUserOpHashes(pooled_user_op_hashes) => {
                 write!(f, "PooledUserOpHashes: next_cursor: {}, Hashes: {:?}", std::str::from_utf8(&pooled_user_op_hashes.next_cursor.to_vec()).unwrap(), pooled_user_op_hashes.hashes)
             }
-            RPCResponse::PooledUserOpsByHashV07(pooled_user_ops_by_hash) => {
-                write!(f, "PooledUserOpsByHashV07: List: {:?}", pooled_user_ops_by_hash.list)
+            RPCResponse::PooledUserOpsByHashV07V08V09(pooled_user_ops_by_hash) => {
+                write!(f, "PooledUserOpsByHashV07V08V09: List: {:?}", pooled_user_ops_by_hash.list)
             }
             RPCResponse::PooledUserOpsByHashV06(pooled_user_ops_by_hash) => {
                 write!(f, "PooledUserOpsByHashV06: List: {:?}", pooled_user_ops_by_hash.list)
@@ -492,7 +492,7 @@ impl std::fmt::Display for PooledUserOpsByHashRequest {
 impl slog::KV for StatusMessage {
     fn serialize(
         &self,
-        record: &slog::Record,
+        _record: &slog::Record,
         serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
         serializer.emit_arguments("chain_id", &format_args!("{:?}", self.chain_id))?;

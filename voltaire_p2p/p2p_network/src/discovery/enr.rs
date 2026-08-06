@@ -1,6 +1,6 @@
 //! Helper functions and an extension trait for Ethereum 2 ENRs.
 
-pub use discv5::enr::{CombinedKey, EnrBuilder};
+pub use discv5::enr::{CombinedKey, Builder as EnrBuilder};
 
 use super::enr_ext::CombinedKeyExt;
 use super::ENR_FILENAME;
@@ -83,7 +83,6 @@ pub fn use_or_load_enr(
 pub fn build_or_load_enr(
     local_key: Keypair,
     config: &NetworkConfig,
-    // enr_fork_id: &EnrForkId,
     log: &slog::Logger,
 ) -> Result<Enr, String> {
     // Build the local ENR.
@@ -100,7 +99,7 @@ pub fn create_enr_builder_from_config<T: EnrKey>(
     config: &NetworkConfig,
     enable_libp2p: bool,
 ) -> EnrBuilder<T> {
-    let mut builder = EnrBuilder::new("v4");
+    let mut builder = EnrBuilder::default();
     let (maybe_ipv4_address, maybe_ipv6_address) = &config.enr_address;
 
     if let Some(ip) = maybe_ipv4_address {
@@ -195,7 +194,7 @@ fn compare_enr(local_enr: &Enr, disk_enr: &Enr) -> bool {
         && (local_enr.udp6().is_none() || local_enr.udp6() == disk_enr.udp6())
         // we need the mempools_bitfield_ENR_KEY and SYNC_COMMITTEE_BITFIELD_ENR_KEY key to match,
         // otherwise we use a new ENR. This will likely only be true for non-validating nodes
-        && local_enr.get(CHAIN_ID) == disk_enr.get(CHAIN_ID)
+        && local_enr.get_raw_rlp(CHAIN_ID) == disk_enr.get_raw_rlp(CHAIN_ID)
         // && local_enr.get(SYNC_COMMITTEE_BITFIELD_ENR_KEY) == disk_enr.get(SYNC_COMMITTEE_BITFIELD_ENR_KEY)
 }
 

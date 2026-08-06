@@ -114,7 +114,6 @@ pub use config::Config as NetworkConfig;
 pub use discovery::{CombinedKeyExt, EnrExt};
 pub use discv5;
 pub use libp2p;
-pub use libp2p::bandwidth::BandwidthSinks;
 pub use libp2p::gossipsub::{IdentTopic, MessageAcceptance, MessageId, Topic, TopicHash};
 pub use libp2p::{core::ConnectedPoint, PeerId, Swarm};
 pub use libp2p::{multiaddr, Multiaddr};
@@ -124,9 +123,7 @@ pub use peer_manager::{
     peerdb::score::{PeerAction, ReportSource},
     peerdb::PeerDB,
     ConnectionDirection, PeerConnectionStatus, PeerInfo, PeerManager, 
-    //SyncInfo, SyncStatus,
 };
-// pub use service::{load_private_key, Context, Libp2pEvent, Service, NETWORK_KEY_FILENAME};
 pub use service::api_types::{PeerRequestId, Request, Response};
 pub use service::utils::*;
 pub use service::{Gossipsub, NetworkEvent};

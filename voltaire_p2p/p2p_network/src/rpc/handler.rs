@@ -12,7 +12,7 @@ use futures::prelude::*;
 use futures::{Sink, SinkExt};
 use libp2p::swarm::handler::{
     ConnectionEvent, ConnectionHandler, ConnectionHandlerEvent, DialUpgradeError,
-    FullyNegotiatedInbound, FullyNegotiatedOutbound, KeepAlive, StreamUpgradeError,
+    FullyNegotiatedInbound, FullyNegotiatedOutbound, StreamUpgradeError,
     SubstreamProtocol,
 };
 use libp2p::swarm::Stream;
@@ -26,7 +26,6 @@ use std::{
 };
 use tokio::time::{sleep_until, Instant as TInstant, Sleep};
 use tokio_util::time::{delay_queue, DelayQueue};
-// use types::{EthSpec, ForkContext};
 
 /// The number of times to retry an outbound upgrade in the case of IO errors.
 const IO_ERROR_RETRIES: u8 = 3;
@@ -307,7 +306,6 @@ where
 {
     type FromBehaviour = RPCSend<Id>;
     type ToBehaviour = HandlerEvent<Id>;
-    type Error = RPCError;
     type InboundProtocol = RPCProtocol;
     type OutboundProtocol = OutboundRequestContainer;
     type OutboundOpenInfo = (Id, OutboundRequest); // Keep track of the id and the request
@@ -329,7 +327,7 @@ where
         }
     }
 
-    fn connection_keep_alive(&self) -> KeepAlive {
+    fn connection_keep_alive(&self) -> bool {
         // Check that we don't have outbound items pending for dialing, nor dialing, nor
         // established. Also check that there are no established inbound substreams.
         // Errors and events need to be reported back, so check those too.
@@ -347,11 +345,7 @@ where
             }
             _ => false,
         };
-        if should_shutdown {
-            KeepAlive::No
-        } else {
-            KeepAlive::Yes
-        }
+        !should_shutdown
     }
 
     fn poll(
@@ -362,7 +356,6 @@ where
             Self::OutboundProtocol,
             Self::OutboundOpenInfo,
             Self::ToBehaviour,
-            Self::Error,
         >,
     > {
         if let Some(waker) = &self.waker {
@@ -387,9 +380,8 @@ where
                 Poll::Ready(_) => {
                     self.state = HandlerState::Deactivated;
                     debug!(self.log, "Handler deactivated");
-                    return Poll::Ready(
-                        ConnectionHandlerEvent::Close(RPCError::Disconnected)
-                    );
+                    // connection_keep_alive will return No and close the connection
+                    return Poll::Pending;
                 }
                 Poll::Pending => {}
             };
@@ -421,9 +413,8 @@ where
                 Poll::Ready(Some(Err(e))) => {
                     warn!(self.log, "Inbound substream poll failed"; "error" => ?e);
                     // drops the peer if we cannot read the delay queue
-                    return Poll::Ready(ConnectionHandlerEvent::Close(RPCError::InternalError(
-                        "Could not poll inbound stream timer",
-                    )));
+                    self.state = HandlerState::Deactivated;
+                    return Poll::Pending;
                 }
                 Poll::Pending | Poll::Ready(None) => break,
             }
@@ -451,9 +442,8 @@ where
                 }
                 Poll::Ready(Some(Err(e))) => {
                     warn!(self.log, "Outbound substream poll failed"; "error" => ?e);
-                    return Poll::Ready(ConnectionHandlerEvent::Close(RPCError::InternalError(
-                        "Could not poll outbound stream timer",
-                    )));
+                    self.state = HandlerState::Deactivated;
+                    return Poll::Pending;
                 }
                 Poll::Pending | Poll::Ready(None) => break,
             }
@@ -793,7 +783,6 @@ where
                 protocol: SubstreamProtocol::new(
                     OutboundRequestContainer {
                         req: req.clone(),
-                        // fork_context: self.fork_context.clone(),
                         max_rpc_size: self.listen_protocol().upgrade().max_rpc_size,
                     },
                     (),
@@ -810,7 +799,8 @@ where
                 && self.events_out.is_empty()
                 && self.dial_negotiated == 0
             {
-                return Poll::Ready(ConnectionHandlerEvent::Close(RPCError::Disconnected));
+                // connection_keep_alive will return No and close the connection
+                return Poll::Pending;
             }
         }
 
@@ -857,6 +847,7 @@ where
                 // We dont care about these changes as they have no bearing on our RPC internal
                 // logic.
             }
+            _ => {}
         }
     }
 }

@@ -12,6 +12,7 @@ from voltaire_bundler.user_operation.user_operation_handler import decode_failed
 from voltaire_bundler.user_operation.user_operation_v6 import UserOperationV6
 from voltaire_bundler.user_operation.user_operation_handler_v6 import \
     UserOperationHandlerV6
+from voltaire_bundler.utils import latest_block_cache
 from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
 from voltaire_bundler.utils.load_bytecode import load_bytecode
 from .validation_manager import ValidationManager
@@ -32,6 +33,7 @@ class ValidationManagerV6(ValidationManager):
         is_unsafe: bool,
         is_legacy_mode: bool,
         enforce_gas_price_tolerance: int,
+        enforce_pre_verification_gas_tolerance: int,
         ethereum_node_debug_trace_call_urls: list[str],
     ):
         self.user_operation_handler = user_operation_handler
@@ -42,6 +44,7 @@ class ValidationManagerV6(ValidationManager):
         self.is_unsafe = is_unsafe
         self.is_legacy_mode = is_legacy_mode
         self.enforce_gas_price_tolerance = enforce_gas_price_tolerance
+        self.enforce_pre_verification_gas_tolerance = enforce_pre_verification_gas_tolerance
         self.ethereum_node_debug_trace_call_urls = ethereum_node_debug_trace_call_urls
 
         package_directory = os.path.dirname(
@@ -57,12 +60,16 @@ class ValidationManagerV6(ValidationManager):
         self.entrypoint_code_override_arb = load_bytecode(
             "EntryPointSimulationsV6Arb.json")
 
+        # Populated at boot by ExecutionEndpoint.init_deployed_simulations
+        # when the simulation contracts are pre-deployed on-chain.
+        self.deployed_simulations_overrides: dict[str, str] = {}
+
 
     async def validate_user_operation(
         self,
         user_operation: UserOperationV6,
         entrypoint: str,
-        block_number: str,
+        block_number: str | None,
         min_block_number: str | None,
         min_stake: int,
         min_unstake_delay: int,
@@ -144,6 +151,14 @@ class ValidationManagerV6(ValidationManager):
             validated_at_block_timestamp,
             validated_at_block_hash
         ) = ValidationManagerV6.decode_validation_result(validation_result)
+        # Simulation just observed the chain head; share it with other
+        # paths (eg the userop-logs fast path) to skip a redundant
+        # eth_getBlockByNumber. Only publish when the simulation ran
+        # against the live head — an explicit historical block_number
+        # (eg the p2p re-verify path) would poison the cache with a
+        # stale value.
+        if block_number is None or block_number == "latest":
+            latest_block_cache.publish(validated_at_block_number)
         ValidationManagerV6.verify_sig_and_timestamp(
             return_info.sigFailed,
             return_info.validUntil,
@@ -225,23 +240,25 @@ class ValidationManagerV6(ValidationManager):
 
         # arbitrum One or arbitrum sepolia
         if self.chain_id == 42161 or self.chain_id == 421614:
-            state_overrides = {
-                # override the Entrypoint with EntryPointSimulationsV6Arb
-                entrypoint: {"code": self.entrypoint_code_override_arb},
-                self.bundler_address: {
-                    # override the bundler address balance with a high value
-                    "balance": "0x314dc6448d9338c15b0a00000000",
-                },
-            }
+            entrypoint_code_override = self.entrypoint_code_override_arb
         else:
-            state_overrides = {
-                # override the Entrypoint with EntryPointSimulationsV6
-                entrypoint: {"code": self.entrypoint_code_override},
-                self.bundler_address: {
-                    # override the bundler address balance with a high value
-                    "balance": "0x314dc6448d9338c15b0a00000000",
-                },
-            }
+            entrypoint_code_override = self.entrypoint_code_override
+        # If the simulation contract was found pre-deployed at boot, override
+        # with a tiny delegatecall proxy pointing at it instead of shipping
+        # the full ~40KB simulation bytecode on every eth_call. Delegatecall
+        # keeps address(this)/storage = EntryPoint, so execution is identical.
+        # Only the non-tracing path does this: an extra call frame would shift
+        # the depths BundlerCollectorTracer relies on in the tracing path.
+        entrypoint_code_override = self.deployed_simulations_overrides.get(
+            entrypoint.lower(), entrypoint_code_override)
+        state_overrides = {
+            # override the Entrypoint with EntryPointSimulations
+            entrypoint: {"code": entrypoint_code_override},
+            self.bundler_address: {
+                # override the bundler address balance with a high value
+                "balance": "0x314dc6448d9338c15b0a00000000",
+            },
+        }
 
         params = [
             {
@@ -280,7 +297,7 @@ class ValidationManagerV6(ValidationManager):
         self,
         user_operation: UserOperationV6,
         entrypoint: str,
-        block_number: str,
+        block_number: str | None,
         min_block_number: str | None = None
     ) -> str:
         call_data = ValidationManagerV6.encode_simulate_validation_calldata(

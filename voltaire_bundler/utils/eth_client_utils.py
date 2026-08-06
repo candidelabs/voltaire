@@ -5,10 +5,89 @@ import traceback
 from typing import Any
 from eth_abi import encode
 
-from aiohttp import ClientSession
+from aiohttp import ClientSession, ClientTimeout, TCPConnector
 
 from eth_account import Account, messages
 from eth_utils import keccak
+
+
+_session: ClientSession | None = None
+
+
+# --- per-method outbound concurrency cap ---------------------------------
+# Caller-side backpressure: cap concurrent in-flight requests per RPC
+# method so a thundering herd against the upstream node can't keep
+# escalating. Excess callers wait inside the semaphore.
+#
+# Limits sized conservatively — the right value is "what the node can
+# serve at acceptable tail latency", which is provider-dependent. Tune
+# upward if the node serves a method comfortably under load, downward
+# if tails grow with concurrency.
+_METHOD_CONCURRENCY_LIMITS: dict[str, int] = {
+    "eth_call": 32,
+    "eth_getLogs": 16,
+    "eth_getBlockByNumber": 8,
+    "eth_getTransactionReceipt": 32,
+    "eth_getTransactionByHash": 32,
+    "eth_getTransactionCount": 16,
+    "eth_sendRawTransaction": 8,
+    "debug_traceCall": 16,
+    "eth_gasPrice": 4,
+    "eth_maxPriorityFeePerGas": 4,
+    "eth_getProof": 16,
+    "eth_getCode": 8,
+    "eth_getBalance": 4,
+    "trace_transaction": 8,
+}
+_DEFAULT_METHOD_CONCURRENCY_LIMIT = 16
+_method_semaphores: dict[str, asyncio.Semaphore] = {}
+
+
+def _get_method_semaphore(method: str) -> asyncio.Semaphore:
+    """Return the per-method semaphore, creating it on first use.
+
+    Lazy creation so the Semaphore binds to whichever event loop is
+    actually running this call. Safe to call from any async context."""
+    sem = _method_semaphores.get(method)
+    if sem is None:
+        limit = _METHOD_CONCURRENCY_LIMITS.get(
+            method, _DEFAULT_METHOD_CONCURRENCY_LIMIT
+        )
+        sem = asyncio.Semaphore(limit)
+        _method_semaphores[method] = sem
+    return sem
+# --------------------------------------------------------------------------
+
+
+def get_eth_client_session() -> ClientSession:
+    """Return the process-wide aiohttp ClientSession for outbound RPC calls.
+
+    Lazily created on first call so it binds to the running event loop.
+    Reused across all callers to enable HTTP keep-alive, DNS caching, and
+    connection pooling against each Ethereum node.
+
+    HTTP transport tuned for a bundler that fans out many small requests to
+    a handful of Ethereum providers per bundle round:
+      - `total=60` seconds: accommodates slow calls (debug_traceCall, wide
+        eth_getLogs) without letting a hung connection pin a coroutine
+        indefinitely.
+      - `connect=10` seconds: generous enough for TLS handshakes to remote
+        providers on slow networks.
+    """
+    global _session
+    if _session is None or _session.closed:
+        connector = TCPConnector(
+            limit=200,                  # max total open connections (all hosts)
+            limit_per_host=50,          # max concurrent connections per host
+            ttl_dns_cache=300,          # DNS cache TTL, in seconds
+            keepalive_timeout=120,      # idle keepalive socket TTL, in seconds
+            enable_cleanup_closed=True,
+        )
+        _session = ClientSession(
+            connector=connector,
+            timeout=ClientTimeout(total=60, connect=10),  # values in seconds
+        )
+    return _session
 
 
 def create_flashbots_signature(
@@ -58,13 +137,24 @@ async def send_rpc_request_to_eth_client(
             logging.info(f'retrying with node no: {node_index + 1}.')
         chosen_node_url = nodes_urls[node_index]  # iterate through nodes
         try:
-            async with ClientSession() as session:
+            session = get_eth_client_session()
+            # Per-method semaphore caps concurrent in-flight requests for
+            # this RPC method so the bundler can't pile thousands of
+            # eth_calls onto an upstream node that can serve only tens at
+            # a time. Held only around session.post — released before the
+            # retry sleep on failure so a busy slot doesn't block retries.
+            async with _get_method_semaphore(method):
                 async with session.post(
                     chosen_node_url,
                     json=json_request,
                     headers=headers
                 ) as response:
                     resp = await response.read()
+                    if response.status != 200:
+                        logging.warning(
+                            f"Attempt No. {i+1}: non-200 status {response.status} "
+                            f"from {chosen_node_url} for {method}: {resp[:200]!r}"
+                        )
                     json_result = json.loads(resp)
         except json.decoder.JSONDecodeError:
             logging.error(
@@ -79,12 +169,12 @@ async def send_rpc_request_to_eth_client(
             )
             logging.error(f"traceback: {str(traceback.format_exc())}")
             await asyncio.sleep(1)
-        except:
-            logging.error(
-                f"Attempt No. {i+1} to call node rpc failed."
-            )
-            logging.error(f"traceback: {str(traceback.format_exc())}")
-            await asyncio.sleep(1)
+        # No bare except: CancelledError / KeyboardInterrupt / SystemExit
+        # are BaseException subclasses and propagate untouched by design.
+        # Without this, a wait_for(...) timeout on a caller (very common
+        # while queued on the per-method semaphore under load) was being
+        # logged as a node-RPC failure, swamping operator logs with
+        # misleading errors when nothing on the node was actually wrong.
         else:
             if "error" in json_result:
                 if "message" in json_result["error"]:
@@ -111,14 +201,21 @@ async def send_rpc_request_to_eth_client(
                         f" with error code: {err_code}"
                         f" and error message: {err_message}."
                     )
+                    await asyncio.sleep(1)
                     continue
-                elif expected_key is not None and expected_key not in json_result:
-                    logging.error(
-                        f"Attempt No. {i+1} to call node rpc failed."
-                        f"the request: {str(json_request)}"
-                        f"as the key {expected_key} is not in the result: {str(json_result)}"
-                    )
-                    continue
+            # Checked independently of the "error" branch: a response
+            # carrying neither "error" nor the expected key (flaky
+            # proxies, load balancers returning bare {"jsonrpc","id"})
+            # must retry too, not be returned for the caller to
+            # KeyError on.
+            if expected_key is not None and expected_key not in json_result:
+                logging.error(
+                    f"Attempt No. {i+1} to call node rpc failed."
+                    f"the request: {str(json_request)}"
+                    f"as the key {expected_key} is not in the result: {str(json_result)}"
+                )
+                await asyncio.sleep(1)
+                continue
             return json_result
     raise ValueError("Failed rpc request to rpc node client")
 
@@ -138,7 +235,10 @@ async def send_rpc_request_to_eth_client_no_retry(
         "content-type": "application/json",
         "connection": "keep-alive"
     }
-    async with ClientSession() as session:
+    session = get_eth_client_session()
+    # Same per-method cap as the retry path. No-retry callers share the
+    # upstream capacity with everyone else.
+    async with _get_method_semaphore(method):
         async with session.post(
             ethereum_node_url,
             json=json_request,
@@ -146,6 +246,11 @@ async def send_rpc_request_to_eth_client_no_retry(
         ) as response:
             try:
                 resp = await response.read()
+                if response.status != 200:
+                    logging.warning(
+                        f"Non-200 status {response.status} from {ethereum_node_url} "
+                        f"for {method}: {resp[:200]!r}"
+                    )
                 return json.loads(resp)
             except json.decoder.JSONDecodeError:
                 logging.critical("Invalid json response from eth client")
@@ -156,12 +261,11 @@ async def send_rpc_request_to_eth_client_no_retry(
                     str(traceback.format_exc()) +
                     str(excp)
                 )
-                await asyncio.sleep(1)
-            except:
-                logging.error(
-                    str(traceback.format_exc())
-                )
-                await asyncio.sleep(1)
+                # Re-raise so the semaphore slot is freed immediately and
+                # callers see an explicit error instead of a silent None.
+                # CancelledError / KeyboardInterrupt / SystemExit are
+                # BaseException subclasses and propagate untouched by design.
+                raise
 
 
 async def get_block_info(
