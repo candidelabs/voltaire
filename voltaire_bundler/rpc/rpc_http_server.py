@@ -371,6 +371,20 @@ async def check_health(
         return web.Response(text=results_str, status=503)
 
 
+async def up(_: web.Request) -> web.Response:
+    """Liveness probe in the Rails ``/up`` convention used by Kamal.
+
+    kamal-proxy polls ``GET /up`` during a deploy and only cuts traffic
+    over once it sees a 200, so this must stay dependency-free: it
+    answers as soon as the HTTP server can serve requests. Deployments
+    that should instead be gated on eth-node health and bundler EOA
+    balances can point Kamal's ``proxy.healthcheck.path`` at
+    ``/health``, which runs the deep check (and returns 503 on
+    failure).
+    """
+    return web.Response(text="OK")
+
+
 async def run_rpc_http_server(
     node_urls_to_check: list[str],
     target_chain_id_hex: str,
@@ -399,16 +413,20 @@ async def run_rpc_http_server(
     app = web.Application()
     app.router.add_post(rpc_path, handle)
 
-    app.router.add_post(
-        "/health",
-        partial(
-            check_health,
-            node_urls_to_check,
-            target_chain_id_hex,
-            bundlers,
-            min_balance
-        )
+    health_handler = partial(
+        check_health,
+        node_urls_to_check,
+        target_chain_id_hex,
+        bundlers,
+        min_balance
     )
+    app.router.add_post("/health", health_handler)
+    # GET so external health checkers (kamal-proxy, load balancers)
+    # that can't POST can run the deep check too.
+    app.router.add_get("/health", health_handler)
+
+    # Kamal-proxy liveness probe.
+    app.router.add_get("/up", up)
 
     cors = aiohttp_cors.setup(
         app,
