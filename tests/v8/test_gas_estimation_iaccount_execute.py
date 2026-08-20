@@ -345,7 +345,8 @@ async def test_estimate_user_operation_gas_full_flow():
         ver_gas = int(ver_gas_hex, 16)
         prever_gas = int(prever_gas_hex, 16)
 
-        assert call_gas == 20_000
+        # call gas = estimated (20_000) + 3_000 buffer
+        assert call_gas == 23_000
         # verification gas = estimated (50_000) + 10_000 buffer
         assert ver_gas == 60_000
         assert prever_gas > 0
@@ -403,3 +404,80 @@ async def test_check_once_mode_with_execute_user_op():
 
         assert call_gas == 0  # check-once returns 0 for callGasLimitMax
         assert verification_gas == 45_000
+
+
+# --------------------------------------------------------------------------
+# Somnia one-probe-per-eth_call estimation
+# (full behavioral suite lives in tests/v7; GasManagerV7V8V9 shares the
+# code path — this covers it against the v8 EntryPoint/bytecode override)
+# --------------------------------------------------------------------------
+
+USER_OP_ABI_TUPLE = "(address,uint256,bytes,bytes,bytes32,uint256,bytes32,bytes,bytes)"
+PROBE_ARGS_ABI_TUPLE = "(uint256,uint256,uint256,bool,bool)"
+
+SOMNIA_MAX_CALL_DATA_GAS = 10_000_000
+PINNED_BLOCK = "0x64"
+
+
+@pytest.mark.asyncio
+async def test_somnia_one_probe_estimation_returns_smallest_success():
+    """One full-gas probe (gasUsed=2M) then a parallel grid
+    {2_105_000, 2_400_000, 2_800_000, 3_250_000}; a true requirement of
+    2.5M makes 2_800_000 the smallest success."""
+    from eth_abi import decode
+
+    gas_manager = GasManagerV7V8V9(
+        ethereum_node_urls=["http://localhost:8545"],
+        chain_id=50312,  # Somnia testnet
+        bundler_address=BUNDLER_ADDRESS,
+        is_legacy_mode=False,
+        max_verification_gas=10_000_000,
+        max_call_data_gas=SOMNIA_MAX_CALL_DATA_GAS,
+        gas_price_cache=GasPriceCache(
+            ethereum_node_urls=["http://localhost:8545"],
+            chain_id=50312,
+            is_legacy_mode=False,
+            refresh_interval_seconds=10.0,
+        ),
+    )
+    user_op = _make_user_operation(_make_execute_user_op_calldata())
+
+    async def responder(nodes_urls, method, params, *args):
+        data = params[0]["data"]
+        decoded = decode(
+            [USER_OP_ABI_TUPLE, PROBE_ARGS_ABI_TUPLE],
+            bytes.fromhex(data[10:]),
+        )
+        max_gas = decoded[1][1]
+        assert decoded[1][4] is True  # is_check_once on every Somnia probe
+        assert params[1] == PINNED_BLOCK
+        if max_gas >= 2_500_000:
+            return _make_simulation_result_revert(120_000, 2_000_000, 0)
+        return _make_estimate_revert_at_max(b"")
+
+    with patch(
+        "voltaire_bundler.gas.gas_manager.send_rpc_request_to_eth_client",
+        new_callable=AsyncMock,
+        return_value={"result": PINNED_BLOCK}
+    ) as mock_block_number, patch(
+        "voltaire_bundler.gas.gas_manager_v7v8v9.send_rpc_request_to_eth_client",
+        new_callable=AsyncMock,
+        side_effect=responder
+    ) as mock_rpc:
+        call_gas, verification_gas = (
+            await gas_manager.estimate_call_gas_and_verificationgas_limit(
+                user_op,
+                ENTRYPOINT_V8,
+                {},
+                False,
+            )
+        )
+
+        assert call_gas == 2_800_000
+        assert verification_gas == 120_000
+        mock_block_number.assert_called_once()
+        assert mock_rpc.call_count == 5  # 1 full-gas + 4 grid probes
+        # the v8 entrypoint keeps selecting the v8 bytecode override
+        state_overrides = mock_rpc.call_args[0][2][2]
+        assert state_overrides[ENTRYPOINT_V8]["code"] == \
+            gas_manager.entrypoint_code_override_v8
