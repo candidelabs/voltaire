@@ -456,7 +456,7 @@ async def test_somnia_one_probe_estimation_returns_smallest_success():
         return _make_estimate_revert_at_max(b"")
 
     with patch(
-        "voltaire_bundler.gas.gas_manager.send_rpc_request_to_eth_client",
+        "voltaire_bundler.gas.somnia_gas_estimation.send_rpc_request_to_eth_client",
         new_callable=AsyncMock,
         return_value={"result": PINNED_BLOCK}
     ) as mock_block_number, patch(

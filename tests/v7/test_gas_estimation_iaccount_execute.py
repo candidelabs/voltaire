@@ -467,7 +467,7 @@ async def test_somnia_one_probe_estimation_returns_smallest_success(caplog):
     caplog.set_level("INFO")
 
     with patch(
-        "voltaire_bundler.gas.gas_manager.send_rpc_request_to_eth_client",
+        "voltaire_bundler.gas.somnia_gas_estimation.send_rpc_request_to_eth_client",
         new_callable=AsyncMock,
         return_value={"result": PINNED_BLOCK}
     ) as mock_block_number, patch(
@@ -533,7 +533,7 @@ async def test_somnia_retry_round_covers_deep_stack_headroom():
     user_op = _make_user_operation(_make_execute_user_op_calldata())
 
     with patch(
-        "voltaire_bundler.gas.gas_manager.send_rpc_request_to_eth_client",
+        "voltaire_bundler.gas.somnia_gas_estimation.send_rpc_request_to_eth_client",
         new_callable=AsyncMock,
         return_value={"result": PINNED_BLOCK}
     ), patch(
@@ -570,7 +570,7 @@ async def test_somnia_full_gas_revert_raises_execution_exception():
     user_op = _make_user_operation(_make_execute_user_op_calldata())
 
     with patch(
-        "voltaire_bundler.gas.gas_manager.send_rpc_request_to_eth_client",
+        "voltaire_bundler.gas.somnia_gas_estimation.send_rpc_request_to_eth_client",
         new_callable=AsyncMock,
         return_value={"result": PINNED_BLOCK}
     ), patch(
@@ -605,7 +605,7 @@ async def test_somnia_anchor_result_is_localized_by_bisection():
     user_op = _make_user_operation(_make_execute_user_op_calldata())
 
     with patch(
-        "voltaire_bundler.gas.gas_manager.send_rpc_request_to_eth_client",
+        "voltaire_bundler.gas.somnia_gas_estimation.send_rpc_request_to_eth_client",
         new_callable=AsyncMock,
         return_value={"result": PINNED_BLOCK}
     ), patch(
@@ -663,7 +663,7 @@ async def test_somnia_falls_back_to_legacy_search_when_all_probes_fail():
         return _make_estimate_revert_at_max(b"")
 
     with patch(
-        "voltaire_bundler.gas.gas_manager.send_rpc_request_to_eth_client",
+        "voltaire_bundler.gas.somnia_gas_estimation.send_rpc_request_to_eth_client",
         new_callable=AsyncMock,
         return_value={"result": PINNED_BLOCK}
     ), patch(
@@ -695,7 +695,7 @@ async def test_somnia_check_once_path_stays_single_call():
     user_op.call_gas_limit = 100_000
 
     with patch(
-        "voltaire_bundler.gas.gas_manager.send_rpc_request_to_eth_client",
+        "voltaire_bundler.gas.somnia_gas_estimation.send_rpc_request_to_eth_client",
         new_callable=AsyncMock,
         return_value={"result": PINNED_BLOCK}
     ) as mock_block_number, patch(

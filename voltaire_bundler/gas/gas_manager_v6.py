@@ -7,7 +7,9 @@ from eth_abi import decode, encode
 from voltaire_bundler.bundle.exceptions import ExecutionException, \
         ExecutionExceptionCode, ValidationException, ValidationExceptionCode
 from voltaire_bundler.gas.gas_manager import \
-    GasManager, SOMNIA_CHAIN_IDS, calculate_deposit_slot_index, deep_union
+    GasManager, calculate_deposit_slot_index, deep_union
+from voltaire_bundler.gas.somnia_gas_estimation import \
+    SOMNIA_CHAIN_IDS, estimate_call_gas_somnia
 from voltaire_bundler.gas.gas_price_cache import GasPriceCache
 from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.models import FailedOp
@@ -124,8 +126,8 @@ class GasManagerV6(GasManager):
         is_check_once: bool,
     ) -> tuple[int, int]:
         if self.chain_id in SOMNIA_CHAIN_IDS and not is_check_once:
-            somnia_result = await self._estimate_call_gas_somnia(
-                user_operation, entrypoint, state_override_set_dict
+            somnia_result = await estimate_call_gas_somnia(
+                self, user_operation, entrypoint, state_override_set_dict
             )
             if somnia_result is not None:
                 return somnia_result

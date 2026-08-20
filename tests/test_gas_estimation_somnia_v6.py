@@ -7,7 +7,7 @@ autouses geth-docker + bundler fixtures for every module in that directory,
 and these tests are pure mock-RPC unit tests.
 
 The full behavioral suite lives in tests/v7/test_gas_estimation_iaccount_execute.py;
-the shared driver is GasManager._estimate_call_gas_somnia. These tests cover
+the shared driver is somnia_gas_estimation.estimate_call_gas_somnia. These tests cover
 the GasManagerV6 wiring: its own Somnia gate, its simulateHandleOpMod selector
 and v0.6 user-operation ABI, and the fallback to its in-contract search.
 """
@@ -133,7 +133,7 @@ async def test_somnia_v6_one_probe_estimation_returns_smallest_success():
     user_op = _make_user_operation()
 
     with patch(
-        "voltaire_bundler.gas.gas_manager.send_rpc_request_to_eth_client",
+        "voltaire_bundler.gas.somnia_gas_estimation.send_rpc_request_to_eth_client",
         new_callable=AsyncMock,
         return_value={"result": PINNED_BLOCK}
     ) as mock_block_number, patch(
@@ -174,7 +174,7 @@ async def test_somnia_v6_full_gas_revert_raises_execution_exception():
     user_op = _make_user_operation()
 
     with patch(
-        "voltaire_bundler.gas.gas_manager.send_rpc_request_to_eth_client",
+        "voltaire_bundler.gas.somnia_gas_estimation.send_rpc_request_to_eth_client",
         new_callable=AsyncMock,
         return_value={"result": PINNED_BLOCK}
     ), patch(
@@ -201,7 +201,7 @@ async def test_somnia_v6_retry_round_covers_deep_stack_headroom():
     user_op = _make_user_operation()
 
     with patch(
-        "voltaire_bundler.gas.gas_manager.send_rpc_request_to_eth_client",
+        "voltaire_bundler.gas.somnia_gas_estimation.send_rpc_request_to_eth_client",
         new_callable=AsyncMock,
         return_value={"result": PINNED_BLOCK}
     ), patch(
@@ -256,7 +256,7 @@ async def test_somnia_v6_falls_back_to_legacy_search_when_all_probes_fail():
         return _make_estimate_revert_at_max(b"")
 
     with patch(
-        "voltaire_bundler.gas.gas_manager.send_rpc_request_to_eth_client",
+        "voltaire_bundler.gas.somnia_gas_estimation.send_rpc_request_to_eth_client",
         new_callable=AsyncMock,
         return_value={"result": PINNED_BLOCK}
     ), patch(
