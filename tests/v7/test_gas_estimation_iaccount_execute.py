@@ -457,10 +457,10 @@ async def test_somnia_one_probe_estimation_returns_smallest_success():
     """
     On Somnia, estimation runs one full-gas check-once probe (measuring
     gasUsed) and then a parallel grid of check-once probes over
-    [gasUsed, gasUsed*1.05 + 1.6M], returning the smallest successful
+    [gasUsed, gasUsed + 1.07M], returning the smallest successful
     candidate. With gasUsed=2M the grid is
-    {2_105_000, 2_450_000, 3_050_000, 3_700_000}; a true requirement of
-    2.5M makes 3_050_000 the smallest success.
+    {2_105_000, 2_360_000, 2_715_000, 3_070_000}; a true requirement of
+    2.5M makes 2_715_000 the smallest success.
     """
     gas_manager = _make_somnia_gas_manager()
     user_op = _make_user_operation(_make_execute_user_op_calldata())
@@ -487,7 +487,7 @@ async def test_somnia_one_probe_estimation_returns_smallest_success():
             )
         )
 
-        assert call_gas == 3_050_000
+        assert call_gas == 2_715_000
         assert verification_gas == 120_000
 
         # one eth_blockNumber to pin the block for all probes
@@ -505,7 +505,7 @@ async def test_somnia_one_probe_estimation_returns_smallest_success():
             probed_gas_limits.append(probe_args[1])
         assert probed_gas_limits[0] == SOMNIA_MAX_CALL_DATA_GAS
         assert sorted(probed_gas_limits[1:]) == [
-            2_105_000, 2_450_000, 3_050_000, 3_700_000
+            2_105_000, 2_360_000, 2_715_000, 3_070_000
         ]
 
 
@@ -514,9 +514,12 @@ async def test_somnia_retry_round_covers_deep_stack_headroom():
     """
     A requirement above the main grid's top (EIP-150 depth amplification
     of the uncharged >=1M-remaining headroom) is caught by the retry
-    round {gasUsed+2.1M, gasUsed+3.2M, max_call_data_gas} instead of
-    falling back to the in-contract search. required=5M fails the main
-    grid (top 3.7M); the retry's 5_200_000 is the smallest success.
+    round {gasUsed*1.05+1.6M, gasUsed+3.2M, max_call_data_gas} instead
+    of falling back to the in-contract search. required=5M fails the
+    main grid (top 3.07M); the retry's 5_200_000 is the smallest success,
+    then one bisection round of the (3.7M, 5.2M) bracket runs (interior
+    probes at 4.0M/4.3M/4.6M/4.9M all fail) and the bracket is within
+    the 10% tolerance.
     """
     gas_manager = _make_somnia_gas_manager()
     user_op = _make_user_operation(_make_execute_user_op_calldata())
@@ -545,9 +548,10 @@ async def test_somnia_retry_round_covers_deep_stack_headroom():
 
         assert call_gas == 5_200_000
         assert verification_gas == 120_000
-        # 1 full-gas probe + 4 failed main-grid probes + 3 retry probes,
-        # and no in-contract search call (the responder would assert)
-        assert mock_rpc.call_count == 8
+        # 1 full-gas probe + 4 failed main-grid probes + 3 retry probes
+        # + 4 bisection probes, and no in-contract search call (the
+        # responder would assert)
+        assert mock_rpc.call_count == 12
 
 
 @pytest.mark.asyncio
@@ -575,6 +579,49 @@ async def test_somnia_full_gas_revert_raises_execution_exception():
             )
         # fails fast on the first probe — no grid round
         assert mock_rpc.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_somnia_anchor_result_is_localized_by_bisection():
+    """
+    When only the retry round's max_call_data_gas anchor succeeds, the
+    driver must NOT quote it as-is (a max-sized callGasLimit is an
+    unusable prefund quote) — parallel bisection localizes it instead.
+    required=6M: main grid (top 3.07M) and the retry's 3.7M/5.2M fail,
+    only the 10M anchor succeeds; bisection round 1 over (5.2M, 10M)
+    probes 6.16M/7.12M/8.08M/9.04M and finds 6_160_000; round 2 over
+    (5.2M, 6.16M) fails everywhere, bringing the bracket within
+    tolerance.
+    """
+    gas_manager = _make_somnia_gas_manager()
+    user_op = _make_user_operation(_make_execute_user_op_calldata())
+
+    with patch(
+        "voltaire_bundler.gas.gas_manager.send_rpc_request_to_eth_client",
+        new_callable=AsyncMock,
+        return_value={"result": PINNED_BLOCK}
+    ), patch(
+        "voltaire_bundler.gas.gas_manager_v7v8v9.send_rpc_request_to_eth_client",
+        new_callable=AsyncMock,
+        side_effect=_somnia_probe_responder(
+            required_gas=6_000_000,
+            gas_used=2_000_000,
+            verification_gas=120_000,
+        )
+    ) as mock_rpc:
+        call_gas, verification_gas = (
+            await gas_manager.estimate_call_gas_and_verificationgas_limit(
+                user_op,
+                ENTRYPOINT_V7,
+                {},
+                False,
+            )
+        )
+
+        assert call_gas == 6_160_000  # never the 10M anchor
+        assert verification_gas == 120_000
+        # 1 full-gas + 4 main-grid + 3 retry + 4 + 4 bisection probes
+        assert mock_rpc.call_count == 16
 
 
 @pytest.mark.asyncio

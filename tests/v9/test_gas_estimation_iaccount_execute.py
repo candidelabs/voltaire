@@ -422,8 +422,8 @@ PINNED_BLOCK = "0x64"
 @pytest.mark.asyncio
 async def test_somnia_one_probe_estimation_returns_smallest_success():
     """One full-gas probe (gasUsed=2M) then a parallel grid
-    {2_105_000, 2_450_000, 3_050_000, 3_700_000}; a true requirement of
-    2.5M makes 3_050_000 the smallest success."""
+    {2_105_000, 2_360_000, 2_715_000, 3_070_000}; a true requirement of
+    2.5M makes 2_715_000 the smallest success."""
     from eth_abi import decode
 
     gas_manager = GasManagerV7V8V9(
@@ -473,7 +473,7 @@ async def test_somnia_one_probe_estimation_returns_smallest_success():
             )
         )
 
-        assert call_gas == 3_050_000
+        assert call_gas == 2_715_000
         assert verification_gas == 120_000
         mock_block_number.assert_called_once()
         assert mock_rpc.call_count == 5  # 1 full-gas + 4 grid probes

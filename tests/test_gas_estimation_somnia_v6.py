@@ -154,7 +154,7 @@ async def test_somnia_v6_one_probe_estimation_returns_smallest_success():
             )
         )
 
-        assert call_gas == 3_050_000
+        assert call_gas == 2_715_000
         assert verification_gas == 120_000
         mock_block_number.assert_called_once()
         assert mock_rpc.call_count == 5  # 1 full-gas + 4 grid probes
@@ -164,7 +164,7 @@ async def test_somnia_v6_one_probe_estimation_returns_smallest_success():
         ]
         assert probed_gas_limits[0] == SOMNIA_MAX_CALL_DATA_GAS
         assert sorted(probed_gas_limits[1:]) == [
-            2_105_000, 2_450_000, 3_050_000, 3_700_000
+            2_105_000, 2_360_000, 2_715_000, 3_070_000
         ]
 
 
@@ -194,8 +194,9 @@ async def test_somnia_v6_full_gas_revert_raises_execution_exception():
 
 @pytest.mark.asyncio
 async def test_somnia_v6_retry_round_covers_deep_stack_headroom():
-    """required=5M fails the main grid (top 3.7M) but is caught by the
-    retry round's gasUsed+3.2M candidate — no legacy fallback."""
+    """required=5M fails the main grid (top 3.07M) but is caught by the
+    retry round's gasUsed+3.2M candidate, then one bisection round
+    tightens the bracket within tolerance — no legacy fallback."""
     gas_manager = _make_gas_manager()
     user_op = _make_user_operation()
 
@@ -224,7 +225,8 @@ async def test_somnia_v6_retry_round_covers_deep_stack_headroom():
         assert call_gas == 5_200_000
         assert verification_gas == 120_000
         # 1 full-gas probe + 4 failed main-grid probes + 3 retry probes
-        assert mock_rpc.call_count == 8
+        # + 4 bisection probes
+        assert mock_rpc.call_count == 12
 
 
 @pytest.mark.asyncio

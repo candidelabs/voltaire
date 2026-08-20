@@ -399,15 +399,19 @@ class GasManager(ABC, Generic[UserOperationType]):
         amplified by EIP-150: a read D call-levels below the account frame
         needs ~1M * (64/63)^D available in the account frame (each parent
         holds back 1/64 when forwarding), so the answer lies in
-        [gasUsed, gasUsed + ~1M * (64/63)^D]. The main grid tops out at
-        gasUsed*1.05 + 1.6M (covers reads ~30 frames deep — beyond any
-        realistic call stack); a retry round extends to gasUsed + ~3.2M
-        for pathological depths before giving up. Overshoot in a limit
-        only pads the prefund, so ~450k resolution is enough (and doubles
-        as margin for slots evicted from the LRU set between estimation
-        and inclusion). A grid only ever returns a candidate whose probe
-        actually succeeded, so a violated window costs a retry round, never
-        an undersized estimate.
+        [gasUsed, gasUsed + ~1M * (64/63)^D]. The rounds escalate by
+        scenario likelihood: the main grid spans [gasUsed, gasUsed+1.07M]
+        (zero or any number of non-existent-key reads <= ~4 frames deep —
+        the overwhelmingly common cases; the constraints max rather than
+        sum, so read count never widens the window, only depth does); a
+        retry round covers pathological depth up to gasUsed + ~3.2M plus
+        the max_call_data_gas anchor; a coarse retry result is then
+        localized with parallel bisection so the driver never quotes the
+        raw anchor. Overshoot in a limit only pads the prefund, so ~360k
+        resolution is enough (and doubles as margin for slots evicted from
+        the LRU set between estimation and inclusion). A grid only ever
+        returns a candidate whose probe actually succeeded, so a violated
+        window costs an extra round trip, never an undersized estimate.
 
         Returns (call_gas_limit, verification_gas_limit), or None if no
         probe of any round succeeded (state drift between probes) so the
@@ -482,28 +486,67 @@ class GasManager(ABC, Generic[UserOperationType]):
                     return candidate
             return None
 
-        # Round trip 2: parallel grid over the bounded window.
-        chosen = await probe_round(sorted({
+        # Round trip 2: parallel grid over [gasUsed, gasUsed + ~1.07M] —
+        # the window for the common cases. The uncharged >=1M-remaining
+        # headroom constraints max (never sum) across reads, so this
+        # window covers ANY number of non-existent-key SLOADs as long as
+        # the binding one sits <= ~4 call frames below the account; only
+        # unusual DEPTH escapes it, never read count.
+        main_grid = sorted({
             min(math.ceil(gas_used * 1.05) + 5_000, self.max_call_data_gas),
-            min(gas_used + 450_000, self.max_call_data_gas),
-            min(gas_used + 1_050_000, self.max_call_data_gas),
+            min(gas_used + 360_000, self.max_call_data_gas),
+            min(gas_used + 715_000, self.max_call_data_gas),
+            min(gas_used + 1_070_000, self.max_call_data_gas),
+        })
+        chosen = await probe_round(main_grid)
+        if chosen is not None:
+            return chosen, verification_gas_limit
+
+        # Retry round for pathological EIP-150 depth amplification of the
+        # uncharged headroom, or for measurement drift. The
+        # max_call_data_gas candidate is the limit round 1 proved
+        # succeeds, so under stable state this round cannot come back
+        # empty.
+        retry_grid = sorted({
             min(
                 math.ceil(gas_used * 1.05) + 1_600_000,
                 self.max_call_data_gas
             ),
-        }))
-        if chosen is None:
-            # Retry round for pathological EIP-150 depth amplification of
-            # the uncharged headroom. The max_call_data_gas candidate is
-            # the limit round 1 proved succeeds, so under stable state
-            # this round cannot come back empty.
-            chosen = await probe_round(sorted({
-                min(gas_used + 2_100_000, self.max_call_data_gas),
-                min(gas_used + 3_200_000, self.max_call_data_gas),
-                self.max_call_data_gas,
-            }))
+            min(gas_used + 3_200_000, self.max_call_data_gas),
+            self.max_call_data_gas,
+        })
+        chosen = await probe_round(retry_grid)
         if chosen is None:
             return None
+
+        # Localize a coarse retry result with parallel bisection rather
+        # than quoting it as-is: if only the max_call_data_gas anchor
+        # succeeded, the raw answer could be absurdly large (a 50M
+        # callGasLimit is an unusable prefund quote). Every candidate
+        # below `chosen` is a proven failure, so bisect the bracket
+        # (largest_fail, chosen) — 4 interior probes shrink it ~5x per
+        # round trip — until it is within ~10% (mirroring the contract's
+        # tolerancePct) or a bounded number of rounds.
+        largest_fail = max(
+            (c for c in main_grid + retry_grid if c < chosen), default=0
+        )
+        for _ in range(3):
+            width = chosen - largest_fail
+            if width <= max(400_000, chosen // 10):
+                break
+            step = width // 5
+            interior = sorted({
+                largest_fail + step * i for i in (1, 2, 3, 4)
+            })
+            interior_chosen = await probe_round(interior)
+            if interior_chosen is not None:
+                chosen = interior_chosen
+                largest_fail = max(
+                    (c for c in interior if c < chosen),
+                    default=largest_fail,
+                )
+            else:
+                largest_fail = max(interior)
         return chosen, verification_gas_limit
 
     @abstractmethod
