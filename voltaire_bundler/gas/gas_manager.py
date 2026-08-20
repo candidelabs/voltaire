@@ -453,8 +453,12 @@ class GasManager(ABC, Generic[UserOperationType]):
         verification_gas_limit = int(error_params[0])
         gas_used = int(error_params[1])
 
+        probes_sent = 1  # the full-gas probe above
+
         async def probe_round(candidates: list[int]) -> int | None:
             """Probe all candidates concurrently; smallest success or None."""
+            nonlocal probes_sent
+            probes_sent += len(candidates)
             probe_results = await asyncio.gather(
                 *[
                     self.simulate_handle_op_mod(
@@ -500,6 +504,11 @@ class GasManager(ABC, Generic[UserOperationType]):
         })
         chosen = await probe_round(main_grid)
         if chosen is not None:
+            logging.info(
+                "somnia gas estimation for sender %s resolved at phase=1 "
+                "(main grid): gasUsed=%s callGasLimit=%s probes=%s",
+                user_operation.sender_address, gas_used, chosen, probes_sent,
+            )
             return chosen, verification_gas_limit
 
         # Retry round for pathological EIP-150 depth amplification of the
@@ -517,6 +526,12 @@ class GasManager(ABC, Generic[UserOperationType]):
         })
         chosen = await probe_round(retry_grid)
         if chosen is None:
+            logging.info(
+                "somnia gas estimation for sender %s exhausted phase=1 "
+                "(main grid) and phase=2 (retry) (gasUsed=%s probes=%s) — "
+                "falling back to the in-contract binary search",
+                user_operation.sender_address, gas_used, probes_sent,
+            )
             return None
 
         # Localize a coarse retry result with parallel bisection rather
@@ -527,13 +542,37 @@ class GasManager(ABC, Generic[UserOperationType]):
         # (largest_fail, chosen) — 4 interior probes shrink it ~5x per
         # round trip — until it is within ~10% (mirroring the contract's
         # tolerancePct) or a bounded number of rounds.
-        largest_fail = max(
-            (c for c in main_grid + retry_grid if c < chosen), default=0
+        chosen, bisection_rounds = await self._localize_call_gas_bracket(
+            probe_round,
+            chosen,
+            max((c for c in main_grid + retry_grid if c < chosen), default=0),
         )
+        logging.info(
+            "somnia gas estimation for sender %s resolved at phase=%s "
+            "(retry, %s bisection round(s)): gasUsed=%s callGasLimit=%s "
+            "probes=%s",
+            user_operation.sender_address,
+            3 if bisection_rounds else 2,
+            bisection_rounds, gas_used, chosen, probes_sent,
+        )
+        return chosen, verification_gas_limit
+
+    @staticmethod
+    async def _localize_call_gas_bracket(
+        probe_round: Any,
+        chosen: int,
+        largest_fail: int,
+    ) -> tuple[int, int]:
+        """Shrink a proven (largest_fail, chosen) probe bracket with up to
+        3 rounds of 4 parallel interior probes (each round ~5x tighter),
+        stopping within max(400k, 10%) of the answer. Returns the
+        localized limit and the number of bisection rounds used."""
+        rounds = 0
         for _ in range(3):
             width = chosen - largest_fail
             if width <= max(400_000, chosen // 10):
                 break
+            rounds += 1
             step = width // 5
             interior = sorted({
                 largest_fail + step * i for i in (1, 2, 3, 4)
@@ -547,7 +586,7 @@ class GasManager(ABC, Generic[UserOperationType]):
                 )
             else:
                 largest_fail = max(interior)
-        return chosen, verification_gas_limit
+        return chosen, rounds
 
     @abstractmethod
     def calc_base_preverification_gas(self, user_operation: UserOperationType) -> int:

@@ -453,7 +453,7 @@ def _somnia_probe_responder(
 
 
 @pytest.mark.asyncio
-async def test_somnia_one_probe_estimation_returns_smallest_success():
+async def test_somnia_one_probe_estimation_returns_smallest_success(caplog):
     """
     On Somnia, estimation runs one full-gas check-once probe (measuring
     gasUsed) and then a parallel grid of check-once probes over
@@ -464,6 +464,7 @@ async def test_somnia_one_probe_estimation_returns_smallest_success():
     """
     gas_manager = _make_somnia_gas_manager()
     user_op = _make_user_operation(_make_execute_user_op_calldata())
+    caplog.set_level("INFO")
 
     with patch(
         "voltaire_bundler.gas.gas_manager.send_rpc_request_to_eth_client",
@@ -507,6 +508,13 @@ async def test_somnia_one_probe_estimation_returns_smallest_success():
         assert sorted(probed_gas_limits[1:]) == [
             2_105_000, 2_360_000, 2_715_000, 3_070_000
         ]
+
+        # an info log reports how deep the estimation went
+        assert any(
+            "resolved at phase=1 (main grid)" in record.getMessage()
+            and "probes=5" in record.getMessage()
+            for record in caplog.records
+        )
 
 
 @pytest.mark.asyncio
