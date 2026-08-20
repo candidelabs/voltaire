@@ -161,7 +161,7 @@ data['deployedBytecode']['object']
 data['bytecode']['object']
 ```
 
-Source Solidity contracts are in the same directory. They import from account-abstraction via HTTPS URLs. To compile locally with Foundry, replace the HTTPS imports with local paths and set up remappings (see `/tmp/voltaire-compile` pattern).
+Source Solidity contracts are in the same directory. They import from account-abstraction via HTTPS URLs. To recompile the `*WithBinarySearch` contracts and refresh their JSON bytecode files, run `./scripts/compile_simulations.sh [v6|v7|v8|v9 ...]` — it clones the pinned dependencies, rewrites the HTTPS imports to Foundry remappings, builds with forge, and extracts `deployedBytecode.object` into the JSONs (workspace cached in `/tmp/voltaire-compile`, override with `COMPILE_WORKDIR`).
 
 ### EntryPoint Addresses
 
