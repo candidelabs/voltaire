@@ -8,7 +8,8 @@ from eth_abi import decode, encode
 from voltaire_bundler.bundle.exceptions import \
     (ExecutionException, ExecutionExceptionCode,
      ValidationException, ValidationExceptionCode)
-from voltaire_bundler.gas.gas_manager import GasManager, calculate_deposit_slot_index, deep_union
+from voltaire_bundler.gas.gas_manager import \
+    GasManager, SOMNIA_CHAIN_IDS, calculate_deposit_slot_index, deep_union
 from voltaire_bundler.gas.gas_price_cache import GasPriceCache
 from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.models import FailedOp, FailedOpWithRevert
@@ -96,7 +97,7 @@ class GasManagerV7V8V9(GasManager):
                 result_verification_gas_limit = math.ceil(
                     result_verification_gas_limit*1.1
                 )
-            elif self.chain_id in (5031, 50312):
+            elif self.chain_id in SOMNIA_CHAIN_IDS:
                 result_verification_gas_limit = estimated_verification_gas_limit + 300_000
                 result_verification_gas_limit = math.ceil(
                     result_verification_gas_limit*1.5
@@ -133,6 +134,14 @@ class GasManagerV7V8V9(GasManager):
         state_override_set_dict: dict[str, Any],
         is_check_once: bool,
     ) -> tuple[int, int]:
+        if self.chain_id in SOMNIA_CHAIN_IDS and not is_check_once:
+            somnia_result = await self._estimate_call_gas_somnia(
+                user_operation, entrypoint, state_override_set_dict
+            )
+            if somnia_result is not None:
+                return somnia_result
+            # no grid probe succeeded (state drift between probes) — fall
+            # back to the in-contract binary search below
         min_gas = 0
         if is_check_once:
             max_gas = user_operation.call_gas_limit
@@ -181,6 +190,7 @@ class GasManagerV7V8V9(GasManager):
         is_continious: bool,
         is_check_once: bool,
         state_override_set_dict: dict[str, Any],
+        block_number_hex: str = "latest",
     ) -> tuple[str, list[int | bytes]]:
         # simulateHandleOpMod(entrypoint solidity function) will always revert
         function_selector = "0xbbfd906b"
@@ -233,7 +243,7 @@ class GasManagerV7V8V9(GasManager):
                 "to": entrypoint,
                 "data": call_data,
             },
-            "latest",
+            block_number_hex,
             deep_union(default_state_overrides, state_override_set_dict)
         ]
 
@@ -337,7 +347,7 @@ class GasManagerV7V8V9(GasManager):
             )
 
         fixed = 21000
-        if self.chain_id == 5031 or self.chain_id == 50312:  # Somnia chain
+        if self.chain_id in SOMNIA_CHAIN_IDS:
             per_user_operation = 18300 + 200_000
         else:
             per_user_operation = 18300

@@ -17,6 +17,14 @@ from voltaire_bundler.utils.eth_client_utils import \
     encode_handleops_calldata_v6, encode_handleops_calldata_v7v8v9, send_rpc_request_to_eth_client
 
 
+# Somnia mainnet / testnet. Somnia prices SLOAD against a persistent,
+# chain-global LRU set of recently accessed slot keys (cold existing key:
+# +1M gas; non-existent key: requires >=1M gas remaining but charges nothing)
+# instead of EIP-2929 per-transaction access lists, which changes how
+# callGasLimit must be estimated (see GasManager._estimate_call_gas_somnia).
+SOMNIA_CHAIN_IDS = (5031, 50312)
+
+
 def _min_accepting_tolerance(effective_fee: int, block_max_fee: int) -> int:
     """Smallest integer tolerance % for which ``effective_fee`` passes the
     gas-fee check ``effective_fee >= ceil(block_max_fee * (1 - t/100))``.
@@ -350,6 +358,132 @@ class GasManager(ABC, Generic[UserOperationType]):
         gas_estimate_for_l1 = decoded_results[0]
 
         return gas_estimate_for_l1
+
+    async def simulate_handle_op_mod(
+        self,
+        user_operation: Any,
+        entrypoint: str,
+        min_gas: int,
+        max_gas: int,
+        is_continious: bool,
+        is_check_once: bool,
+        state_override_set_dict: dict[str, Any],
+        block_number_hex: str = "latest",
+    ) -> tuple[str, list[Any]]:
+        # implemented by GasManagerV6 / GasManagerV7V8V9; declared here (with
+        # loose types, as each subclass narrows user_operation) so the shared
+        # Somnia estimation driver below can call it on `self`
+        raise NotImplementedError
+
+    async def _estimate_call_gas_somnia(
+        self,
+        user_operation: Any,
+        entrypoint: str,
+        state_override_set_dict: dict[str, Any],
+    ) -> tuple[int, int] | None:
+        """Estimate callGasLimit with one simulation probe per eth_call.
+
+        The in-contract binary search assumes EIP-2929 semantics: its
+        always-reverting probes roll back the per-transaction access lists,
+        so every search round measures against the same cold state. On
+        Somnia warm/cold is a persistent chain-global LRU set instead, so
+        probe 1 warms the op's slots for probes 2..N *within* one eth_call
+        and the search converges on warm costs — undercounting by ~1M gas
+        per cold slot. Running each probe as its own eth_call makes every
+        measurement start from canonical chain state.
+
+        Kept fast (2 network round trips) by exploiting the gas model:
+        the first full-gas probe's gasUsed is a faithful measurement, and
+        the only gas that is required but never charged (the >=1M-remaining
+        rule for non-existent keys) is bounded by ~1.05M, so the answer
+        lies in [gasUsed, gasUsed + ~1.15M]. A single parallel grid of
+        check-once probes resolves that window; overshoot in a limit only
+        pads the prefund, so ~400k resolution is enough (and doubles as
+        margin for slots evicted from the LRU set between estimation and
+        inclusion).
+
+        Returns (call_gas_limit, verification_gas_limit), or None if no
+        grid probe succeeded (state drift between probes) so the caller
+        can fall back to the in-contract search.
+        """
+        # module-level import would cycle:
+        # user_operation_handler -> gas_manager_v* -> gas_manager
+        from voltaire_bundler.user_operation.user_operation_handler import \
+            decode_revert_bytes
+        from voltaire_bundler.bundle.exceptions import \
+            ExecutionException, ExecutionExceptionCode
+
+        # Pin every probe to one block: Somnia blocks are sub-second, so
+        # concurrent probes against "latest" could observe different states.
+        block_number_result = await send_rpc_request_to_eth_client(
+            self.ethereum_node_urls, "eth_blockNumber", [], None, "result"
+        )
+        block_number_hex = block_number_result["result"]
+
+        # Round trip 1: one probe at full gas — proves success is possible
+        # (or surfaces the real revert) and measures cold-faithful gasUsed.
+        (solidity_error, error_params) = await self.simulate_handle_op_mod(
+            user_operation,
+            entrypoint,
+            0,
+            self.max_call_data_gas,
+            False,
+            True,  # check once: single probe at max_gas, reverts with gasUsed
+            state_override_set_dict,
+            block_number_hex,
+        )
+        if solidity_error[:10] == "0x59f233d2":  # EstimateCallGasRevertAtMax
+            raise ExecutionException(
+                ExecutionExceptionCode.UserOperationReverted,
+                decode_revert_bytes(bytes(error_params[0])),
+            )
+        if solidity_error[:10] != "0xdeb13018":  # SimulationResult
+            return None
+        verification_gas_limit = int(error_params[0])
+        gas_used = int(error_params[1])
+
+        # Round trip 2: parallel grid over the bounded window. The top
+        # candidate clamps to max_call_data_gas, which round 1 proved
+        # succeeds, so under stable state at least one probe succeeds.
+        candidates = sorted({
+            min(math.ceil(gas_used * 1.05) + 5_000, self.max_call_data_gas),
+            min(gas_used + 400_000, self.max_call_data_gas),
+            min(gas_used + 800_000, self.max_call_data_gas),
+            min(
+                math.ceil(gas_used * 1.05) + 1_150_000,
+                self.max_call_data_gas
+            ),
+        })
+        probe_results = await asyncio.gather(
+            *[
+                self.simulate_handle_op_mod(
+                    user_operation,
+                    entrypoint,
+                    0,
+                    candidate,
+                    False,
+                    True,
+                    state_override_set_dict,
+                    block_number_hex,
+                )
+                for candidate in candidates
+            ],
+            return_exceptions=True,
+        )
+        for candidate, probe_result in zip(candidates, probe_results):
+            if isinstance(probe_result, BaseException):
+                # out-of-gas at this candidate raises through the error
+                # decoding paths (e.g. FailedOp) or failed transport —
+                # either way treat as an unsuccessful guess so a higher
+                # candidate wins
+                logging.debug(
+                    "somnia call gas probe at %s failed: %s",
+                    candidate, probe_result,
+                )
+                continue
+            if probe_result[0][:10] == "0xdeb13018":  # SimulationResult
+                return candidate, verification_gas_limit
+        return None
 
     @abstractmethod
     def calc_base_preverification_gas(self, user_operation: UserOperationType) -> int:
