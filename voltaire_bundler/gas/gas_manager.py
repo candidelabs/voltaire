@@ -394,17 +394,24 @@ class GasManager(ABC, Generic[UserOperationType]):
 
         Kept fast (2 network round trips) by exploiting the gas model:
         the first full-gas probe's gasUsed is a faithful measurement, and
-        the only gas that is required but never charged (the >=1M-remaining
-        rule for non-existent keys) is bounded by ~1.05M, so the answer
-        lies in [gasUsed, gasUsed + ~1.15M]. A single parallel grid of
-        check-once probes resolves that window; overshoot in a limit only
-        pads the prefund, so ~400k resolution is enough (and doubles as
-        margin for slots evicted from the LRU set between estimation and
-        inclusion).
+        the only gas that is required but never charged is the
+        >=1M-remaining rule for non-existent keys. That headroom is
+        amplified by EIP-150: a read D call-levels below the account frame
+        needs ~1M * (64/63)^D available in the account frame (each parent
+        holds back 1/64 when forwarding), so the answer lies in
+        [gasUsed, gasUsed + ~1M * (64/63)^D]. The main grid tops out at
+        gasUsed*1.05 + 1.6M (covers reads ~30 frames deep — beyond any
+        realistic call stack); a retry round extends to gasUsed + ~3.2M
+        for pathological depths before giving up. Overshoot in a limit
+        only pads the prefund, so ~450k resolution is enough (and doubles
+        as margin for slots evicted from the LRU set between estimation
+        and inclusion). A grid only ever returns a candidate whose probe
+        actually succeeded, so a violated window costs a retry round, never
+        an undersized estimate.
 
         Returns (call_gas_limit, verification_gas_limit), or None if no
-        grid probe succeeded (state drift between probes) so the caller
-        can fall back to the in-contract search.
+        probe of any round succeeded (state drift between probes) so the
+        caller can fall back to the in-contract search.
         """
         # module-level import would cycle:
         # user_operation_handler -> gas_manager_v* -> gas_manager
@@ -442,48 +449,62 @@ class GasManager(ABC, Generic[UserOperationType]):
         verification_gas_limit = int(error_params[0])
         gas_used = int(error_params[1])
 
-        # Round trip 2: parallel grid over the bounded window. The top
-        # candidate clamps to max_call_data_gas, which round 1 proved
-        # succeeds, so under stable state at least one probe succeeds.
-        candidates = sorted({
+        async def probe_round(candidates: list[int]) -> int | None:
+            """Probe all candidates concurrently; smallest success or None."""
+            probe_results = await asyncio.gather(
+                *[
+                    self.simulate_handle_op_mod(
+                        user_operation,
+                        entrypoint,
+                        0,
+                        candidate,
+                        False,
+                        True,
+                        state_override_set_dict,
+                        block_number_hex,
+                    )
+                    for candidate in candidates
+                ],
+                return_exceptions=True,
+            )
+            for candidate, probe_result in zip(candidates, probe_results):
+                if isinstance(probe_result, BaseException):
+                    # out-of-gas at this candidate raises through the error
+                    # decoding paths (e.g. FailedOp) or failed transport —
+                    # either way treat as an unsuccessful guess so a higher
+                    # candidate wins
+                    logging.debug(
+                        "somnia call gas probe at %s failed: %s",
+                        candidate, probe_result,
+                    )
+                    continue
+                if probe_result[0][:10] == "0xdeb13018":  # SimulationResult
+                    return candidate
+            return None
+
+        # Round trip 2: parallel grid over the bounded window.
+        chosen = await probe_round(sorted({
             min(math.ceil(gas_used * 1.05) + 5_000, self.max_call_data_gas),
-            min(gas_used + 400_000, self.max_call_data_gas),
-            min(gas_used + 800_000, self.max_call_data_gas),
+            min(gas_used + 450_000, self.max_call_data_gas),
+            min(gas_used + 1_050_000, self.max_call_data_gas),
             min(
-                math.ceil(gas_used * 1.05) + 1_150_000,
+                math.ceil(gas_used * 1.05) + 1_600_000,
                 self.max_call_data_gas
             ),
-        })
-        probe_results = await asyncio.gather(
-            *[
-                self.simulate_handle_op_mod(
-                    user_operation,
-                    entrypoint,
-                    0,
-                    candidate,
-                    False,
-                    True,
-                    state_override_set_dict,
-                    block_number_hex,
-                )
-                for candidate in candidates
-            ],
-            return_exceptions=True,
-        )
-        for candidate, probe_result in zip(candidates, probe_results):
-            if isinstance(probe_result, BaseException):
-                # out-of-gas at this candidate raises through the error
-                # decoding paths (e.g. FailedOp) or failed transport —
-                # either way treat as an unsuccessful guess so a higher
-                # candidate wins
-                logging.debug(
-                    "somnia call gas probe at %s failed: %s",
-                    candidate, probe_result,
-                )
-                continue
-            if probe_result[0][:10] == "0xdeb13018":  # SimulationResult
-                return candidate, verification_gas_limit
-        return None
+        }))
+        if chosen is None:
+            # Retry round for pathological EIP-150 depth amplification of
+            # the uncharged headroom. The max_call_data_gas candidate is
+            # the limit round 1 proved succeeds, so under stable state
+            # this round cannot come back empty.
+            chosen = await probe_round(sorted({
+                min(gas_used + 2_100_000, self.max_call_data_gas),
+                min(gas_used + 3_200_000, self.max_call_data_gas),
+                self.max_call_data_gas,
+            }))
+        if chosen is None:
+            return None
+        return chosen, verification_gas_limit
 
     @abstractmethod
     def calc_base_preverification_gas(self, user_operation: UserOperationType) -> int:

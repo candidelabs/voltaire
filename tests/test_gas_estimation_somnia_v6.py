@@ -154,7 +154,7 @@ async def test_somnia_v6_one_probe_estimation_returns_smallest_success():
             )
         )
 
-        assert call_gas == 2_800_000
+        assert call_gas == 3_050_000
         assert verification_gas == 120_000
         mock_block_number.assert_called_once()
         assert mock_rpc.call_count == 5  # 1 full-gas + 4 grid probes
@@ -164,7 +164,7 @@ async def test_somnia_v6_one_probe_estimation_returns_smallest_success():
         ]
         assert probed_gas_limits[0] == SOMNIA_MAX_CALL_DATA_GAS
         assert sorted(probed_gas_limits[1:]) == [
-            2_105_000, 2_400_000, 2_800_000, 3_250_000
+            2_105_000, 2_450_000, 3_050_000, 3_700_000
         ]
 
 
@@ -193,15 +193,11 @@ async def test_somnia_v6_full_gas_revert_raises_execution_exception():
 
 
 @pytest.mark.asyncio
-async def test_somnia_v6_falls_back_to_legacy_search_when_grid_fails():
+async def test_somnia_v6_retry_round_covers_deep_stack_headroom():
+    """required=5M fails the main grid (top 3.7M) but is caught by the
+    retry round's gasUsed+3.2M candidate — no legacy fallback."""
     gas_manager = _make_gas_manager()
     user_op = _make_user_operation()
-
-    legacy_response = _make_simulation_result_revert(
-        verification_gas=120_000,
-        call_gas_max=4_999_999,
-        num_rounds=7,
-    )
 
     with patch(
         "voltaire_bundler.gas.gas_manager.send_rpc_request_to_eth_client",
@@ -211,11 +207,60 @@ async def test_somnia_v6_falls_back_to_legacy_search_when_grid_fails():
         "voltaire_bundler.gas.gas_manager_v6.send_rpc_request_to_eth_client",
         new_callable=AsyncMock,
         side_effect=_somnia_probe_responder(
-            required_gas=5_000_000,  # above the grid's top candidate (3.25M)
+            required_gas=5_000_000,
             gas_used=2_000_000,
             verification_gas=120_000,
-            legacy_response=legacy_response,
         )
+    ) as mock_rpc:
+        call_gas, verification_gas = (
+            await gas_manager.estimate_call_gas_and_verificationgas_limit(
+                user_op,
+                ENTRYPOINT_V6,
+                {},
+                False,
+            )
+        )
+
+        assert call_gas == 5_200_000
+        assert verification_gas == 120_000
+        # 1 full-gas probe + 4 failed main-grid probes + 3 retry probes
+        assert mock_rpc.call_count == 8
+
+
+@pytest.mark.asyncio
+async def test_somnia_v6_falls_back_to_legacy_search_when_all_probes_fail():
+    """State drift: the full-gas probe succeeds but every later probe
+    fails — estimation falls back to the in-contract binary search."""
+    gas_manager = _make_gas_manager()
+    user_op = _make_user_operation()
+
+    legacy_response = _make_simulation_result_revert(
+        verification_gas=120_000,
+        call_gas_max=4_999_999,
+        num_rounds=7,
+    )
+
+    check_once_calls = 0
+
+    async def drift_responder(nodes_urls, method, params, *args):
+        nonlocal check_once_calls
+        probe_args = _decode_probe_args(params)
+        if not probe_args[4]:  # in-contract legacy search
+            return legacy_response
+        check_once_calls += 1
+        if check_once_calls == 1:  # full-gas probe succeeds...
+            return _make_simulation_result_revert(120_000, 2_000_000, 0)
+        # ...then state drifts and every grid/retry probe fails
+        return _make_estimate_revert_at_max(b"")
+
+    with patch(
+        "voltaire_bundler.gas.gas_manager.send_rpc_request_to_eth_client",
+        new_callable=AsyncMock,
+        return_value={"result": PINNED_BLOCK}
+    ), patch(
+        "voltaire_bundler.gas.gas_manager_v6.send_rpc_request_to_eth_client",
+        new_callable=AsyncMock,
+        side_effect=drift_responder
     ) as mock_rpc:
         call_gas, verification_gas = (
             await gas_manager.estimate_call_gas_and_verificationgas_limit(
@@ -228,5 +273,5 @@ async def test_somnia_v6_falls_back_to_legacy_search_when_grid_fails():
 
         assert call_gas == 4_999_999
         assert verification_gas == 120_000
-        # 1 full-gas probe + 4 failed grid probes + 1 legacy search call
-        assert mock_rpc.call_count == 6
+        # 1 full-gas probe + 4 main-grid + 3 retry probes + 1 legacy call
+        assert mock_rpc.call_count == 9
