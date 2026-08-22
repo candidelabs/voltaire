@@ -240,7 +240,9 @@ contract EntryPointSimulationsV6WithBinarySearch is IEntryPoint, StakeManager, N
                 revert EstimateCallGasRevertAtMax(revertData);
             }
             if(args.isCheckOnce) {
-                revert SimulationResult(opInfo.preOpGas - op.preVerificationGas, 0, 0);
+                // return the measured gasUsed so the bundler can seed an
+                // externally-driven (one probe per eth_call) search from a single probe
+                revert SimulationResult(opInfo.preOpGas - op.preVerificationGas, gasUsed, 0);
             }
             callGasLimitMin = gasUsed;
         }
