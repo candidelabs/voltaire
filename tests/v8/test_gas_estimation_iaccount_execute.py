@@ -416,7 +416,6 @@ USER_OP_ABI_TUPLE = "(address,uint256,bytes,bytes,bytes32,uint256,bytes32,bytes,
 PROBE_ARGS_ABI_TUPLE = "(uint256,uint256,uint256,bool,bool)"
 
 SOMNIA_MAX_CALL_DATA_GAS = 10_000_000
-PINNED_BLOCK = "0x64"
 
 
 @pytest.mark.asyncio
@@ -450,16 +449,14 @@ async def test_somnia_one_probe_estimation_returns_smallest_success():
         )
         max_gas = decoded[1][1]
         assert decoded[1][4] is True  # is_check_once on every Somnia probe
-        assert params[1] == PINNED_BLOCK
+        # never a pinned block number: Somnia skips its required-but-
+        # uncharged >=1M gas checks at explicit block numbers
+        assert params[1] == "latest"
         if max_gas >= 2_500_000:
             return _make_simulation_result_revert(120_000, 2_000_000, 0)
         return _make_estimate_revert_at_max(b"")
 
     with patch(
-        "voltaire_bundler.gas.somnia_gas_estimation.send_rpc_request_to_eth_client",
-        new_callable=AsyncMock,
-        return_value={"result": PINNED_BLOCK}
-    ) as mock_block_number, patch(
         "voltaire_bundler.gas.gas_manager_v7v8v9.send_rpc_request_to_eth_client",
         new_callable=AsyncMock,
         side_effect=responder
@@ -475,7 +472,6 @@ async def test_somnia_one_probe_estimation_returns_smallest_success():
 
         assert call_gas == 2_715_000
         assert verification_gas == 120_000
-        mock_block_number.assert_called_once()
         assert mock_rpc.call_count == 5  # 1 full-gas + 4 grid probes
         # the v8 entrypoint keeps selecting the v8 bytecode override
         state_overrides = mock_rpc.call_args[0][2][2]

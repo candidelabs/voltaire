@@ -245,7 +245,10 @@ class GasManagerV7V8V9(GasManager):
                 "to": entrypoint,
                 "data": call_data,
             },
-            block_number_hex,
+            # "latest" on purpose: Somnia skips its required-but-uncharged
+            # >=1M gas checks at explicit block numbers, which corrupts
+            # the one-probe estimation (see somnia_gas_estimation.py)
+            "latest",
             deep_union(default_state_overrides, state_override_set_dict)
         ]
 
