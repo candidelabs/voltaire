@@ -192,6 +192,7 @@ class GasManagerV7V8V9(GasManager):
         is_continious: bool,
         is_check_once: bool,
         state_override_set_dict: dict[str, Any],
+        block_number_hex: str = "latest",
     ) -> tuple[str, list[int | bytes]]:
         # simulateHandleOpMod(entrypoint solidity function) will always revert
         function_selector = "0xbbfd906b"
