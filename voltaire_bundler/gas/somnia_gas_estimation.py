@@ -1,37 +1,62 @@
 """callGasLimit estimation for the Somnia chain — one probe per eth_call.
 
-Somnia prices SLOAD against a persistent, chain-global LRU set of the most
-recently accessed slot keys instead of EIP-2929 per-transaction access
-lists:
+Somnia prices state access against persistent, chain-global LRU sets of
+recently accessed keys instead of EIP-2929 per-transaction access lists.
+For storage slot keys (SLOAD/SSTORE, 128M-entry set):
 
 - key in the set (warm):      no extra cost beyond the 100 static gas
 - cold existing key:          +1,000,000 gas, charged
 - non-existent key:           requires >=1,000,000 gas remaining in the
-                              current frame, but charges nothing
+                              current frame, but charges nothing (an
+                              SSTORE of a non-zero value charges 200k)
+
+and analogously for account keys (BALANCE/EXTCODE*/CALL/CREATE,
+32M-entry set):
+
+- recently accessed account:  no extra cost
+- cold existing account:      +1,000,000 gas, charged
+- non-existent account read:  requires >=1M received gas, charges nothing
+- account creation (e.g. a value transfer to a fresh address):
+                              requires >=1M received gas, charges 400,000
 
 This breaks the in-contract binary search of the
 EntryPointSimulations*WithBinarySearch contracts, which assumes EIP-2929
 semantics: its always-reverting probes roll back per-transaction access
 lists so every search round measures against the same cold state. On
-Somnia, probe 1 warms the op's slots for probes 2..N *within* one
+Somnia, probe 1 warms the op's keys for probes 2..N *within* one
 eth_call and the search converges on warm costs — undercounting by ~1M
-gas per cold slot. Running each probe as its own eth_call instead makes
+gas per cold key. Running each probe as its own eth_call instead makes
 every measurement start from canonical chain state.
+
+Every probe MUST run against the "latest" block tag, never a pinned
+block number. Somnia nodes evaluate the required-but-uncharged >=1M
+rules against their live LRU state, which only exists for the chain
+head: an eth_call at any explicit block number — even the current
+head's — silently skips those checks while still applying the
+deterministic charges (verified empirically against dream-rpc; e.g. a
+value transfer to a fresh account charges ~407k and needs >=1M
+forwarded at "latest", but succeeds inside ~433k at a pinned number).
+Pinned probes therefore let every candidate succeed and quote a
+callGasLimit that runs out of gas on-chain. The cost of "latest" is
+that concurrent probes may observe different sub-second blocks; a grid
+only ever returns a candidate whose probe actually succeeded, so drift
+costs an extra round trip or a fallback, never an undersized estimate.
 
 The driver stays fast (2 network round trips in the common case) by
 exploiting the gas model: the first full-gas probe's gasUsed is a
-faithful measurement, and the only gas that is required but never
-charged is the >=1M-remaining rule for non-existent keys. That headroom
-is amplified by EIP-150 — a read D call-levels below the account frame
-needs ~1M * (64/63)^D available in the account frame (each parent holds
-back 1/64 when forwarding) — so the answer lies in
-[gasUsed, gasUsed + ~1M * (64/63)^D]. The probe rounds escalate by
-scenario likelihood:
+faithful measurement of everything charged, and the only gas that is
+required on top is the >=1M-received rule for non-existent keys and
+accounts. That headroom is amplified by EIP-150 — an access D
+call-levels below the account frame needs ~1M * (64/63)^D available in
+the account frame (each parent holds back 1/64 when forwarding) — so
+the answer lies in [gasUsed, gasUsed + ~1M * (64/63)^D]. The probe
+rounds escalate by scenario likelihood:
 
 - phase 1, main grid: spans [gasUsed, gasUsed + 1.07M] — zero or any
-  number of non-existent-key reads up to ~4 frames deep, the
-  overwhelmingly common cases. The per-read constraints max rather than
-  sum, so read count never widens the window, only depth does.
+  number of non-existent-key or fresh-account accesses up to ~4 frames
+  deep, the overwhelmingly common cases. The per-access constraints max
+  rather than sum, so access count never widens the window, only depth
+  does.
 - phase 2, retry grid: pathological depth up to gasUsed + ~3.2M, plus
   the max_call_data_gas anchor (the limit the full-gas probe proved
   succeeds, so under stable state this round cannot come back empty).
@@ -51,9 +76,6 @@ import logging
 import math
 from typing import Any
 
-from voltaire_bundler.utils.eth_client_utils import \
-    send_rpc_request_to_eth_client
-
 # Somnia mainnet / testnet
 SOMNIA_CHAIN_IDS = (5031, 50312)
 
@@ -67,8 +89,7 @@ async def estimate_call_gas_somnia(
     """Run the one-probe-per-eth_call estimation (see module docstring).
 
     ``gas_manager`` is a GasManagerV6 / GasManagerV7V8V9 instance — used
-    for its ``simulate_handle_op_mod``, ``max_call_data_gas`` and
-    ``ethereum_node_urls``.
+    for its ``simulate_handle_op_mod`` and ``max_call_data_gas``.
 
     Returns (call_gas_limit, verification_gas_limit), or None if no probe
     of any round succeeded (state drift between probes) so the caller can
@@ -83,12 +104,11 @@ async def estimate_call_gas_somnia(
 
     max_call_data_gas = gas_manager.max_call_data_gas
 
-    # Pin every probe to one block: Somnia blocks are sub-second, so
-    # concurrent probes against "latest" could observe different states.
-    block_number_result = await send_rpc_request_to_eth_client(
-        gas_manager.ethereum_node_urls, "eth_blockNumber", [], None, "result"
-    )
-    block_number_hex = block_number_result["result"]
+    # Every probe targets the "latest" block tag on purpose: at any
+    # explicit block number Somnia nodes skip the required-but-uncharged
+    # >=1M rules for non-existent keys/accounts (see module docstring),
+    # which would make every candidate succeed and the estimate come out
+    # too low to execute on-chain.
 
     # Round trip 1: one probe at full gas — proves success is possible
     # (or surfaces the real revert) and measures cold-faithful gasUsed.
@@ -100,7 +120,6 @@ async def estimate_call_gas_somnia(
         False,
         True,  # check once: single probe at max_gas, reverts with gasUsed
         state_override_set_dict,
-        block_number_hex,
     )
     if solidity_error[:10] == "0x59f233d2":  # EstimateCallGasRevertAtMax
         raise ExecutionException(
@@ -128,7 +147,6 @@ async def estimate_call_gas_somnia(
                     False,
                     True,
                     state_override_set_dict,
-                    block_number_hex,
                 )
                 for candidate in candidates
             ],

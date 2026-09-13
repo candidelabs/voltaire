@@ -184,7 +184,6 @@ class GasManagerV6(GasManager):
         is_continious: bool,
         is_check_once: bool,
         state_override_set_dict: dict[str, Any],
-        block_number_hex: str = "latest",
     ) -> tuple[str, list[int | bytes]]:
         # simulateHandleOpMod(entrypoint solidity function) will always revert
         function_selector = "0x85085b6b"
@@ -236,7 +235,10 @@ class GasManagerV6(GasManager):
                 "to": entrypoint,
                 "data": call_data,
             },
-            block_number_hex,
+            # "latest" on purpose: Somnia skips its required-but-uncharged
+            # >=1M gas checks at explicit block numbers, which corrupts
+            # the one-probe estimation (see somnia_gas_estimation.py)
+            "latest",
             deep_union(default_state_overrides, state_override_set_dict)
         ]
 

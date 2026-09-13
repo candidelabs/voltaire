@@ -396,7 +396,6 @@ USER_OP_ABI_TUPLE = "(address,uint256,bytes,bytes,bytes32,uint256,bytes32,bytes,
 PROBE_ARGS_ABI_TUPLE = "(uint256,uint256,uint256,bool,bool)"
 
 SOMNIA_MAX_CALL_DATA_GAS = 10_000_000
-PINNED_BLOCK = "0x64"
 
 
 def _make_somnia_gas_manager() -> GasManagerV7V8V9:
@@ -444,6 +443,10 @@ def _somnia_probe_responder(
             assert legacy_response is not None, \
                 "unexpected legacy (in-contract search) call"
             return legacy_response
+        # Somnia probes must never pin a block number: explicit block
+        # numbers make the node skip its required-but-uncharged >=1M
+        # gas checks, corrupting the estimation
+        assert params[1] == "latest"
         if max_gas >= required_gas:
             return _make_simulation_result_revert(
                 verification_gas, gas_used, 0
@@ -467,10 +470,6 @@ async def test_somnia_one_probe_estimation_returns_smallest_success(caplog):
     caplog.set_level("INFO")
 
     with patch(
-        "voltaire_bundler.gas.somnia_gas_estimation.send_rpc_request_to_eth_client",
-        new_callable=AsyncMock,
-        return_value={"result": PINNED_BLOCK}
-    ) as mock_block_number, patch(
         "voltaire_bundler.gas.gas_manager_v7v8v9.send_rpc_request_to_eth_client",
         new_callable=AsyncMock,
         side_effect=_somnia_probe_responder(
@@ -491,16 +490,12 @@ async def test_somnia_one_probe_estimation_returns_smallest_success(caplog):
         assert call_gas == 2_715_000
         assert verification_gas == 120_000
 
-        # one eth_blockNumber to pin the block for all probes
-        mock_block_number.assert_called_once()
-        assert mock_block_number.call_args[0][1] == "eth_blockNumber"
-
-        # 1 full-gas probe + 4 grid probes, all pinned to the same block
+        # 1 full-gas probe + 4 grid probes, all against "latest"
         assert mock_rpc.call_count == 5
         probed_gas_limits = []
         for call in mock_rpc.call_args_list:
             params = call[0][2]
-            assert params[1] == PINNED_BLOCK
+            assert params[1] == "latest"
             probe_args = _decode_probe_args(params)
             assert probe_args[4] is True  # is_check_once
             probed_gas_limits.append(probe_args[1])
@@ -533,10 +528,6 @@ async def test_somnia_retry_round_covers_deep_stack_headroom():
     user_op = _make_user_operation(_make_execute_user_op_calldata())
 
     with patch(
-        "voltaire_bundler.gas.somnia_gas_estimation.send_rpc_request_to_eth_client",
-        new_callable=AsyncMock,
-        return_value={"result": PINNED_BLOCK}
-    ), patch(
         "voltaire_bundler.gas.gas_manager_v7v8v9.send_rpc_request_to_eth_client",
         new_callable=AsyncMock,
         side_effect=_somnia_probe_responder(
@@ -570,10 +561,6 @@ async def test_somnia_full_gas_revert_raises_execution_exception():
     user_op = _make_user_operation(_make_execute_user_op_calldata())
 
     with patch(
-        "voltaire_bundler.gas.somnia_gas_estimation.send_rpc_request_to_eth_client",
-        new_callable=AsyncMock,
-        return_value={"result": PINNED_BLOCK}
-    ), patch(
         "voltaire_bundler.gas.gas_manager_v7v8v9.send_rpc_request_to_eth_client",
         new_callable=AsyncMock,
         return_value=_make_estimate_revert_at_max(b"")
@@ -605,10 +592,6 @@ async def test_somnia_anchor_result_is_localized_by_bisection():
     user_op = _make_user_operation(_make_execute_user_op_calldata())
 
     with patch(
-        "voltaire_bundler.gas.somnia_gas_estimation.send_rpc_request_to_eth_client",
-        new_callable=AsyncMock,
-        return_value={"result": PINNED_BLOCK}
-    ), patch(
         "voltaire_bundler.gas.gas_manager_v7v8v9.send_rpc_request_to_eth_client",
         new_callable=AsyncMock,
         side_effect=_somnia_probe_responder(
@@ -663,10 +646,6 @@ async def test_somnia_falls_back_to_legacy_search_when_all_probes_fail():
         return _make_estimate_revert_at_max(b"")
 
     with patch(
-        "voltaire_bundler.gas.somnia_gas_estimation.send_rpc_request_to_eth_client",
-        new_callable=AsyncMock,
-        return_value={"result": PINNED_BLOCK}
-    ), patch(
         "voltaire_bundler.gas.gas_manager_v7v8v9.send_rpc_request_to_eth_client",
         new_callable=AsyncMock,
         side_effect=drift_responder
@@ -695,10 +674,6 @@ async def test_somnia_check_once_path_stays_single_call():
     user_op.call_gas_limit = 100_000
 
     with patch(
-        "voltaire_bundler.gas.somnia_gas_estimation.send_rpc_request_to_eth_client",
-        new_callable=AsyncMock,
-        return_value={"result": PINNED_BLOCK}
-    ) as mock_block_number, patch(
         "voltaire_bundler.gas.gas_manager_v7v8v9.send_rpc_request_to_eth_client",
         new_callable=AsyncMock,
         return_value=_make_simulation_result_revert(45_000, 60_000, 0)
@@ -714,7 +689,5 @@ async def test_somnia_check_once_path_stays_single_call():
 
         assert call_gas == 60_000  # check-once now returns measured gasUsed
         assert verification_gas == 45_000
-        mock_block_number.assert_not_called()
         mock_rpc.assert_called_once()
-        # unpinned: the single probe still uses "latest"
         assert mock_rpc.call_args[0][2][1] == "latest"
