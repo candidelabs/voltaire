@@ -117,25 +117,64 @@ solc_version = "$(solc_for "$version")"
 evm_version = "$(evm_for "$version")"
 optimizer = true
 optimizer_runs = 1000000
+# ASTs are needed to resolve immutableReferences ids to variable names below.
+ast = true
 EOF
 
     (cd "$project" && forge build)
 
     # Extract the runtime bytecode into the two-key JSON shape that
     # voltaire_bundler/utils/load_bytecode.py expects.
-    python3 - "$project/out/$name.sol/$name.json" "$CONTRACTS_DIR/$name.json" "$name" <<'EOF'
-import json, sys
-artifact_path, target_path, name = sys.argv[1:4]
+    python3 - "$project/out/$name.sol/$name.json" "$CONTRACTS_DIR/$name.json" "$name" "$project/out" <<'EOF'
+import glob, json, os, sys
+artifact_path, target_path, name, out_dir = sys.argv[1:5]
 artifact = json.load(open(artifact_path))
 runtime = artifact["deployedBytecode"]["object"]
 assert runtime.startswith("0x60"), f"unexpected runtime bytecode prefix: {runtime[:10]}"
+
 # The runtime bytecode is injected via state overrides and never runs a
-# constructor, so any `immutable` would remain a zero placeholder. Refuse to
-# ship such bytecode (this broke v0.6 account deployment estimation once).
-immutables = artifact["deployedBytecode"].get("immutableReferences") or {}
-assert not immutables, (
-    f"{name} has unresolved immutables {sorted(immutables)}; "
-    "use `constant` or runtime initialisation instead of `immutable`"
+# constructor, so every `immutable` stays a zero placeholder in
+# deployedBytecode. That silently broke v0.6 account-deployment estimation
+# once (senderCreator was `immutable`). Resolve each unresolved immutable to
+# its declaration and refuse anything that is not known to be harmless.
+#
+# Known-harmless: OpenZeppelin EIP712's `_name` / `_version` (ShortString).
+# The v0.8/v0.9 simulations override getDomainSeparatorV4(), so these are only
+# read by eip712Domain(), which no simulation path calls.
+HARMLESS = {("EIP712.sol", "_name"), ("EIP712.sol", "_version")}
+
+immutable_ids = {int(k) for k in (artifact["deployedBytecode"].get("immutableReferences") or {})}
+declarations = {}
+
+def walk(node, path):
+    if isinstance(node, dict):
+        if node.get("nodeType") == "VariableDeclaration" and node.get("id") in immutable_ids:
+            declarations[node["id"]] = (os.path.basename(path), node.get("name"))
+        for value in node.values():
+            walk(value, path)
+    elif isinstance(node, list):
+        for value in node:
+            walk(value, path)
+
+if immutable_ids:
+    for path in glob.glob(os.path.join(out_dir, "**", "*.json"), recursive=True):
+        try:
+            ast = json.load(open(path)).get("ast")
+        except Exception:
+            continue
+        if ast:
+            walk(ast, ast.get("absolutePath", path))
+
+offending = []
+for immutable_id in sorted(immutable_ids):
+    decl = declarations.get(immutable_id, ("<unknown>", f"id {immutable_id}"))
+    if decl in HARMLESS:
+        print(f"  note: {name} keeps zeroed immutable {decl[0]}::{decl[1]} (harmless, never read in simulation)")
+    else:
+        offending.append(f"{decl[0]}::{decl[1]}")
+assert not offending, (
+    f"{name} has unresolved immutables {offending}; they are zero in runtime "
+    "bytecode. Use `constant` or runtime initialisation instead of `immutable`."
 )
 with open(target_path, "w") as f:
     json.dump({"contractName": name, "bytecode": runtime}, f)
