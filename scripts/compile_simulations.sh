@@ -129,6 +129,14 @@ artifact_path, target_path, name = sys.argv[1:4]
 artifact = json.load(open(artifact_path))
 runtime = artifact["deployedBytecode"]["object"]
 assert runtime.startswith("0x60"), f"unexpected runtime bytecode prefix: {runtime[:10]}"
+# The runtime bytecode is injected via state overrides and never runs a
+# constructor, so any `immutable` would remain a zero placeholder. Refuse to
+# ship such bytecode (this broke v0.6 account deployment estimation once).
+immutables = artifact["deployedBytecode"].get("immutableReferences") or {}
+assert not immutables, (
+    f"{name} has unresolved immutables {sorted(immutables)}; "
+    "use `constant` or runtime initialisation instead of `immutable`"
+)
 with open(target_path, "w") as f:
     json.dump({"contractName": name, "bytecode": runtime}, f)
 print(f"  wrote {target_path} ({len(runtime)} hex chars)")

@@ -161,6 +161,8 @@ data['deployedBytecode']['object']
 data['bytecode']['object']
 ```
 
+**Also critical**: never use `immutable` in these simulation contracts. Runtime bytecode injected via state override never runs a constructor, so immutables stay as zero placeholders in `deployedBytecode`. The v0.6 contracts hard-code the SenderCreator address (`0x7fc98430eAEdbb6070B35B39D798725049088348`) and it must be declared `constant`; when it shipped as `immutable` (v3.0.2), every v0.6 `initCode` estimation reverted with empty data. `compile_simulations.sh` refuses artifacts with `immutableReferences`, and `tests/test_simulation_bytecode_is_runtime.py` checks the address is embedded.
+
 Source Solidity contracts are in the same directory. They import from account-abstraction via HTTPS URLs. To recompile the `*WithBinarySearch` contracts and refresh their JSON bytecode files, run `./scripts/compile_simulations.sh [v6|v7|v8|v9 ...]` — it clones the pinned dependencies, rewrites the HTTPS imports to Foundry remappings, builds with forge, and extracts `deployedBytecode.object` into the JSONs (workspace cached in `/tmp/voltaire-compile`, override with `COMPILE_WORKDIR`).
 
 ### EntryPoint Addresses
