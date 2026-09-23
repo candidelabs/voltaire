@@ -1162,19 +1162,20 @@ async def get_init_data(args: Namespace) -> InitData:
         # Soft-fail — a transient node hiccup at container start (DNS,
         # TLS handshake, first-connect latency past our 2 s timeout,
         # or the RPC endpoint not yet routable inside the orchestrator
-        # network) shouldn't hard-exit the bundler. GasPriceCache.get_snapshot
-        # falls back to a synchronous fetch under a lock when no fresh
-        # snapshot is available, so the first bundle round will surface
-        # a genuinely bad node URL if one exists. Warn loudly so
-        # operators still notice.
+        # network) shouldn't hard-exit the bundler. GasPriceCache.run()
+        # keeps retrying every interval and populates the cache on its
+        # first success; until then eth_sendUserOperation fails with a
+        # clear "gas price unavailable" error, so a genuinely bad node
+        # URL still surfaces quickly. Warn loudly so operators notice.
         #
         # Don't log the raw URLs — they may embed provider API keys.
         logging.warning(
             f"Failed to warm gas-price cache from configured "
             f"ethereum_node_url(s) ({len(ethereum_node_urls_rearranged)} "
-            f"endpoint(s)): {exc}. Continuing — the cache will fetch "
-            f"lazily on first read (refresh interval: "
-            f"{gas_price_refresh_interval}s)."
+            f"endpoint(s)): {exc}. Continuing — the background loop "
+            f"will keep retrying (refresh interval: "
+            f"{gas_price_refresh_interval}s); userops are rejected until "
+            f"the first refresh succeeds."
         )
 
     # Warm the chain-head cache for the same reason as gas_price_cache:

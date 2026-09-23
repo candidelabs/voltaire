@@ -28,7 +28,8 @@ from voltaire_bundler.user_operation.user_operation_handler_v7v8v9 import \
     UserOperationHandlerV7V8V9
 from voltaire_bundler.user_operation.user_operation_handler import \
     fell_user_operation_optional_parameters_for_estimateUserOperationGas
-from voltaire_bundler.gas.gas_price_cache import GasPriceCache
+from voltaire_bundler.gas.gas_price_cache import \
+    GasPriceCache, GasPriceUnavailableError
 from voltaire_bundler.utils.cache import PersistentFIFOCache
 from voltaire_bundler.utils.deployed_simulations import check_deployed_simulations
 from voltaire_bundler.utils.eth_client_utils import get_block_info, send_rpc_request_to_eth_client
@@ -1225,6 +1226,17 @@ async def exception_handler_decorator(
         rpc_call_response = await response_function(rpc_call_request)
     except (ExecutionException, ValidationException) as excp:
         rpc_call_response = {"payload": excp, "is_error": True}
+    except GasPriceUnavailableError as excp:
+        # Gas-price cache never populated (eth node unreachable since
+        # startup). Not a bundler bug — tell the submitter what happened
+        # instead of the generic "Unexpected Error".
+        logging.error(str(excp))
+        rpc_call_response = {
+            "payload": OtherJsonRpcErrorException(
+                OtherJsonRpcErrorCode.InternalError, str(excp)
+            ),
+            "is_error": True
+        }
     except ValueError as excp:
         logging.error(str(excp))
         rpc_call_response = {
