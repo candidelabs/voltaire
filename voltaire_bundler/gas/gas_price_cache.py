@@ -202,16 +202,32 @@ class GasPriceCache:
     # ----------------------------------------------------------- internals
     async def _fetch_from_node(self, node_url: str) -> list[Any]:
         """Fetch the fee values from one node under a hard deadline."""
-        tasks: list[Any] = [send_rpc_request_to_eth_client(
-            [node_url], "eth_gasPrice", None, None, "result"
+        tasks: list[asyncio.Task[Any]] = [asyncio.create_task(
+            send_rpc_request_to_eth_client(
+                [node_url], "eth_gasPrice", None, None, "result"
+            )
         )]
         if self._fetch_priority_fee:
-            tasks.append(send_rpc_request_to_eth_client(
+            tasks.append(asyncio.create_task(send_rpc_request_to_eth_client(
                 [node_url], "eth_maxPriorityFeePerGas", None, None, "result",
-            ))
-        return await asyncio.wait_for(
-            asyncio.gather(*tasks), timeout=_PER_NODE_TIMEOUT_SECONDS
-        )
+            )))
+        try:
+            return await asyncio.wait_for(
+                asyncio.gather(*tasks), timeout=_PER_NODE_TIMEOUT_SECONDS
+            )
+        finally:
+            # gather() propagates the first failure without cancelling its
+            # siblings, so without this a failed eth_gasPrice would leave
+            # the eth_maxPriorityFeePerGas task (and its retry loop)
+            # running against the node while we move on to the next one.
+            # The timeout path already cancels both via wait_for; this
+            # makes the exception path behave the same. Awaiting the
+            # cancelled tasks lets them settle and retrieves their
+            # exceptions so asyncio doesn't log "never retrieved".
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _refresh(self) -> None:
         """Try each configured node in order until one answers within its

@@ -191,3 +191,35 @@ async def test_background_loop_populates_after_failed_warm(
     await _run_for(cache, 0.1)
 
     assert (await cache.get_snapshot()).max_fee_per_gas == 0x70
+
+
+@pytest.mark.asyncio
+async def test_failed_fee_rpc_cancels_its_sibling(monkeypatch, fast_timeouts):
+    """When one of the two fee RPCs against a node fails, the other must be
+    cancelled rather than left running against that node after the refresh
+    has moved on to the next one."""
+    monkeypatch.setattr(gpc, "_PER_NODE_TIMEOUT_SECONDS", 1.0)
+    hanging: list[asyncio.Task] = []
+
+    async def rpc(nodes_urls, method, params=None, flashbots=None,
+                  expected_key=None):
+        url = nodes_urls[0]
+        if url == "http://a" and method == "eth_gasPrice":
+            raise ValueError("boom")
+        if url == "http://a":
+            hanging.append(asyncio.current_task())
+            await asyncio.sleep(3600)
+        return {"result": "0x10"}
+
+    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    # Non-legacy mode on a chain with a priority fee: both RPCs are issued.
+    cache = GasPriceCache(["http://a", "http://b"], chain_id=1,
+                          is_legacy_mode=False, refresh_interval_seconds=1.0)
+
+    await cache.warm()
+
+    snap = await cache.get_snapshot()
+    assert snap.max_fee_per_gas == 0x10
+    assert snap.max_priority_fee_per_gas == 0x10
+    assert len(hanging) == 1
+    assert hanging[0].cancelled()
