@@ -10,7 +10,8 @@ from eth_account import Account
 from eth_abi import encode
 
 from voltaire_bundler.cli_manager import ConditionalRpc
-from voltaire_bundler.gas.gas_price_cache import GasPriceCache
+from voltaire_bundler.gas.gas_price_cache import \
+    GasPriceCache, GasPriceUnavailableError
 from voltaire_bundler.user_operation.models import \
     FailedOp, FailedOpWithRevert
 from voltaire_bundler.bundle.exceptions import ExecutionException, ValidationException
@@ -419,6 +420,21 @@ class BundlerManager:
             f"Attempting to send bundle with {num_of_user_operations} user operations."
         )
 
+        # Gas-price values come from the background-refreshed cache so each
+        # bundle round drops two RPCs (eth_gasPrice + eth_maxPriorityFeePerGas)
+        # off the upstream node. Read it BEFORE building the RPC coroutines
+        # below: the read never touches the network and raises
+        # GasPriceUnavailableError only while the cache has never been
+        # populated (eth node unreachable since startup). Raising here
+        # skips the round without having already fired the bundle
+        # estimate + nonce RPCs — asyncio.gather does not cancel its
+        # siblings when one of them fails.
+        try:
+            gas_price_snapshot = await self.gas_price_cache.get_snapshot()
+        except GasPriceUnavailableError as err:
+            logging.error(f"sending bundle skipped: {err}")
+            return
+
         call_data_and_call_gas_limit_op = self.create_bundle_calldata_and_estimate_gas(
             user_operations,
             bundler_address,
@@ -432,33 +448,24 @@ class BundlerManager:
             [bundler_address, "latest"], None, "result"
         )
 
-        # Gas-price values come from the background-refreshed cache so each
-        # bundle round drops two RPCs (eth_gasPrice + eth_maxPriorityFeePerGas)
-        # off the upstream node. The snapshot read never touches the
-        # network; it is gathered with the bundle gas estimate + nonce
-        # purely for symmetry with the other awaits.
         try:
             (
                 call_data_tuple,
                 nonce_result,
-                gas_price_snapshot,
             ) = await asyncio.gather(
                 call_data_and_call_gas_limit_op,
                 nonce_op,
-                self.gas_price_cache.get_snapshot(),
             )
         except ExecutionException as err:
             logging.error(f"Sending bundle failed with erro: {err.message}")
             return
         except Exception:
-            # get_snapshot raises GasPriceUnavailableError while the cache
-            # has never been populated (eth node unreachable since
-            # startup), and the gathered RPCs can raise transport errors.
-            # Skipping the bundle round cleanly is preferable to leaking
-            # and aborting the entire cron task — the next tick retries.
+            # The gathered RPCs can raise transport errors or a malformed-
+            # response ValueError. Skipping the bundle round cleanly is
+            # preferable to leaking and aborting the entire cron task —
+            # the next tick retries.
             logging.error(
-                "sending bundle failed: gas-price snapshot unavailable or "
-                "bundle estimate errored",
+                "sending bundle failed: bundle estimate or nonce fetch errored",
                 exc_info=True,
             )
             return
