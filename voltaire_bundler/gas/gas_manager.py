@@ -50,9 +50,8 @@ class GasManager(ABC, Generic[UserOperationType]):
         enforce_gas_price_tolerance: int
     ):
         # When tolerance is 100% the validation below is a no-op; skip
-        # touching the cache (including its staleness-fallback fetch) so
-        # operators running with the gas check disabled never pay any RPC
-        # cost here.
+        # touching the cache so operators running with the gas check
+        # disabled never depend on it being populated.
         if enforce_gas_price_tolerance >= 100:
             return
 
@@ -61,8 +60,8 @@ class GasManager(ABC, Generic[UserOperationType]):
 
         # Read the cached gas-price snapshot instead of issuing fresh
         # eth_gasPrice / eth_maxPriorityFeePerGas calls per userop. The
-        # snapshot is refreshed by GasPriceCache.run() on a per-chain
-        # cadence (see gas_price_cache.py).
+        # snapshot is refreshed by GasPriceCache.run() on a fixed
+        # interval; this read never touches the network.
         snapshot = await self.gas_price_cache.get_snapshot()
         block_max_fee_per_gas = snapshot.max_fee_per_gas
         block_max_fee_per_gas_with_tolerance = math.ceil(
@@ -290,9 +289,8 @@ class GasManager(ABC, Generic[UserOperationType]):
         ]
 
         # Run the OP gas-oracle eth_call in parallel with a cached gas-price
-        # read. The cache read returns immediately unless the background
-        # refresh loop has fallen far enough behind to trigger the
-        # synchronous staleness fallback (see GasPriceCache.get_snapshot).
+        # read. The cache read never touches the network and returns
+        # immediately (see GasPriceCache.get_snapshot).
         result, snapshot = await asyncio.gather(
             send_rpc_request_to_eth_client(
                 self.ethereum_node_urls, "eth_call", params, None, "result"

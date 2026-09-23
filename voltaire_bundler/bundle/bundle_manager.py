@@ -434,9 +434,9 @@ class BundlerManager:
 
         # Gas-price values come from the background-refreshed cache so each
         # bundle round drops two RPCs (eth_gasPrice + eth_maxPriorityFeePerGas)
-        # off the upstream node. Snapshot is fetched in parallel with the
-        # bundle gas estimate + nonce so a stale-fallback refresh, if it
-        # happens, doesn't add wall-clock latency.
+        # off the upstream node. The snapshot read never touches the
+        # network; it is gathered with the bundle gas estimate + nonce
+        # purely for symmetry with the other awaits.
         try:
             (
                 call_data_tuple,
@@ -451,14 +451,14 @@ class BundlerManager:
             logging.error(f"Sending bundle failed with erro: {err.message}")
             return
         except Exception:
-            # get_snapshot's synchronous-fallback path can raise non-Execution
-            # errors when the upstream node is unreachable or returns a
-            # malformed response (ValueError on int(..,16), KeyError on
-            # missing 'result', transport errors). Skipping the bundle round
-            # cleanly is preferable to leaking and aborting the entire cron
-            # task — the next tick will retry with a fresh snapshot.
+            # get_snapshot raises GasPriceUnavailableError while the cache
+            # has never been populated (eth node unreachable since
+            # startup), and the gathered RPCs can raise transport errors.
+            # Skipping the bundle round cleanly is preferable to leaking
+            # and aborting the entire cron task — the next tick retries.
             logging.error(
-                "sending bundle failed: gas-price snapshot fetch errored",
+                "sending bundle failed: gas-price snapshot unavailable or "
+                "bundle estimate errored",
                 exc_info=True,
             )
             return
