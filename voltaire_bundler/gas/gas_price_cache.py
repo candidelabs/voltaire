@@ -200,8 +200,11 @@ class GasPriceCache:
         self._stop.set()
 
     # ----------------------------------------------------------- internals
-    async def _fetch_from_node(self, node_url: str) -> list[Any]:
-        """Fetch the fee values from one node under a hard deadline."""
+    async def _fetch_from_node(self, node_url: str) -> tuple[int, int | None]:
+        """Fetch and parse the fee values from one node under a hard
+        deadline. Returns ``(max_fee, priority_fee_or_None)``. A malformed
+        response raises ValueError so the caller treats it as this node's
+        failure and falls through to the next one."""
         tasks: list[asyncio.Task[Any]] = [asyncio.create_task(
             send_rpc_request_to_eth_client(
                 [node_url], "eth_gasPrice", None, None, "result"
@@ -212,7 +215,7 @@ class GasPriceCache:
                 [node_url], "eth_maxPriorityFeePerGas", None, None, "result",
             )))
         try:
-            return await asyncio.wait_for(
+            results = await asyncio.wait_for(
                 asyncio.gather(*tasks), timeout=_PER_NODE_TIMEOUT_SECONDS
             )
         finally:
@@ -229,28 +232,6 @@ class GasPriceCache:
                     task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _refresh(self) -> None:
-        """Try each configured node in order until one answers within its
-        deadline. Raises the last node's error if all of them fail."""
-        results: list[Any] | None = None
-        last_exc: Exception | None = None
-        node_count = len(self._ethereum_node_urls)
-        for index, node_url in enumerate(self._ethereum_node_urls):
-            try:
-                results = await self._fetch_from_node(node_url)
-                break
-            except Exception as exc:
-                last_exc = exc
-                logging.warning(
-                    "GasPriceCache: node %d/%d failed to serve gas price "
-                    "(%r)%s",
-                    index + 1, node_count, exc,
-                    "; trying next node" if index + 1 < node_count else "",
-                )
-        if results is None:
-            assert last_exc is not None
-            raise last_exc
-
         try:
             max_fee = int(results[0]["result"], 16)
             priority: int | None = (
@@ -266,7 +247,32 @@ class GasPriceCache:
                 "response (eth_gasPrice / eth_maxPriorityFeePerGas): "
                 f"{results!r}"
             ) from exc
+        return max_fee, priority
 
+    async def _refresh(self) -> None:
+        """Try each configured node in order until one answers within its
+        deadline with well-formed values. Raises the last node's error if
+        all of them fail."""
+        parsed: tuple[int, int | None] | None = None
+        last_exc: Exception | None = None
+        node_count = len(self._ethereum_node_urls)
+        for index, node_url in enumerate(self._ethereum_node_urls):
+            try:
+                parsed = await self._fetch_from_node(node_url)
+                break
+            except Exception as exc:
+                last_exc = exc
+                logging.warning(
+                    "GasPriceCache: node %d/%d failed to serve gas price "
+                    "(%r)%s",
+                    index + 1, node_count, exc,
+                    "; trying next node" if index + 1 < node_count else "",
+                )
+        if parsed is None:
+            assert last_exc is not None
+            raise last_exc
+
+        max_fee, priority = parsed
         self._snapshot = GasPriceSnapshot(
             max_fee_per_gas=max_fee,
             max_priority_fee_per_gas=priority,

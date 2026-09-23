@@ -223,3 +223,32 @@ async def test_failed_fee_rpc_cancels_its_sibling(monkeypatch, fast_timeouts):
     assert snap.max_priority_fee_per_gas == 0x10
     assert len(hanging) == 1
     assert hanging[0].cancelled()
+
+
+@pytest.mark.asyncio
+async def test_malformed_primary_falls_through_to_secondary(
+    monkeypatch, fast_timeouts
+):
+    """A node that answers but with an unparseable value (JSON null here,
+    as some proxies return) counts as that node's failure, so the refresh
+    moves on to the next node instead of aborting."""
+    rpc = FakeRpc({"http://a": None, "http://b": "0x20"})
+    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    cache = _cache(["http://a", "http://b"])
+
+    await cache.warm()
+
+    assert (await cache.get_snapshot()).max_fee_per_gas == 0x20
+    assert [u for u, _ in rpc.calls] == ["http://a", "http://b"]
+
+
+@pytest.mark.asyncio
+async def test_malformed_on_all_nodes_raises_value_error(
+    monkeypatch, fast_timeouts
+):
+    rpc = FakeRpc({"http://a": "not-hex"})
+    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    cache = _cache(["http://a"])
+
+    with pytest.raises(ValueError, match="malformed gas-price response"):
+        await cache.warm()
