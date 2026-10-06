@@ -35,18 +35,20 @@ from voltaire_bundler.utils.eth_client_utils import \
     send_rpc_request_to_eth_client
 
 
-# Uniform 1-second refresh cadence across every chain. Gives the tightest
-# bound on how old a served value can be (one interval plus the fetch
-# time) and matches the block time of the fast L2s (Arbitrum, HyperEVM,
-# Somnia) that ran at this cadence before.
+# Uniform 5-second refresh cadence across every chain. Bounds how old a
+# served value can be at one interval plus the fetch time, while keeping
+# upstream RPC volume modest: ~17k eth_gasPrice calls per day (plus the
+# same again for eth_maxPriorityFeePerGas where fetched), versus ~86k at
+# the previous 1 s default.
 #
-# Tradeoff on slow-block chains: the loop refreshes every interval
-# regardless of block time. On mainnet that's ~12 eth_gasPrice /
-# eth_maxPriorityFeePerGas calls per block, 11 of which return the same
-# value. Operators on metered eth-node providers should raise this via
-# --gas_price_refresh_interval or VOLTAIRE_GAS_PRICE_REFRESH_INTERVAL;
-# both accept a positive float and take precedence over this default.
-DEFAULT_REFRESH_INTERVAL_SECONDS = 1.0
+# Tradeoff on fast-block L2s (Arbitrum, HyperEVM, Somnia run ~1 s blocks):
+# the served price can lag a few blocks. Fee validation tolerates that
+# because gas prices move slowly relative to block time; operators who
+# want tighter tracking can lower this via --gas_price_refresh_interval
+# or VOLTAIRE_GAS_PRICE_REFRESH_INTERVAL. On slow-block chains (mainnet,
+# ~12 s) this still refreshes 2-3 times per block. Both overrides accept
+# a positive float and take precedence over this default.
+DEFAULT_REFRESH_INTERVAL_SECONDS = 5.0
 
 # Chains where ``eth_maxPriorityFeePerGas`` is not available. ``--legacy_mode``
 # also disables the call (handled at construction time).

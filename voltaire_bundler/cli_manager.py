@@ -412,10 +412,10 @@ def initialize_argument_parser() -> ArgumentParser:
         help=(
             "seconds between background refreshes of the cached "
             "eth_gasPrice / eth_maxPriorityFeePerGas values. Defaults to "
-            "1s across every chain; the background loop is idle-aware "
-            "and skips refreshes when the cache hasn't been read in "
-            "3 * interval seconds, so a shorter interval on a quiet "
-            "bundler costs nothing."
+            "5s across every chain. The loop refreshes on this cadence "
+            "regardless of traffic, so raise it to cut RPC volume on a "
+            "metered provider or lower it for tighter fee tracking on "
+            "fast-block L2s."
         ),
         nargs="?",
         default=_get_env_or_default(
