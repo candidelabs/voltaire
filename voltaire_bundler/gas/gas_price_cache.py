@@ -22,6 +22,17 @@ failed and no background tick has succeeded yet), which raises
 Node failover: every refresh tries the configured node URLs one at a time,
 each under its own short deadline, so a primary that hangs (rather than
 erroring) falls through to the next node instead of stalling the loop.
+
+Public-node mode (``--gas_price_node_url``): operators can point the
+refresh loop at a list of free public RPC endpoints instead of their paid
+provider, since the two fee calls are cheap and carry no state. In that
+mode each refresh starts from the next node in the list (round-robin) so
+the per-node request rate is ``1 / (interval * len(nodes))``, well under
+public rate limits, and samples that deviate wildly from the current
+snapshot are rejected unless several consecutive samples agree (see
+``_OUTLIER_RATIO``). Public nodes are an unauthenticated input to a cost
+decision — ``eth_maxPriorityFeePerGas`` drives the tip the bundler pays —
+so one buggy or hostile endpoint must not be able to set the price alone.
 """
 from __future__ import annotations
 
@@ -73,6 +84,25 @@ _PER_NODE_TIMEOUT_SECONDS = 5.0
 # logs as more than a stream of per-tick warnings.
 _STALE_ERROR_AFTER_SECONDS = 60.0
 
+# Outlier rejection, active only in public-node mode. A fetched value that
+# is more than this factor above or below the currently cached value is
+# treated as that node's failure and the walk moves on to the next node.
+# 5x is far outside what one refresh interval can legitimately move
+# (EIP-1559 base fee changes at most 12.5% per block) while still
+# catching the realistic bad cases: a node returning a wrong-chain
+# price, a stuck/zero value, or a deliberately inflated tip.
+_OUTLIER_RATIO = 5.0
+
+# Escape hatch for the clamp. A genuine market jump beyond _OUTLIER_RATIO
+# (a mint frenzy spiking the priority fee) would otherwise be rejected on
+# every tick forever, pinning the cache at a stale low price. Once this
+# many *consecutive* samples all deviate, the next deviant sample is
+# accepted. Under round-robin, consecutive samples come from different
+# nodes, so this is effectively "N nodes agree the price moved". A single
+# bad node can't reach the threshold alone because the healthy node that
+# follows it in the rotation resets the count.
+_OUTLIER_CONFIRMATIONS = 3
+
 
 class GasPriceUnavailableError(Exception):
     """Raised by ``get_snapshot`` when the cache has never been populated:
@@ -112,7 +142,13 @@ class GasPriceCache:
         chain_id: int,
         is_legacy_mode: bool,
         refresh_interval_seconds: float,
+        public_nodes: bool = False,
     ):
+        """``public_nodes`` switches the node-selection policy from
+        primary-first (walk the list from index 0 every refresh, so a
+        trusted primary always answers when healthy) to round-robin with
+        outlier rejection, for lists of untrusted public endpoints. See
+        the module docstring."""
         # Reject non-positive intervals at construction: a zero or
         # negative interval would turn run()'s sleep into a hot loop.
         if refresh_interval_seconds <= 0:
@@ -120,7 +156,14 @@ class GasPriceCache:
                 "refresh_interval_seconds must be > 0, got "
                 f"{refresh_interval_seconds!r}"
             )
+        if not ethereum_node_urls:
+            raise ValueError("GasPriceCache needs at least one node URL")
         self._ethereum_node_urls = ethereum_node_urls
+        self._public_nodes = public_nodes
+        # Index of the node the next refresh starts from (round-robin).
+        self._next_start = 0
+        # Consecutive samples rejected by the outlier clamp.
+        self._outlier_streak = 0
         self._chain_id = chain_id
         self._is_legacy_mode = is_legacy_mode
         self._interval = refresh_interval_seconds
@@ -251,29 +294,97 @@ class GasPriceCache:
             ) from exc
         return max_fee, priority
 
+    def _node_walk_order(self) -> list[tuple[int, str]]:
+        """``(configured_index, url)`` pairs in the order this refresh
+        should try them. Primary-first by default; in public-node mode the
+        start rotates one position per refresh and the rest of the list
+        follows as failover. Indices are logged instead of URLs, which may
+        embed provider API keys."""
+        indexed = list(enumerate(self._ethereum_node_urls))
+        if not self._public_nodes:
+            return indexed
+        start = self._next_start % len(indexed)
+        # Advance even if this refresh ends up failing, so a dead node
+        # doesn't get retried first on every tick.
+        self._next_start = start + 1
+        return indexed[start:] + indexed[:start]
+
+    def _is_outlier(self, max_fee: int, priority: int | None) -> bool:
+        """Public-node mode only: does this sample deviate from the cached
+        snapshot by more than ``_OUTLIER_RATIO`` in either direction? A
+        field whose cached value is zero can't be compared by ratio and is
+        skipped. With no snapshot yet there is nothing to compare against,
+        so the first sample is always accepted."""
+        if not self._public_nodes or self._snapshot is None:
+            return False
+        pairs = [(max_fee, self._snapshot.max_fee_per_gas)]
+        if priority is not None and \
+                self._snapshot.max_priority_fee_per_gas is not None:
+            pairs.append((priority, self._snapshot.max_priority_fee_per_gas))
+        for new, old in pairs:
+            if old == 0:
+                continue
+            if new > old * _OUTLIER_RATIO or new * _OUTLIER_RATIO < old:
+                return True
+        return False
+
     async def _refresh(self) -> None:
-        """Try each configured node in order until one answers within its
-        deadline with well-formed values. Raises the last node's error if
-        all of them fail."""
+        """Try the configured nodes one at a time (see ``_node_walk_order``)
+        until one answers within its deadline with well-formed, plausible
+        values. Raises the last node's error if all of them fail."""
         parsed: tuple[int, int | None] | None = None
         last_exc: Exception | None = None
         node_count = len(self._ethereum_node_urls)
-        for index, node_url in enumerate(self._ethereum_node_urls):
+        for position, (index, node_url) in enumerate(self._node_walk_order()):
+            is_last = position + 1 == node_count
             try:
-                parsed = await self._fetch_from_node(node_url)
-                break
+                candidate = await self._fetch_from_node(node_url)
             except Exception as exc:
                 last_exc = exc
                 logging.warning(
                     "GasPriceCache: node %d/%d failed to serve gas price "
                     "(%r)%s",
                     index + 1, node_count, exc,
-                    "; trying next node" if index + 1 < node_count else "",
+                    "" if is_last else "; trying next node",
                 )
+                continue
+
+            if self._is_outlier(*candidate):
+                self._outlier_streak += 1
+                if self._outlier_streak < _OUTLIER_CONFIRMATIONS:
+                    assert self._snapshot is not None
+                    last_exc = ValueError(
+                        "GasPriceCache: node %d/%d returned an outlier "
+                        "gas price (max_fee %d, priority %s vs cached "
+                        "%d, %s); %d/%d consecutive deviant samples" % (
+                            index + 1, node_count, candidate[0],
+                            candidate[1], self._snapshot.max_fee_per_gas,
+                            self._snapshot.max_priority_fee_per_gas,
+                            self._outlier_streak, _OUTLIER_CONFIRMATIONS,
+                        )
+                    )
+                    logging.warning(
+                        "%s%s", last_exc,
+                        "" if is_last else "; trying next node",
+                    )
+                    continue
+                logging.warning(
+                    "GasPriceCache: accepting deviant gas price from node "
+                    "%d/%d after %d consecutive agreeing samples",
+                    index + 1, node_count, self._outlier_streak,
+                )
+            parsed = candidate
+            logging.debug(
+                "GasPriceCache: refreshed from node %d/%d",
+                index + 1, node_count,
+            )
+            break
+
         if parsed is None:
             assert last_exc is not None
             raise last_exc
 
+        self._outlier_streak = 0
         max_fee, priority = parsed
         self._snapshot = GasPriceSnapshot(
             max_fee_per_gas=max_fee,

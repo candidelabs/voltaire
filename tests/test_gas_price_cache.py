@@ -252,3 +252,214 @@ async def test_malformed_on_all_nodes_raises_value_error(
 
     with pytest.raises(ValueError, match="malformed gas-price response"):
         await cache.warm()
+
+
+# ------------------------------------------------------------ public nodes
+# --gas_price_node_url mode: round-robin start plus outlier rejection.
+
+def _public_cache(urls: list[str], interval: float = 1.0) -> GasPriceCache:
+    return GasPriceCache(urls, chain_id=1, is_legacy_mode=True,
+                         refresh_interval_seconds=interval,
+                         public_nodes=True)
+
+
+@pytest.mark.asyncio
+async def test_default_mode_always_starts_at_primary(
+    monkeypatch, fast_timeouts
+):
+    rpc = FakeRpc({"http://a": "0x10", "http://b": "0x10"})
+    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    cache = _cache(["http://a", "http://b"])
+
+    for _ in range(3):
+        await cache.warm()
+
+    assert [u for u, _ in rpc.calls] == ["http://a"] * 3
+
+
+@pytest.mark.asyncio
+async def test_public_mode_round_robins_start_node(
+    monkeypatch, fast_timeouts
+):
+    rpc = FakeRpc({"http://a": "0x10", "http://b": "0x10",
+                   "http://c": "0x10"})
+    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    cache = _public_cache(["http://a", "http://b", "http://c"])
+
+    for _ in range(4):
+        await cache.warm()
+
+    assert [u for u, _ in rpc.calls] == [
+        "http://a", "http://b", "http://c", "http://a"]
+
+
+@pytest.mark.asyncio
+async def test_public_mode_fails_over_from_rotated_start(
+    monkeypatch, fast_timeouts
+):
+    """Second refresh starts at b; b hangs, so it walks c then wraps to a.
+    The rotation also advances past a failed start so the third refresh
+    begins at c, not b again."""
+    rpc = FakeRpc({"http://a": "0x10", "http://b": "hang",
+                   "http://c": ValueError("down")})
+    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    cache = _public_cache(["http://a", "http://b", "http://c"])
+
+    await cache.warm()  # a
+    await cache.warm()  # b (hang) -> c (error) -> a
+    await cache.warm()  # c (error) -> a
+
+    assert [u for u, _ in rpc.calls] == [
+        "http://a",
+        "http://b", "http://c", "http://a",
+        "http://c", "http://a",
+    ]
+    assert (await cache.get_snapshot()).max_fee_per_gas == 0x10
+
+
+@pytest.mark.asyncio
+async def test_public_mode_rejects_outlier_and_uses_next_node(
+    monkeypatch, fast_timeouts
+):
+    """Node a reports a 256x price; it is treated as a's failure and b's
+    sane value is served instead."""
+    rpc = FakeRpc({"http://a": "0x100", "http://b": "0x110"})
+    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    cache = _public_cache(["http://a", "http://b"])
+    await cache.warm()  # a -> 0x100 (first sample, always accepted)
+    rpc.behaviour["http://a"] = "0x10000"
+
+    await cache.warm()  # starts at b -> 0x110
+    await cache.warm()  # starts at a -> outlier -> b -> 0x110
+
+    assert (await cache.get_snapshot()).max_fee_per_gas == 0x110
+    assert [u for u, _ in rpc.calls] == [
+        "http://a", "http://b", "http://a", "http://b"]
+
+
+@pytest.mark.asyncio
+async def test_public_mode_rejects_outlier_in_both_directions(
+    monkeypatch, fast_timeouts
+):
+    rpc = FakeRpc({"http://a": "0x1000", "http://b": "0x1000"})
+    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    cache = _public_cache(["http://a", "http://b"])
+    await cache.warm()
+    rpc.behaviour["http://b"] = "0x1"  # far too low
+
+    await cache.warm()  # b -> outlier -> a -> 0x1000
+
+    assert (await cache.get_snapshot()).max_fee_per_gas == 0x1000
+
+
+@pytest.mark.asyncio
+async def test_public_mode_accepts_jump_after_consecutive_confirmations(
+    monkeypatch, fast_timeouts
+):
+    """A genuine market move beyond the ratio is accepted once three
+    consecutive samples agree, so the cache can't get pinned at a stale
+    price. With one node that takes three refreshes."""
+    rpc = FakeRpc({"http://a": "0x100"})
+    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    cache = _public_cache(["http://a"])
+    await cache.warm()
+    rpc.behaviour["http://a"] = "0x10000"
+
+    for _ in range(2):
+        with pytest.raises(ValueError, match="outlier"):
+            await cache.warm()
+        assert (await cache.get_snapshot()).max_fee_per_gas == 0x100
+    await cache.warm()  # third consecutive deviant sample: accepted
+
+    assert (await cache.get_snapshot()).max_fee_per_gas == 0x10000
+
+
+@pytest.mark.asyncio
+async def test_public_mode_jump_confirmed_across_nodes_in_one_refresh(
+    monkeypatch, fast_timeouts
+):
+    """With three nodes all reporting the jump, the walk within a single
+    refresh collects the three confirmations and serves the new price."""
+    rpc = FakeRpc({"http://a": "0x100", "http://b": "0x100",
+                   "http://c": "0x100"})
+    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    cache = _public_cache(["http://a", "http://b", "http://c"])
+    await cache.warm()
+    for url in rpc.behaviour:
+        rpc.behaviour[url] = "0x10000"
+
+    await cache.warm()
+
+    assert (await cache.get_snapshot()).max_fee_per_gas == 0x10000
+    assert len(rpc.calls) == 4
+
+
+@pytest.mark.asyncio
+async def test_public_mode_sane_sample_resets_outlier_streak(
+    monkeypatch, fast_timeouts
+):
+    """One persistently bad node can't accumulate confirmations on its own:
+    the healthy node after it in the rotation resets the streak."""
+    rpc = FakeRpc({"http://a": "0x100", "http://b": "0x100"})
+    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    cache = _public_cache(["http://a", "http://b"])
+    await cache.warm()
+    rpc.behaviour["http://a"] = "0x10000"
+
+    for _ in range(10):
+        await cache.warm()
+        assert (await cache.get_snapshot()).max_fee_per_gas == 0x100
+
+
+@pytest.mark.asyncio
+async def test_default_mode_never_clamps(monkeypatch, fast_timeouts):
+    rpc = FakeRpc({"http://a": "0x100"})
+    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    cache = _cache(["http://a"])
+    await cache.warm()
+    rpc.behaviour["http://a"] = "0x10000"
+
+    await cache.warm()
+
+    assert (await cache.get_snapshot()).max_fee_per_gas == 0x10000
+
+
+@pytest.mark.asyncio
+async def test_public_mode_clamps_priority_fee_too(
+    monkeypatch, fast_timeouts
+):
+    """An inflated tip alone (sane eth_gasPrice) is still an outlier: the
+    priority fee is what the bundler actually pays."""
+    def rpc_for(prices: dict[str, dict[str, str]]):
+        calls: list[tuple[str, str]] = []
+
+        async def rpc(nodes_urls, method, params=None, flashbots=None,
+                      expected_key=None):
+            calls.append((nodes_urls[0], method))
+            return {"result": prices[nodes_urls[0]][method]}
+        return rpc, calls
+
+    prices = {
+        "http://a": {"eth_gasPrice": "0x100",
+                     "eth_maxPriorityFeePerGas": "0x10"},
+        "http://b": {"eth_gasPrice": "0x100",
+                     "eth_maxPriorityFeePerGas": "0x10"},
+    }
+    rpc, calls = rpc_for(prices)
+    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    cache = GasPriceCache(["http://a", "http://b"], chain_id=1,
+                          is_legacy_mode=False, refresh_interval_seconds=1.0,
+                          public_nodes=True)
+    await cache.warm()  # a
+    prices["http://b"]["eth_maxPriorityFeePerGas"] = "0x1000"
+
+    await cache.warm()  # b -> tip outlier -> a
+
+    snap = await cache.get_snapshot()
+    assert snap.max_priority_fee_per_gas == 0x10
+    assert [u for u, _ in calls][-2:] == ["http://a", "http://a"]
+
+
+def test_public_cache_rejects_empty_node_list():
+    with pytest.raises(ValueError, match="at least one node"):
+        _public_cache([])

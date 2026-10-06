@@ -424,6 +424,22 @@ def initialize_argument_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
+        "--gas_price_node_url",
+        help=(
+            "List of Eth client JSON-RPC urls used only for the periodic "
+            "eth_gasPrice / eth_maxPriorityFeePerGas refresh - defaults "
+            "to ethereum_node_url value. Intended for free public "
+            "endpoints: requests round-robin across the list so each "
+            "node sees 1/N of the refresh rate, and a value that "
+            "deviates >5x from the cached price is rejected unless "
+            "three consecutive samples agree."
+        ),
+        nargs="?",
+        default=_get_env_or_default(
+            "VOLTAIRE_GAS_PRICE_NODE_URL", None, str),
+    )
+
+    parser.add_argument(
         "--max_fee_per_gas_percentage_multiplier",
         type=unsigned_int,
         help=(
@@ -1127,6 +1143,30 @@ async def get_init_data(args: Namespace) -> InitData:
             )
             sys.exit(1)
 
+    # Dedicated gas-price node list. Unlike the lists above this one is
+    # meant for untrusted public endpoints, so the cache rotates across
+    # it and rejects outliers (GasPriceCache(public_nodes=True)). The
+    # chain-id probe also reorders reachable nodes first, which only
+    # affects which node the warm fetch hits. A wrong-chain public URL
+    # would otherwise feed garbage prices into fee validation.
+    if args.gas_price_node_url is None:
+        gas_price_node_urls = ethereum_node_urls_rearranged
+        gas_price_public_nodes = False
+    else:
+        gas_price_node_urls = args.gas_price_node_url.split(',')
+        gas_price_public_nodes = True
+        gas_price_chain_id_hex, gas_price_node_urls = (
+            await check_and_rearrange_valid_ethereum_rpc_nodes_and_get_chain_id(
+                gas_price_node_urls
+            )
+        )
+        if ethereum_node_chain_id_hex != gas_price_chain_id_hex:
+            logging.critical(
+                f"Eth node chain id {ethereum_node_chain_id_hex} not equal " +
+                f"gas price node chain id {gas_price_chain_id_hex}"
+            )
+            sys.exit(1)
+
     if args.conditional_rpc is not None and args.unsafe:
         logging.critical(
             "sendRawTransactionalConditional can't work with unsafe mode."
@@ -1147,16 +1187,19 @@ async def get_init_data(args: Namespace) -> InitData:
         else DEFAULT_REFRESH_INTERVAL_SECONDS
     )
     gas_price_cache = GasPriceCache(
-        ethereum_node_urls_rearranged,
+        gas_price_node_urls,
         args.chain_id,
         args.legacy_mode,
         gas_price_refresh_interval,
+        public_nodes=gas_price_public_nodes,
     )
     try:
         await gas_price_cache.warm()
         logging.info(
             "Gas-price cache warmed (refresh interval: "
-            f"{gas_price_refresh_interval}s)."
+            f"{gas_price_refresh_interval}s, "
+            f"{len(gas_price_node_urls)} node(s), "
+            f"{'round-robin' if gas_price_public_nodes else 'primary-first'})."
         )
     except Exception as exc:
         # Soft-fail — a transient node hiccup at container start (DNS,
@@ -1169,9 +1212,13 @@ async def get_init_data(args: Namespace) -> InitData:
         # URL still surfaces quickly. Warn loudly so operators notice.
         #
         # Don't log the raw URLs — they may embed provider API keys.
+        flag = (
+            "gas_price_node_url" if gas_price_public_nodes
+            else "ethereum_node_url"
+        )
         logging.warning(
             f"Failed to warm gas-price cache from configured "
-            f"ethereum_node_url(s) ({len(ethereum_node_urls_rearranged)} "
+            f"{flag}(s) ({len(gas_price_node_urls)} "
             f"endpoint(s)): {exc}. Continuing — the background loop "
             f"will keep retrying (refresh interval: "
             f"{gas_price_refresh_interval}s); userops are rejected until "
