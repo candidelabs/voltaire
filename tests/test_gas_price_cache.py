@@ -648,3 +648,155 @@ async def test_successful_ticks_log_nothing(monkeypatch, fast_timeouts, caplog):
 
     assert len(rpc.calls) > 3
     assert [r for r in caplog.records if "GasPriceCache" in r.getMessage()] == []
+
+
+# --------------------------------------------------------------------------
+# Fallback to the bundler's own (trusted) node list when every public node
+# fails on a tick.
+# --------------------------------------------------------------------------
+
+def _public_cache_with_fallback(public: list[str], fallback: list[str],
+                                interval: float = 1.0) -> GasPriceCache:
+    return GasPriceCache(public, chain_id=1, is_legacy_mode=True,
+                         refresh_interval_seconds=interval,
+                         public_nodes=True, fallback_node_urls=fallback)
+
+
+@pytest.mark.asyncio
+async def test_fallback_serves_when_every_public_node_fails(
+    monkeypatch, fast_timeouts, caplog
+):
+    rpc = FakeRpc({"http://a": ValueError("a"), "http://b": "hang",
+                   "http://primary": "0x10"})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _public_cache_with_fallback(["http://a", "http://b"],
+                                        ["http://primary"])
+    caplog.set_level("DEBUG")
+
+    await cache.warm()
+
+    assert (await cache.get_snapshot()).max_fee_per_gas == 0x10
+    # public list walked in full first, fallback last
+    assert [u for u, _ in rpc.calls] == ["http://a", "http://b", "http://primary"]
+    warned = _records(caplog, "WARNING", "all 2 public gas-price nodes failed")
+    assert len(warned) == 1
+    assert "fallback node 1/1" in warned[0].getMessage()
+    # a fallback refresh is a successful refresh
+    assert _records(caplog, "WARNING", "background refresh failed") == []
+
+
+@pytest.mark.asyncio
+async def test_fallback_is_not_consulted_while_a_public_node_serves(
+    monkeypatch, fast_timeouts, caplog
+):
+    rpc = FakeRpc({"http://a": ValueError("a"), "http://b": "0x10",
+                   "http://primary": "0x99"})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _public_cache_with_fallback(["http://a", "http://b"],
+                                        ["http://primary"])
+    caplog.set_level("DEBUG")
+
+    for _ in range(4):
+        await cache._refresh()
+
+    assert (await cache.get_snapshot()).max_fee_per_gas == 0x10
+    assert "http://primary" not in [u for u, _ in rpc.calls]
+    assert _records(caplog, "WARNING", "public gas-price nodes failed") == []
+
+
+@pytest.mark.asyncio
+async def test_fallback_walks_primary_first_and_fails_over(
+    monkeypatch, fast_timeouts
+):
+    rpc = FakeRpc({"http://a": ValueError("a"),
+                   "http://p1": ValueError("p1"), "http://p2": "0x20"})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _public_cache_with_fallback(["http://a"], ["http://p1", "http://p2"])
+
+    await cache.warm()
+    await cache.warm()
+
+    assert (await cache.get_snapshot()).max_fee_per_gas == 0x20
+    # primary-first every time, no rotation on the fallback list
+    assert [u for u, _ in rpc.calls] == ["http://a", "http://p1", "http://p2"] * 2
+
+
+@pytest.mark.asyncio
+async def test_fallback_sample_bypasses_the_outlier_clamp(
+    monkeypatch, fast_timeouts
+):
+    """The clamp guards against untrusted public input; the fallback is
+    the node the bundler trusts for everything else, so a deviant
+    sample from it is the new truth."""
+    rpc = FakeRpc({"http://a": "0x10", "http://primary": "0x10"})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _public_cache_with_fallback(["http://a"], ["http://primary"])
+    await cache.warm()
+    rpc.behaviour["http://a"] = ValueError("down")
+    rpc.behaviour["http://primary"] = "0x1000"  # 256x the cached value
+
+    await cache._refresh()
+
+    assert (await cache.get_snapshot()).max_fee_per_gas == 0x1000
+
+
+@pytest.mark.asyncio
+async def test_fallback_failing_too_is_a_refresh_failure(
+    monkeypatch, fast_timeouts, caplog
+):
+    rpc = FakeRpc({"http://a": ValueError("a"), "http://primary": ValueError("p")})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _public_cache_with_fallback(["http://a"], ["http://primary"])
+    caplog.set_level("DEBUG")
+
+    with pytest.raises(ValueError, match="p"):
+        await cache.warm()
+    assert _records(caplog, "WARNING", "public gas-price nodes failed") == []
+
+
+@pytest.mark.asyncio
+async def test_fallback_run_is_logged_on_state_change_only(
+    monkeypatch, fast_timeouts, caplog
+):
+    rpc = FakeRpc({"http://a": ValueError("a"), "http://primary": "0x10"})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _public_cache_with_fallback(["http://a"], ["http://primary"])
+    caplog.set_level("DEBUG")
+
+    for _ in range(5):
+        await cache._refresh()
+    rpc.behaviour["http://a"] = "0x11"
+    await cache._refresh()
+    await cache._refresh()
+
+    assert len(_records(caplog, "WARNING", "public gas-price nodes failed")) == 1
+    assert _records(caplog, "WARNING", "still on fallback") == []
+    back = _records(caplog, "INFO", "back on the public gas-price nodes")
+    assert len(back) == 1
+    assert "after 5 fallback refreshes" in back[0].getMessage()
+    assert (await cache.get_snapshot()).max_fee_per_gas == 0x11
+    # the fallback run and the public node's problem run close together
+    assert len(_records(caplog, "INFO", "node 1/1 recovered")) == 1
+
+
+@pytest.mark.asyncio
+async def test_fallback_reminder_after_heartbeat_interval(
+    monkeypatch, fast_timeouts, caplog
+):
+    rpc = FakeRpc({"http://a": ValueError("a"), "http://primary": "0x10"})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    monkeypatch.setattr(gpc, "_PROBLEM_HEARTBEAT_SECONDS", 0.0)
+    cache = _public_cache_with_fallback(["http://a"], ["http://primary"])
+    caplog.set_level("DEBUG")
+
+    for _ in range(3):
+        await cache._refresh()
+
+    reminders = _records(caplog, "WARNING", "still on fallback")
+    assert len(reminders) == 2
+    assert "3 consecutive refreshes" in reminders[-1].getMessage()
+
+
+def test_no_fallback_without_a_list():
+    cache = _cache(["http://a"])
+    assert cache._fallback_node_urls == []
