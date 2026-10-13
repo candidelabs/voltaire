@@ -4,6 +4,7 @@ import math
 from typing import Any
 
 from eth_abi import decode, encode
+from eth_account import Account
 
 from voltaire_bundler.bundle.exceptions import \
     (ExecutionException, ExecutionExceptionCode,
@@ -25,8 +26,6 @@ from voltaire_bundler.utils.eth_client_utils import \
     send_rpc_request_to_eth_client
 
 MIN_CALL_GAS_LIMIT = 21_000
-# EIP-7702 intrinsic cost per authorization tuple
-PER_EMPTY_ACCOUNT_COST = 25_000
 
 
 class GasManagerV7V8V9(GasManager):
@@ -124,7 +123,7 @@ class GasManagerV7V8V9(GasManager):
             ) + 1000  # 1000 buffer overhead
             if user_operation.eip7702_auth is not None:
                 result_preverification_gas += (
-                    await self.estimate_eip7702_auth_gas(user_operation.eip7702_auth)
+                    await self.estimate_eip7702_auth_gas(user_operation)
                 )
         else:
             result_preverification_gas = user_operation.pre_verification_gas
@@ -135,31 +134,77 @@ class GasManagerV7V8V9(GasManager):
             hex(result_verification_gas_limit),
         )
 
-    async def estimate_eip7702_auth_gas(self, eip7702_auth: dict[str, str]) -> int:
+    async def estimate_eip7702_auth_gas(
+        self, user_operation: UserOperationV7V8V9
+    ) -> int:
         """
         Intrinsic gas the bundle transaction pays for the operation's
         authorization tuple. It depends on the chain rules and on the
         authority's state (an empty authority costs more), so it is measured
         as the difference between estimating a plain transfer with and
         without the tuple.
+        The submitted tuple signature may be a stub (ERC-7769), so the tuple
+        is re-signed by a throwaway key whose account is overridden with the
+        sender's state.
         """
-        tx = {"from": self.bundler_address, "to": self.bundler_address, "data": "0x"}
-        tx_with_auth = tx | {"type": "0x4", "authorizationList": [eip7702_auth]}
+        eip7702_auth = user_operation.eip7702_auth
+        assert eip7702_auth is not None
+        sender = user_operation.sender_address
         try:
+            nonce, balance, code = await asyncio.gather(*[
+                send_rpc_request_to_eth_client(
+                    self.ethereum_node_urls, method, [sender, "latest"], None, "result")
+                for method in (
+                    "eth_getTransactionCount", "eth_getBalance", "eth_getCode"
+                )
+            ])
+            stand_in = Account.create()
+            signed_auth = Account.sign_authorization(
+                {
+                    "chainId": int(eip7702_auth["chainId"], 16),
+                    "address": eip7702_auth["address"],
+                    "nonce": int(nonce["result"], 16),
+                },
+                stand_in.key,
+            )
+            overrides = {
+                stand_in.address: {
+                    "nonce": nonce["result"],
+                    "balance": balance["result"],
+                    "code": code["result"],
+                }
+            }
+            tx = {
+                "from": self.bundler_address, "to": self.bundler_address, "data": "0x"
+            }
+            tx_with_auth = tx | {
+                "type": "0x4",
+                "authorizationList": [{
+                    "chainId": hex(signed_auth.chain_id),
+                    "address": eip7702_auth["address"],
+                    "nonce": hex(signed_auth.nonce),
+                    "yParity": hex(signed_auth.y_parity),
+                    "r": hex(signed_auth.r),
+                    "s": hex(signed_auth.s),
+                }],
+            }
             without_auth, with_auth = await asyncio.gather(
                 send_rpc_request_to_eth_client(
-                    self.ethereum_node_urls, "eth_estimateGas", [tx, "latest"]),
+                    self.ethereum_node_urls, "eth_estimateGas",
+                    [tx, "latest", overrides]),
                 send_rpc_request_to_eth_client(
-                    self.ethereum_node_urls, "eth_estimateGas", [tx_with_auth, "latest"]),
+                    self.ethereum_node_urls, "eth_estimateGas",
+                    [tx_with_auth, "latest", overrides]),
             )
             return max(
                 int(with_auth["result"], 16) - int(without_auth["result"], 16), 0)
         except Exception as excp:
-            logging.warning(
-                f"eip7702 authorization gas estimation failed: {excp}. "
-                f"falling back to {PER_EMPTY_ACCOUNT_COST}"
+            # the cost can be far above any constant, so don't guess
+            logging.warning(f"eip7702 authorization gas estimation failed: {excp}")
+            raise ValidationException(
+                ValidationExceptionCode.SimulateValidation,
+                "eip7702 authorization gas estimation failed",
             )
-            return PER_EMPTY_ACCOUNT_COST
 
     async def estimate_call_gas_and_verificationgas_limit(
         self,
