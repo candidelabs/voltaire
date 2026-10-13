@@ -465,7 +465,8 @@ def test_public_cache_rejects_empty_node_list():
 # --------------------------------------------------------------------------
 # Log volume: the loop ticks forever, so it must log on state changes, not
 # on every tick (one warning when a node breaks, one info when it recovers,
-# a reminder every _PROBLEM_HEARTBEAT_SECONDS in between).
+# a reminder every _PROBLEM_HEARTBEAT_SECONDS in between, and nothing else,
+# not even at debug level).
 # --------------------------------------------------------------------------
 
 def _records(caplog, level, needle):
@@ -486,10 +487,8 @@ async def test_failing_node_is_warned_about_once(
         await cache._refresh()
 
     assert len(_records(caplog, "WARNING", "node 1/2 failed")) == 1
-    # the other four ticks are debug, with the running count
-    assert len(_records(caplog, "DEBUG", "node 1/2 failed")) == 4
-    assert "5 consecutive problems" in \
-        _records(caplog, "DEBUG", "node 1/2 failed")[-1].getMessage()
+    # the other four ticks log nothing at any level
+    assert len([r for r in caplog.records if "node 1/2" in r.getMessage()]) == 1
     assert _records(caplog, "WARNING", "node 2/2") == []
 
 
@@ -559,7 +558,7 @@ async def test_repeated_outliers_from_one_node_are_warned_about_once(
         await cache._refresh()
 
     assert len(_records(caplog, "WARNING", "node 1/2 returned an outlier")) == 1
-    assert len(_records(caplog, "DEBUG", "node 1/2 returned an outlier")) >= 1
+    assert len([r for r in caplog.records if "outlier" in r.getMessage()]) == 1
     assert (await cache.get_snapshot()).max_fee_per_gas == 0x10
 
 
@@ -582,10 +581,10 @@ async def test_total_outage_logs_first_failure_then_one_escalation(
     escalations = _records(caplog, "ERROR", "refresh has failed")
     assert len(escalations) == 1
     assert "likely working from a wrong price" in escalations[0].getMessage()
-    # every other tick is debug; no reminder within the heartbeat window
+    # no reminder within the heartbeat window, and nothing else at all
     assert _records(caplog, "WARNING", "refresh still failing") == []
     assert _records(caplog, "ERROR", "refresh still failing") == []
-    assert len(_records(caplog, "DEBUG", "refresh failed again")) >= 5
+    assert len([r for r in caplog.records if "refresh" in r.getMessage()]) == 2
     # readers kept the last good value throughout
     assert (await cache.get_snapshot()).max_fee_per_gas == 0x10
 

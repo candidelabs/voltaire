@@ -38,8 +38,10 @@ Logging: the loop ticks every few seconds forever, so it logs on *state
 changes*, not on every tick. A node's first failure (or outlier sample) is
 a warning, its recovery an info line, and while it stays broken a single
 reminder is logged every ``_PROBLEM_HEARTBEAT_SECONDS``; the ticks in
-between are debug. The same applies to the refresh as a whole, with one
-escalation to error at the moment the served value turns stale. Fetches
+between log nothing, even at debug level, since the reminder carries the
+running count and the latest error. The same applies to the refresh as a
+whole, with one escalation to error at the moment the served value turns
+stale. Fetches
 go through ``send_rpc_request_once`` (one attempt, no logging) because the
 cache already has its own per-node deadline and failover; the retrying
 helper would add an error line plus a traceback for every attempt.
@@ -95,7 +97,7 @@ _PER_NODE_TIMEOUT_SECONDS = 5.0
 _STALE_ERROR_AFTER_SECONDS = 60.0
 
 # While a node, or the refresh as a whole, keeps failing tick after tick,
-# one reminder line is logged this often; the ticks in between are debug.
+# one reminder line is logged this often; the ticks in between are silent.
 _PROBLEM_HEARTBEAT_SECONDS = 60.0
 
 # Outlier rejection, active only in public-node mode. A fetched value that
@@ -404,8 +406,8 @@ class GasPriceCache:
     ) -> None:
         """A node failed to produce a usable sample this tick. Logged at
         warning the first time, then as a reminder every
-        ``_PROBLEM_HEARTBEAT_SECONDS`` while it keeps happening, and at
-        debug in between."""
+        ``_PROBLEM_HEARTBEAT_SECONDS`` while it keeps happening; silent
+        in between."""
         now = time.monotonic()
         node_count = len(self._ethereum_node_urls)
         count = self._node_problems[index] + 1
@@ -419,20 +421,14 @@ class GasPriceCache:
                 index + 1, node_count, description, suffix,
             )
             return
-        since = now - self._node_problem_since[index]
         if now - self._node_problem_logged_at[index] >= _PROBLEM_HEARTBEAT_SECONDS:
             self._node_problem_logged_at[index] = now
             logging.warning(
                 "GasPriceCache: node %d/%d still failing: %d consecutive "
                 "problems over %.0fs, latest: %s%s",
-                index + 1, node_count, count, since, description, suffix,
+                index + 1, node_count, count,
+                now - self._node_problem_since[index], description, suffix,
             )
-            return
-        logging.debug(
-            "GasPriceCache: node %d/%d %s (%d consecutive problems over "
-            "%.0fs)%s",
-            index + 1, node_count, description, count, since, suffix,
-        )
 
     def _note_node_ok(self, index: int) -> None:
         """A node produced an accepted sample; closes its problem run, if
@@ -452,8 +448,8 @@ class GasPriceCache:
         """Every node failed this tick. First failure is a warning (error if
         nothing has ever been cached), the moment the served value turns
         stale is one error, then a reminder every
-        ``_PROBLEM_HEARTBEAT_SECONDS`` at the matching level; the ticks in
-        between are debug."""
+        ``_PROBLEM_HEARTBEAT_SECONDS`` at the matching level; silent in
+        between."""
         now = time.monotonic()
         snap = self._snapshot
         age = now - snap.fetched_at_monotonic if snap is not None else None
@@ -493,12 +489,6 @@ class GasPriceCache:
                 "(latest: %r)",
                 count, since, age_text, exc,
             )
-            return
-        logging.debug(
-            "GasPriceCache: refresh failed again: %r (%d consecutive "
-            "failures over %.0fs; serving cached value aged %s)",
-            exc, count, since, age_text,
-        )
 
     def _on_refresh_success(self) -> None:
         count = self._refresh_failures
