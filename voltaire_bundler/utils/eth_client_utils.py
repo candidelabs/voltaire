@@ -220,6 +220,77 @@ async def send_rpc_request_to_eth_client(
     raise ValueError("Failed rpc request to rpc node client")
 
 
+class RpcRequestError(Exception):
+    """One JSON-RPC request did not yield a usable ``result``: transport
+    failure, non-200 status, malformed body, a JSON-RPC error object, or a
+    response without ``result``. The message is a single line naming the
+    method and the cause, suitable for a caller's own log policy."""
+
+
+async def send_rpc_request_once(
+    node_url: str,
+    method: str,
+    params: Any = None,
+) -> Any:
+    """One HTTP attempt against one node: no retry, no logging.
+
+    Returns the JSON-RPC ``result``; raises ``RpcRequestError`` otherwise.
+    For callers that run their own deadline, failover and log policy
+    (GasPriceCache). ``send_rpc_request_to_eth_client`` logs an error plus a
+    traceback on every one of its retries, which is the right thing for a
+    one-off call on the hot path but turns a periodic probe of a dead node
+    into thousands of log lines an hour.
+    """
+    json_request = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": method,
+        "params": params,
+    }
+    headers = {
+        "content-type": "application/json",
+        "connection": "keep-alive"
+    }
+    try:
+        session = get_eth_client_session()
+        async with _get_method_semaphore(method):
+            async with session.post(
+                node_url, json=json_request, headers=headers
+            ) as response:
+                status = response.status
+                body = await response.read()
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        # %r: str() of a TimeoutError / ClientConnectorError can be empty
+        raise RpcRequestError(f"{method}: {exc!r}") from exc
+    return _rpc_result_or_raise(method, status, body)
+
+
+def _rpc_result_or_raise(method: str, status: int, body: bytes) -> Any:
+    """``result`` of a JSON-RPC response body, or RpcRequestError naming
+    what was wrong with it (see send_rpc_request_once)."""
+    if status != 200:
+        raise RpcRequestError(f"{method}: HTTP {status}: {body[:200]!r}")
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        raise RpcRequestError(f"{method}: invalid JSON response: {body[:200]!r}")
+    if not isinstance(payload, dict):
+        raise RpcRequestError(f"{method}: unexpected response: {body[:200]!r}")
+    if "error" in payload:
+        error = payload["error"]
+        if isinstance(error, dict):
+            raise RpcRequestError(
+                f"{method}: node error {error.get('code')}: "
+                f"{error.get('message')}"
+            )
+        raise RpcRequestError(f"{method}: node error: {error!r}")
+    if "result" not in payload:
+        raise RpcRequestError(f"{method}: response without result: {body[:200]!r}")
+    return payload["result"]
+
+
 async def send_rpc_request_to_eth_client_no_retry(
     ethereum_node_url,
     method,

@@ -26,25 +26,25 @@ from voltaire_bundler.gas.gas_price_cache import (
 
 
 class FakeRpc:
-    """Stand-in for send_rpc_request_to_eth_client keyed by node URL.
+    """Stand-in for send_rpc_request_once keyed by node URL.
 
     ``behaviour[url]`` is either a hex string to return, an Exception to
-    raise, or the string "hang" to block until cancelled."""
+    raise, or the string "hang" to block until cancelled. Mutate
+    ``behaviour`` between refreshes to simulate a node going down or
+    coming back."""
 
     def __init__(self, behaviour: dict[str, object]):
         self.behaviour = behaviour
         self.calls: list[tuple[str, str]] = []
 
-    async def __call__(self, nodes_urls, method, params=None,
-                       flashbots=None, expected_key=None):
-        url = nodes_urls[0]
-        self.calls.append((url, method))
-        action = self.behaviour[url]
+    async def __call__(self, node_url, method, params=None):
+        self.calls.append((node_url, method))
+        action = self.behaviour[node_url]
         if action == "hang":
             await asyncio.sleep(3600)
         if isinstance(action, Exception):
             raise action
-        return {"result": action}
+        return action
 
 
 @pytest.fixture
@@ -68,7 +68,7 @@ async def _run_for(cache: GasPriceCache, seconds: float) -> None:
 @pytest.mark.asyncio
 async def test_read_never_fetches_even_when_old(monkeypatch, fast_timeouts):
     rpc = FakeRpc({"http://a": "0x10"})
-    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = _cache(["http://a"])
     cache._snapshot = GasPriceSnapshot(
         max_fee_per_gas=0x30, max_priority_fee_per_gas=None,
@@ -84,7 +84,7 @@ async def test_read_never_fetches_even_when_old(monkeypatch, fast_timeouts):
 @pytest.mark.asyncio
 async def test_read_before_first_fetch_raises(monkeypatch, fast_timeouts):
     rpc = FakeRpc({"http://a": "0x10"})
-    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = _cache(["http://a"])
 
     with pytest.raises(GasPriceUnavailableError):
@@ -95,7 +95,7 @@ async def test_read_before_first_fetch_raises(monkeypatch, fast_timeouts):
 @pytest.mark.asyncio
 async def test_warm_populates_and_reads_are_free(monkeypatch, fast_timeouts):
     rpc = FakeRpc({"http://a": "0x60"})
-    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = _cache(["http://a"])
 
     await cache.warm()
@@ -111,7 +111,7 @@ async def test_hanging_primary_falls_through_to_secondary(
     monkeypatch, fast_timeouts
 ):
     rpc = FakeRpc({"http://a": "hang", "http://b": "0x10"})
-    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = _cache(["http://a", "http://b"])
 
     await cache.warm()
@@ -125,7 +125,7 @@ async def test_erroring_primary_falls_through_to_secondary(
     monkeypatch, fast_timeouts
 ):
     rpc = FakeRpc({"http://a": ValueError("boom"), "http://b": "0x20"})
-    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = _cache(["http://a", "http://b"])
 
     await cache.warm()
@@ -136,7 +136,7 @@ async def test_erroring_primary_falls_through_to_secondary(
 @pytest.mark.asyncio
 async def test_warm_raises_when_all_nodes_fail(monkeypatch, fast_timeouts):
     rpc = FakeRpc({"http://a": "hang", "http://b": ValueError("down")})
-    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = _cache(["http://a", "http://b"])
 
     with pytest.raises(ValueError, match="down"):
@@ -149,7 +149,7 @@ async def test_background_loop_refreshes_on_interval(
     monkeypatch, fast_timeouts
 ):
     rpc = FakeRpc({"http://a": "0x10"})
-    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = _cache(["http://a"], interval=0.02)
     await cache.warm()
     rpc.behaviour["http://a"] = "0x11"
@@ -165,7 +165,7 @@ async def test_background_failure_keeps_previous_value(
     monkeypatch, fast_timeouts
 ):
     rpc = FakeRpc({"http://a": "0x10"})
-    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = _cache(["http://a"], interval=0.02)
     await cache.warm()
     before = await cache.get_snapshot()
@@ -182,7 +182,7 @@ async def test_background_loop_populates_after_failed_warm(
     monkeypatch, fast_timeouts
 ):
     rpc = FakeRpc({"http://a": ValueError("down")})
-    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = _cache(["http://a"], interval=0.02)
     with pytest.raises(ValueError):
         await cache.warm()
@@ -201,17 +201,15 @@ async def test_failed_fee_rpc_cancels_its_sibling(monkeypatch, fast_timeouts):
     monkeypatch.setattr(gpc, "_PER_NODE_TIMEOUT_SECONDS", 1.0)
     hanging: list[asyncio.Task] = []
 
-    async def rpc(nodes_urls, method, params=None, flashbots=None,
-                  expected_key=None):
-        url = nodes_urls[0]
+    async def rpc(url, method, params=None):
         if url == "http://a" and method == "eth_gasPrice":
             raise ValueError("boom")
         if url == "http://a":
             hanging.append(asyncio.current_task())
             await asyncio.sleep(3600)
-        return {"result": "0x10"}
+        return "0x10"
 
-    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     # Non-legacy mode on a chain with a priority fee: both RPCs are issued.
     cache = GasPriceCache(["http://a", "http://b"], chain_id=1,
                           is_legacy_mode=False, refresh_interval_seconds=1.0)
@@ -233,7 +231,7 @@ async def test_malformed_primary_falls_through_to_secondary(
     as some proxies return) counts as that node's failure, so the refresh
     moves on to the next node instead of aborting."""
     rpc = FakeRpc({"http://a": None, "http://b": "0x20"})
-    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = _cache(["http://a", "http://b"])
 
     await cache.warm()
@@ -247,7 +245,7 @@ async def test_malformed_on_all_nodes_raises_value_error(
     monkeypatch, fast_timeouts
 ):
     rpc = FakeRpc({"http://a": "not-hex"})
-    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = _cache(["http://a"])
 
     with pytest.raises(ValueError, match="malformed gas-price response"):
@@ -268,7 +266,7 @@ async def test_default_mode_always_starts_at_primary(
     monkeypatch, fast_timeouts
 ):
     rpc = FakeRpc({"http://a": "0x10", "http://b": "0x10"})
-    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = _cache(["http://a", "http://b"])
 
     for _ in range(3):
@@ -283,7 +281,7 @@ async def test_public_mode_round_robins_start_node(
 ):
     rpc = FakeRpc({"http://a": "0x10", "http://b": "0x10",
                    "http://c": "0x10"})
-    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = _public_cache(["http://a", "http://b", "http://c"])
 
     for _ in range(4):
@@ -302,7 +300,7 @@ async def test_public_mode_fails_over_from_rotated_start(
     begins at c, not b again."""
     rpc = FakeRpc({"http://a": "0x10", "http://b": "hang",
                    "http://c": ValueError("down")})
-    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = _public_cache(["http://a", "http://b", "http://c"])
 
     await cache.warm()  # a
@@ -324,7 +322,7 @@ async def test_public_mode_rejects_outlier_and_uses_next_node(
     """Node a reports a 256x price; it is treated as a's failure and b's
     sane value is served instead."""
     rpc = FakeRpc({"http://a": "0x100", "http://b": "0x110"})
-    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = _public_cache(["http://a", "http://b"])
     await cache.warm()  # a -> 0x100 (first sample, always accepted)
     rpc.behaviour["http://a"] = "0x10000"
@@ -342,7 +340,7 @@ async def test_public_mode_rejects_outlier_in_both_directions(
     monkeypatch, fast_timeouts
 ):
     rpc = FakeRpc({"http://a": "0x1000", "http://b": "0x1000"})
-    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = _public_cache(["http://a", "http://b"])
     await cache.warm()
     rpc.behaviour["http://b"] = "0x1"  # far too low
@@ -360,7 +358,7 @@ async def test_public_mode_accepts_jump_after_consecutive_confirmations(
     consecutive samples agree, so the cache can't get pinned at a stale
     price. With one node that takes three refreshes."""
     rpc = FakeRpc({"http://a": "0x100"})
-    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = _public_cache(["http://a"])
     await cache.warm()
     rpc.behaviour["http://a"] = "0x10000"
@@ -382,7 +380,7 @@ async def test_public_mode_jump_confirmed_across_nodes_in_one_refresh(
     refresh collects the three confirmations and serves the new price."""
     rpc = FakeRpc({"http://a": "0x100", "http://b": "0x100",
                    "http://c": "0x100"})
-    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = _public_cache(["http://a", "http://b", "http://c"])
     await cache.warm()
     for url in rpc.behaviour:
@@ -401,7 +399,7 @@ async def test_public_mode_sane_sample_resets_outlier_streak(
     """One persistently bad node can't accumulate confirmations on its own:
     the healthy node after it in the rotation resets the streak."""
     rpc = FakeRpc({"http://a": "0x100", "http://b": "0x100"})
-    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = _public_cache(["http://a", "http://b"])
     await cache.warm()
     rpc.behaviour["http://a"] = "0x10000"
@@ -414,7 +412,7 @@ async def test_public_mode_sane_sample_resets_outlier_streak(
 @pytest.mark.asyncio
 async def test_default_mode_never_clamps(monkeypatch, fast_timeouts):
     rpc = FakeRpc({"http://a": "0x100"})
-    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = _cache(["http://a"])
     await cache.warm()
     rpc.behaviour["http://a"] = "0x10000"
@@ -433,10 +431,9 @@ async def test_public_mode_clamps_priority_fee_too(
     def rpc_for(prices: dict[str, dict[str, str]]):
         calls: list[tuple[str, str]] = []
 
-        async def rpc(nodes_urls, method, params=None, flashbots=None,
-                      expected_key=None):
-            calls.append((nodes_urls[0], method))
-            return {"result": prices[nodes_urls[0]][method]}
+        async def rpc(url, method, params=None):
+            calls.append((url, method))
+            return prices[url][method]
         return rpc, calls
 
     prices = {
@@ -446,7 +443,7 @@ async def test_public_mode_clamps_priority_fee_too(
                      "eth_maxPriorityFeePerGas": "0x10"},
     }
     rpc, calls = rpc_for(prices)
-    monkeypatch.setattr(gpc, "send_rpc_request_to_eth_client", rpc)
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = GasPriceCache(["http://a", "http://b"], chain_id=1,
                           is_legacy_mode=False, refresh_interval_seconds=1.0,
                           public_nodes=True)
@@ -463,3 +460,192 @@ async def test_public_mode_clamps_priority_fee_too(
 def test_public_cache_rejects_empty_node_list():
     with pytest.raises(ValueError, match="at least one node"):
         _public_cache([])
+
+
+# --------------------------------------------------------------------------
+# Log volume: the loop ticks forever, so it must log on state changes, not
+# on every tick (one warning when a node breaks, one info when it recovers,
+# a reminder every _PROBLEM_HEARTBEAT_SECONDS in between).
+# --------------------------------------------------------------------------
+
+def _records(caplog, level, needle):
+    return [r for r in caplog.records
+            if r.levelname == level and needle in r.getMessage()]
+
+
+@pytest.mark.asyncio
+async def test_failing_node_is_warned_about_once(
+    monkeypatch, fast_timeouts, caplog
+):
+    rpc = FakeRpc({"http://a": ValueError("boom"), "http://b": "0x10"})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _cache(["http://a", "http://b"])
+    caplog.set_level("DEBUG")
+
+    for _ in range(5):
+        await cache._refresh()
+
+    assert len(_records(caplog, "WARNING", "node 1/2 failed")) == 1
+    # the other four ticks are debug, with the running count
+    assert len(_records(caplog, "DEBUG", "node 1/2 failed")) == 4
+    assert "5 consecutive problems" in \
+        _records(caplog, "DEBUG", "node 1/2 failed")[-1].getMessage()
+    assert _records(caplog, "WARNING", "node 2/2") == []
+
+
+@pytest.mark.asyncio
+async def test_failing_node_gets_a_reminder_after_heartbeat_interval(
+    monkeypatch, fast_timeouts, caplog
+):
+    rpc = FakeRpc({"http://a": ValueError("boom"), "http://b": "0x10"})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    monkeypatch.setattr(gpc, "_PROBLEM_HEARTBEAT_SECONDS", 0.0)
+    cache = _cache(["http://a", "http://b"])
+    caplog.set_level("DEBUG")
+
+    for _ in range(3):
+        await cache._refresh()
+
+    assert len(_records(caplog, "WARNING", "node 1/2 failed")) == 1
+    reminders = _records(caplog, "WARNING", "node 1/2 still failing")
+    assert len(reminders) == 2
+    assert "3 consecutive problems" in reminders[-1].getMessage()
+    assert "trying next node" in reminders[-1].getMessage()
+
+
+@pytest.mark.asyncio
+async def test_node_recovery_is_logged_once_at_info(
+    monkeypatch, fast_timeouts, caplog
+):
+    rpc = FakeRpc({"http://a": ValueError("boom"), "http://b": "0x10"})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _cache(["http://a", "http://b"])
+    caplog.set_level("DEBUG")
+
+    await cache._refresh()
+    await cache._refresh()
+    rpc.behaviour["http://a"] = "0x11"
+    await cache._refresh()
+    await cache._refresh()
+
+    recovered = _records(caplog, "INFO", "node 1/2 recovered")
+    assert len(recovered) == 1
+    assert "after 2 consecutive problems" in recovered[0].getMessage()
+    assert (await cache.get_snapshot()).max_fee_per_gas == 0x11
+    # a second outage starts a new run and is warned about again
+    rpc.behaviour["http://a"] = ValueError("boom again")
+    await cache._refresh()
+    assert len(_records(caplog, "WARNING", "node 1/2 failed")) == 2
+
+
+@pytest.mark.asyncio
+async def test_repeated_outliers_from_one_node_are_warned_about_once(
+    monkeypatch, fast_timeouts, caplog
+):
+    """Round-robin: the bad node's outlier is rejected every other tick,
+    the sane node in between resets the confirmation streak, and the bad
+    node's problem run stays open, so only its first outlier is a
+    warning."""
+    rpc = FakeRpc({"http://a": "0x10", "http://b": "0x10"})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = GasPriceCache(["http://a", "http://b"], chain_id=1,
+                          is_legacy_mode=True, refresh_interval_seconds=1.0,
+                          public_nodes=True)
+    caplog.set_level("DEBUG")
+    await cache.warm()
+    rpc.behaviour["http://a"] = "0x1000"  # 256x: outlier from now on
+
+    for _ in range(6):
+        await cache._refresh()
+
+    assert len(_records(caplog, "WARNING", "node 1/2 returned an outlier")) == 1
+    assert len(_records(caplog, "DEBUG", "node 1/2 returned an outlier")) >= 1
+    assert (await cache.get_snapshot()).max_fee_per_gas == 0x10
+
+
+@pytest.mark.asyncio
+async def test_total_outage_logs_first_failure_then_one_escalation(
+    monkeypatch, fast_timeouts, caplog
+):
+    rpc = FakeRpc({"http://a": "0x10"})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    # stale after 50 ms; the loop ticks every 10 ms
+    monkeypatch.setattr(gpc, "_STALE_ERROR_AFTER_SECONDS", 0.05)
+    cache = _cache(["http://a"], interval=0.01)
+    caplog.set_level("DEBUG")
+    await cache.warm()
+    rpc.behaviour["http://a"] = ValueError("down")
+
+    await _run_for(cache, 0.3)
+
+    assert len(_records(caplog, "WARNING", "background refresh failed")) == 1
+    escalations = _records(caplog, "ERROR", "refresh has failed")
+    assert len(escalations) == 1
+    assert "likely working from a wrong price" in escalations[0].getMessage()
+    # every other tick is debug; no reminder within the heartbeat window
+    assert _records(caplog, "WARNING", "refresh still failing") == []
+    assert _records(caplog, "ERROR", "refresh still failing") == []
+    assert len(_records(caplog, "DEBUG", "refresh failed again")) >= 5
+    # readers kept the last good value throughout
+    assert (await cache.get_snapshot()).max_fee_per_gas == 0x10
+
+
+@pytest.mark.asyncio
+async def test_total_outage_reminders_use_error_level_once_stale(
+    monkeypatch, fast_timeouts, caplog
+):
+    rpc = FakeRpc({"http://a": "0x10"})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    monkeypatch.setattr(gpc, "_STALE_ERROR_AFTER_SECONDS", 0.0)
+    monkeypatch.setattr(gpc, "_PROBLEM_HEARTBEAT_SECONDS", 0.0)
+    cache = _cache(["http://a"], interval=0.01)
+    caplog.set_level("DEBUG")
+    await cache.warm()
+    rpc.behaviour["http://a"] = ValueError("down")
+
+    await _run_for(cache, 0.1)
+
+    # already stale on the first failure: first line is the error, the
+    # following ticks are reminders at error level, nothing at warning
+    assert len(_records(caplog, "ERROR", "background refresh failed")) == 1
+    assert len(_records(caplog, "ERROR", "refresh still failing")) >= 3
+    assert _records(caplog, "WARNING", "refresh") == []
+
+
+@pytest.mark.asyncio
+async def test_total_outage_recovery_is_logged_once_at_info(
+    monkeypatch, fast_timeouts, caplog
+):
+    rpc = FakeRpc({"http://a": "0x10"})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _cache(["http://a"], interval=0.01)
+    caplog.set_level("DEBUG")
+    await cache.warm()
+    rpc.behaviour["http://a"] = ValueError("down")
+    task = asyncio.create_task(cache.run())
+    await asyncio.sleep(0.1)
+    rpc.behaviour["http://a"] = "0x20"
+    await asyncio.sleep(0.1)
+    cache.stop()
+    await task
+
+    recovered = _records(caplog, "INFO", "refresh recovered")
+    assert len(recovered) == 1
+    assert "consecutive failures" in recovered[0].getMessage()
+    assert (await cache.get_snapshot()).max_fee_per_gas == 0x20
+    # the single-node problem run closes with the same tick
+    assert len(_records(caplog, "INFO", "node 1/1 recovered")) == 1
+
+
+@pytest.mark.asyncio
+async def test_successful_ticks_log_nothing(monkeypatch, fast_timeouts, caplog):
+    rpc = FakeRpc({"http://a": "0x10"})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _cache(["http://a"], interval=0.01)
+    caplog.set_level("DEBUG")
+    await cache.warm()
+
+    await _run_for(cache, 0.1)
+
+    assert len(rpc.calls) > 3
+    assert [r for r in caplog.records if "GasPriceCache" in r.getMessage()] == []

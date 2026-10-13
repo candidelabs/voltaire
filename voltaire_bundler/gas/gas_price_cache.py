@@ -33,6 +33,16 @@ snapshot are rejected unless several consecutive samples agree (see
 ``_OUTLIER_RATIO``). Public nodes are an unauthenticated input to a cost
 decision — ``eth_maxPriorityFeePerGas`` drives the tip the bundler pays —
 so one buggy or hostile endpoint must not be able to set the price alone.
+
+Logging: the loop ticks every few seconds forever, so it logs on *state
+changes*, not on every tick. A node's first failure (or outlier sample) is
+a warning, its recovery an info line, and while it stays broken a single
+reminder is logged every ``_PROBLEM_HEARTBEAT_SECONDS``; the ticks in
+between are debug. The same applies to the refresh as a whole, with one
+escalation to error at the moment the served value turns stale. Fetches
+go through ``send_rpc_request_once`` (one attempt, no logging) because the
+cache already has its own per-node deadline and failover; the retrying
+helper would add an error line plus a traceback for every attempt.
 """
 from __future__ import annotations
 
@@ -42,8 +52,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from voltaire_bundler.utils.eth_client_utils import \
-    send_rpc_request_to_eth_client
+from voltaire_bundler.utils.eth_client_utils import send_rpc_request_once
 
 
 # Uniform 5-second refresh cadence across every chain. Bounds how old a
@@ -79,10 +88,15 @@ _CHAINS_WITHOUT_PRIORITY_FEE: frozenset[int] = frozenset({999, 998})
 # primary lets a healthy secondary answer.
 _PER_NODE_TIMEOUT_SECONDS = 5.0
 
-# Once the cached value is this old the loop's failure log is escalated
-# from warning to error, so a long-running outage is visible in operator
-# logs as more than a stream of per-tick warnings.
+# Once the cached value is this old a continuing refresh failure is
+# escalated from warning to error (once, when the threshold is crossed,
+# and in the periodic reminders after that), so a long outage is visible
+# in operator logs as more than the initial warning.
 _STALE_ERROR_AFTER_SECONDS = 60.0
+
+# While a node, or the refresh as a whole, keeps failing tick after tick,
+# one reminder line is logged this often; the ticks in between are debug.
+_PROBLEM_HEARTBEAT_SECONDS = 60.0
 
 # Outlier rejection, active only in public-node mode. A fetched value that
 # is more than this factor above or below the currently cached value is
@@ -172,6 +186,18 @@ class GasPriceCache:
         )
         self._snapshot: GasPriceSnapshot | None = None
         self._stop = asyncio.Event()
+        # Per-node log state (see _note_node_problem): consecutive problems,
+        # when the current run of problems started, and when it was last
+        # logged. A problem is a failed fetch or a rejected outlier sample.
+        node_count = len(ethereum_node_urls)
+        self._node_problems = [0] * node_count
+        self._node_problem_since = [0.0] * node_count
+        self._node_problem_logged_at = [0.0] * node_count
+        # Same for the refresh as a whole (see _on_refresh_failure).
+        self._refresh_failures = 0
+        self._refresh_failed_since = 0.0
+        self._refresh_failure_logged_at = 0.0
+        self._stale_escalated = False
 
     # ------------------------------------------------------------------ read
     async def get_snapshot(self) -> GasPriceSnapshot:
@@ -221,25 +247,11 @@ class GasPriceCache:
             try:
                 await self._refresh()
             except Exception as exc:
-                # Background failures must not kill the loop. Escalate to
-                # error once the value being served is old enough that
-                # fee validation is likely working from a wrong price.
-                # %r, not %s: str(TimeoutError()) is an empty string.
-                snap = self._snapshot
-                age = (
-                    time.monotonic() - snap.fetched_at_monotonic
-                    if snap is not None else None
-                )
-                log = (
-                    logging.error
-                    if age is None or age > _STALE_ERROR_AFTER_SECONDS
-                    else logging.warning
-                )
-                log(
-                    "GasPriceCache background refresh failed: %r; "
-                    "serving cached value aged %s",
-                    exc, f"{age:.1f}s" if age is not None else "<none>",
-                )
+                # Background failures must not kill the loop; readers keep
+                # getting the previous snapshot.
+                self._on_refresh_failure(exc)
+            else:
+                self._on_refresh_success()
 
     def stop(self) -> None:
         self._stop.set()
@@ -251,14 +263,12 @@ class GasPriceCache:
         response raises ValueError so the caller treats it as this node's
         failure and falls through to the next one."""
         tasks: list[asyncio.Task[Any]] = [asyncio.create_task(
-            send_rpc_request_to_eth_client(
-                [node_url], "eth_gasPrice", None, None, "result"
-            )
+            send_rpc_request_once(node_url, "eth_gasPrice")
         )]
         if self._fetch_priority_fee:
-            tasks.append(asyncio.create_task(send_rpc_request_to_eth_client(
-                [node_url], "eth_maxPriorityFeePerGas", None, None, "result",
-            )))
+            tasks.append(asyncio.create_task(
+                send_rpc_request_once(node_url, "eth_maxPriorityFeePerGas")
+            ))
         try:
             results = await asyncio.wait_for(
                 asyncio.gather(*tasks), timeout=_PER_NODE_TIMEOUT_SECONDS
@@ -278,9 +288,9 @@ class GasPriceCache:
             await asyncio.gather(*tasks, return_exceptions=True)
 
         try:
-            max_fee = int(results[0]["result"], 16)
+            max_fee = int(results[0], 16)
             priority: int | None = (
-                int(results[1]["result"], 16)
+                int(results[1], 16)
                 if self._fetch_priority_fee else None
             )
         except (ValueError, TypeError) as exc:
@@ -341,11 +351,9 @@ class GasPriceCache:
                 candidate = await self._fetch_from_node(node_url)
             except Exception as exc:
                 last_exc = exc
-                logging.warning(
-                    "GasPriceCache: node %d/%d failed to serve gas price "
-                    "(%r)%s",
-                    index + 1, node_count, exc,
-                    "" if is_last else "; trying next node",
+                # %r, not %s: str(TimeoutError()) is an empty string.
+                self._note_node_problem(
+                    index, f"failed to serve gas price ({exc!r})", is_last
                 )
                 continue
 
@@ -353,20 +361,21 @@ class GasPriceCache:
                 self._outlier_streak += 1
                 if self._outlier_streak < _OUTLIER_CONFIRMATIONS:
                     assert self._snapshot is not None
-                    last_exc = ValueError(
-                        "GasPriceCache: node %d/%d returned an outlier "
-                        "gas price (max_fee %d, priority %s vs cached "
-                        "%d, %s); %d/%d consecutive deviant samples" % (
-                            index + 1, node_count, candidate[0],
-                            candidate[1], self._snapshot.max_fee_per_gas,
+                    description = (
+                        "returned an outlier gas price (max_fee %d, "
+                        "priority %s vs cached %d, %s); %d/%d consecutive "
+                        "deviant samples" % (
+                            candidate[0], candidate[1],
+                            self._snapshot.max_fee_per_gas,
                             self._snapshot.max_priority_fee_per_gas,
                             self._outlier_streak, _OUTLIER_CONFIRMATIONS,
                         )
                     )
-                    logging.warning(
-                        "%s%s", last_exc,
-                        "" if is_last else "; trying next node",
+                    last_exc = ValueError(
+                        "GasPriceCache: node %d/%d %s"
+                        % (index + 1, node_count, description)
                     )
+                    self._note_node_problem(index, description, is_last)
                     continue
                 logging.warning(
                     "GasPriceCache: accepting deviant gas price from node "
@@ -374,10 +383,7 @@ class GasPriceCache:
                     index + 1, node_count, self._outlier_streak,
                 )
             parsed = candidate
-            logging.debug(
-                "GasPriceCache: refreshed from node %d/%d",
-                index + 1, node_count,
-            )
+            self._note_node_ok(index)
             break
 
         if parsed is None:
@@ -391,3 +397,117 @@ class GasPriceCache:
             max_priority_fee_per_gas=priority,
             fetched_at_monotonic=time.monotonic(),
         )
+
+    # ------------------------------------------------------------- logging
+    def _note_node_problem(
+        self, index: int, description: str, is_last: bool
+    ) -> None:
+        """A node failed to produce a usable sample this tick. Logged at
+        warning the first time, then as a reminder every
+        ``_PROBLEM_HEARTBEAT_SECONDS`` while it keeps happening, and at
+        debug in between."""
+        now = time.monotonic()
+        node_count = len(self._ethereum_node_urls)
+        count = self._node_problems[index] + 1
+        self._node_problems[index] = count
+        suffix = "" if is_last else "; trying next node"
+        if count == 1:
+            self._node_problem_since[index] = now
+            self._node_problem_logged_at[index] = now
+            logging.warning(
+                "GasPriceCache: node %d/%d %s%s",
+                index + 1, node_count, description, suffix,
+            )
+            return
+        since = now - self._node_problem_since[index]
+        if now - self._node_problem_logged_at[index] >= _PROBLEM_HEARTBEAT_SECONDS:
+            self._node_problem_logged_at[index] = now
+            logging.warning(
+                "GasPriceCache: node %d/%d still failing: %d consecutive "
+                "problems over %.0fs, latest: %s%s",
+                index + 1, node_count, count, since, description, suffix,
+            )
+            return
+        logging.debug(
+            "GasPriceCache: node %d/%d %s (%d consecutive problems over "
+            "%.0fs)%s",
+            index + 1, node_count, description, count, since, suffix,
+        )
+
+    def _note_node_ok(self, index: int) -> None:
+        """A node produced an accepted sample; closes its problem run, if
+        any, with one info line."""
+        count = self._node_problems[index]
+        if count == 0:
+            return
+        logging.info(
+            "GasPriceCache: node %d/%d recovered after %d consecutive "
+            "problems over %.0fs",
+            index + 1, len(self._ethereum_node_urls), count,
+            time.monotonic() - self._node_problem_since[index],
+        )
+        self._node_problems[index] = 0
+
+    def _on_refresh_failure(self, exc: Exception) -> None:
+        """Every node failed this tick. First failure is a warning (error if
+        nothing has ever been cached), the moment the served value turns
+        stale is one error, then a reminder every
+        ``_PROBLEM_HEARTBEAT_SECONDS`` at the matching level; the ticks in
+        between are debug."""
+        now = time.monotonic()
+        snap = self._snapshot
+        age = now - snap.fetched_at_monotonic if snap is not None else None
+        age_text = f"{age:.1f}s" if age is not None else "<none>"
+        stale = age is None or age > _STALE_ERROR_AFTER_SECONDS
+        self._refresh_failures += 1
+        count = self._refresh_failures
+        if count == 1:
+            self._refresh_failed_since = now
+            self._refresh_failure_logged_at = now
+            self._stale_escalated = stale
+            log = logging.error if stale else logging.warning
+            log(
+                "GasPriceCache background refresh failed: %r; "
+                "serving cached value aged %s",
+                exc, age_text,
+            )
+            return
+        since = now - self._refresh_failed_since
+        if stale and not self._stale_escalated:
+            self._stale_escalated = True
+            self._refresh_failure_logged_at = now
+            logging.error(
+                "GasPriceCache: refresh has failed %d times in a row over "
+                "%.0fs; the served gas price is now %s old and fee "
+                "validation is likely working from a wrong price "
+                "(latest: %r)",
+                count, since, age_text, exc,
+            )
+            return
+        if now - self._refresh_failure_logged_at >= _PROBLEM_HEARTBEAT_SECONDS:
+            self._refresh_failure_logged_at = now
+            log = logging.error if stale else logging.warning
+            log(
+                "GasPriceCache: refresh still failing: %d consecutive "
+                "failures over %.0fs; serving cached value aged %s "
+                "(latest: %r)",
+                count, since, age_text, exc,
+            )
+            return
+        logging.debug(
+            "GasPriceCache: refresh failed again: %r (%d consecutive "
+            "failures over %.0fs; serving cached value aged %s)",
+            exc, count, since, age_text,
+        )
+
+    def _on_refresh_success(self) -> None:
+        count = self._refresh_failures
+        if count == 0:
+            return
+        logging.info(
+            "GasPriceCache: refresh recovered after %d consecutive failures "
+            "over %.0fs",
+            count, time.monotonic() - self._refresh_failed_since,
+        )
+        self._refresh_failures = 0
+        self._stale_escalated = False
