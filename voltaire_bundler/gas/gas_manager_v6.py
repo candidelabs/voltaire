@@ -101,6 +101,19 @@ class GasManagerV6(GasManager):
         else:
             result_call_gas_limit = input_call_gas_limit
 
+        if input_verification_gas_limit == 0:
+            # the estimate is a gasleft() measurement; confirm validation
+            # actually fits under it before quoting it (see GasManager)
+            result_verification_gas_limit = (
+                await self.verify_verification_gas_limit(
+                    user_operation,
+                    entrypoint,
+                    state_override_set_dict,
+                    result_verification_gas_limit,
+                    result_call_gas_limit,
+                )
+            )
+
         if input_preverification_gas == 0:
             user_operation.call_gas_limit = result_call_gas_limit
             user_operation.verification_gas_limit = result_verification_gas_limit

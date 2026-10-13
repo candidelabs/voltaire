@@ -353,6 +353,152 @@ class GasManager(ABC, Generic[UserOperationType]):
     def calc_base_preverification_gas(self, user_operation: UserOperationType) -> int:
         pass
 
+    @abstractmethod
+    async def simulate_handle_op_mod(
+        self,
+        user_operation: UserOperationType,
+        entrypoint: str,
+        min_gas: int,
+        max_gas: int,
+        is_continious: bool,
+        is_check_once: bool,
+        state_override_set_dict: dict[str, Any],
+        block_number_hex: str = "latest",
+    ) -> tuple[str, list[int | bytes]]:
+        pass
+
+    # Validation failures that mean the verificationGasLimit under test was
+    # too small, as opposed to the operation being invalid: the factory or
+    # the account ran out of gas (AA13/AA23), the account silently failed
+    # to pay its prefund because the deposit transfer ran out of gas inside
+    # validateUserOp (AA21 - SimpleAccount-style accounts ignore the
+    # transfer's success flag), or the EntryPoint's own over-limit checks
+    # fired (AA26 on v0.7+, AA40/AA41 on v0.6). The estimate itself already
+    # passed under max_verification_gas, so anything else is unexpected and
+    # fails the estimation as before.
+    VERIFICATION_GAS_SHORTFALL_CODES = (
+        "AA13", "AA21", "AA23", "AA26", "AA40", "AA41"
+    )
+    # Bounds for the (rare) shortfall path, so one estimation can never
+    # turn into an unbounded stream of eth_calls: up to 4 doublings (x16
+    # the estimate, capped at max_verification_gas) and 3 bisection rounds.
+    VERIFICATION_GAS_MAX_DOUBLINGS = 4
+    VERIFICATION_GAS_BISECTION_ROUNDS = 3
+    # Chains whose gas accounting refills state-creation gas into the frame
+    # that undid the creation (EIP-8037, Glamsterdam) - the only thing that
+    # makes a gasleft() measurement of validation untrustworthy as a limit.
+    # The verify pass costs one eth_call per estimate, so it runs only here.
+    # Sepolia activated Glamsterdam on 2026-10-06; add mainnet and Hoodi
+    # when they follow.
+    STATE_GAS_REFILL_CHAIN_IDS = (11155111,)
+
+    async def verify_verification_gas_limit(
+        self,
+        user_operation: UserOperationType,
+        entrypoint: str,
+        state_override_set_dict: dict[str, Any],
+        verification_gas_limit: int,
+        call_gas_limit: int,
+    ) -> int:
+        """Run validation once with ``verification_gas_limit`` as the actual
+        cap and return a limit validation is known to fit under.
+
+        The in-contract estimate is a gasleft() measurement taken while
+        validation runs under max_verification_gas, so it is only as good
+        as the chain's gas accounting lets it be. On EIP-8037 chains
+        (Glamsterdam: Sepolia since October 2026) state-creation gas is
+        refilled into the frame that undoes the creation, which makes any
+        gasleft() difference spanning a create-then-reset undercount; the
+        simulation contracts correct the EntryPoint deposit-slot case, but
+        the same pattern inside the account's or paymaster's own frame is
+        invisible to them. This pass tests the limit the way the
+        callGasLimit search tests its guesses - as a limit - so whatever
+        the measurement missed surfaces here instead of on-chain as
+        AA23/AA21. Common case: one extra eth_call that passes. On a
+        shortfall the limit is doubled until validation fits, then
+        bisected back to within ~10%. On every other chain the estimate is
+        returned untouched, with no extra call.
+        """
+        if self.chain_id not in self.STATE_GAS_REFILL_CHAIN_IDS:
+            return verification_gas_limit
+        candidate = verification_gas_limit
+        largest_failed = 0
+        last_error: ValidationException | None = None
+        for _ in range(self.VERIFICATION_GAS_MAX_DOUBLINGS + 1):
+            error = await self._verification_gas_shortfall(
+                user_operation, entrypoint, state_override_set_dict,
+                candidate, call_gas_limit,
+            )
+            if error is None:
+                break
+            if candidate >= self.max_verification_gas:
+                # the estimate passed under this very cap moments ago, so
+                # this is state drift between the two calls, not a shortfall
+                raise error
+            largest_failed = candidate
+            last_error = error
+            candidate = min(candidate * 2, self.max_verification_gas)
+        else:
+            assert last_error is not None
+            raise last_error
+
+        if largest_failed == 0:
+            return candidate
+
+        low, high = largest_failed, candidate
+        for _ in range(self.VERIFICATION_GAS_BISECTION_ROUNDS):
+            if high - low <= high // 10:
+                break
+            mid = (low + high) // 2
+            error = await self._verification_gas_shortfall(
+                user_operation, entrypoint, state_override_set_dict,
+                mid, call_gas_limit,
+            )
+            if error is None:
+                high = mid
+            else:
+                low = mid
+        logging.info(
+            "verificationGasLimit estimate %s did not cover validation for "
+            "sender %s on chain %s (%s); raised to %s",
+            verification_gas_limit, user_operation.sender_address,
+            self.chain_id, last_error.message, high,
+        )
+        return high
+
+    async def _verification_gas_shortfall(
+        self,
+        user_operation: UserOperationType,
+        entrypoint: str,
+        state_override_set_dict: dict[str, Any],
+        verification_gas_limit: int,
+        call_gas_limit: int,
+    ) -> ValidationException | None:
+        """Validate under ``verification_gas_limit``; return the shortfall
+        error if the limit was too small, None if validation fit."""
+        user_operation.verification_gas_limit = verification_gas_limit
+        user_operation.call_gas_limit = call_gas_limit
+        try:
+            # check-once at full call gas: only the validation phase is
+            # under test, the callGasLimit estimate is not re-probed
+            await self.simulate_handle_op_mod(
+                user_operation,
+                entrypoint,
+                0,
+                self.max_call_data_gas,
+                False,
+                True,
+                state_override_set_dict,
+            )
+        except ValidationException as error:
+            if any(
+                code in error.message
+                for code in self.VERIFICATION_GAS_SHORTFALL_CODES
+            ):
+                return error
+            raise
+        return None
+
 
 @cache
 def calculate_deposit_slot_index(address: str) -> str:
