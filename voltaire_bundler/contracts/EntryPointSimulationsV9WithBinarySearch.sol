@@ -234,9 +234,43 @@ contract EntryPointSimulationsV9WithBinarySearch is EntryPoint, IEntryPointSimul
 
     error SimulationResult(uint256 verificationGasLimit, uint256 callGasLimitMax, uint256 numRounds);
 
+    // gasleft() when simulateHandleOpMod enters _validatePrepayment
+    uint256 transient private _validationStartGas;
+    // validation gas consumed up to the moment the account's validateUserOp returned
+    uint256 transient private _accountValidationGas;
+
+    // The account's validateUserOp runs under a hard cap of verificationGasLimit, but preOpGas
+    // is only the net gas of _validatePrepayment. When the sender's deposit starts at zero, the
+    // prefund it sends creates a fresh storage slot that _tryDecrementDeposit then resets to
+    // zero, and chains that credit state-creation gas back on reset make the net figure far
+    // smaller than what the account call needed. Record the gas used right after the call,
+    // before the deposit is decremented.
+    function _callValidateUserOp(
+        uint256 opIndex,
+        PackedUserOperation calldata op,
+        UserOpInfo memory opInfo,
+        uint256 missingAccountFunds
+    ) internal virtual override returns (uint256 validationData) {
+        validationData = super._callValidateUserOp(opIndex, op, opInfo, missingAccountFunds);
+        uint256 startGas = _validationStartGas;
+        if (startGas != 0) {
+            _accountValidationGas = startGas - gasleft();
+        }
+    }
+
+    function _estimatedVerificationGasLimit(
+        PackedUserOperation calldata op,
+        UserOpInfo memory opInfo
+    ) internal view returns (uint256) {
+        uint256 netGas = opInfo.preOpGas - op.preVerificationGas;
+        uint256 accountGas = _accountValidationGas;
+        return accountGas > netGas ? accountGas : netGas;
+    }
+
     function simulateHandleOpMod(PackedUserOperation calldata op, EstimateCallGasArgs calldata args) external {
          UserOpInfo memory opInfo;
         _simulationOnlyValidations(op);
+        _validationStartGas = gasleft();
         (
             uint256 validationData,
             uint256 paymasterValidationData
@@ -278,7 +312,7 @@ contract EntryPointSimulationsV9WithBinarySearch is EntryPoint, IEntryPointSimul
             if(args.isCheckOnce) {
                 // return the measured gasUsed so the bundler can seed an
                 // externally-driven (one probe per eth_call) search from a single probe
-                revert SimulationResult(opInfo.preOpGas - op.preVerificationGas, gasUsed, 0);
+                revert SimulationResult(_estimatedVerificationGasLimit(op, opInfo), gasUsed, 0);
             }
             callGasLimitMin = gasUsed;
         }
@@ -309,7 +343,7 @@ contract EntryPointSimulationsV9WithBinarySearch is EntryPoint, IEntryPointSimul
             }
             guess = callGasLimitMin + ((callGasLimitMax - callGasLimitMin) / 2);
         }
-        revert SimulationResult(opInfo.preOpGas - op.preVerificationGas, callGasLimitMax, numRounds);
+        revert SimulationResult(_estimatedVerificationGasLimit(op, opInfo), callGasLimitMax, numRounds);
     }
 
     error _InnerCallResult(bool success, uint256 gasUsed, bytes revertData);
