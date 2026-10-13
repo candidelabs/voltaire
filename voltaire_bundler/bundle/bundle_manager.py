@@ -1134,6 +1134,9 @@ class BundlerManager:
         )
 
         if "result" in result:
+            if len(auth_list) > 0:
+                bundle_gas_limit = await self.estimate_eip7702_bundle_gas(
+                    call_data, bundler, entrypoint, auth_list, bundle_gas_limit)
             merged_storage_map = None
             if self.conditional_rpc is not None:
                 senders_root_hashs_operations = list()
@@ -1241,6 +1244,41 @@ class BundlerManager:
             + str(result["error"])
         )
         return None, None, None, []
+
+    async def estimate_eip7702_bundle_gas(
+        self,
+        call_data: str,
+        bundler: Address,
+        entrypoint: Address,
+        auth_list: list[dict[str, str]],
+        bundle_gas_limit: int,
+    ) -> int:
+        """
+        The per-operation gas limits don't cover the intrinsic cost of the
+        bundle's authorization tuples, which can be far above the formula's
+        overhead (e.g. for empty authorities), so the bundle runs out of gas.
+        Use the node's estimate of the actual type-4 transaction when higher.
+        """
+        result = await send_rpc_request_to_eth_client(
+            self.ethereum_node_urls,
+            "eth_estimateGas",
+            [
+                {
+                    "from": bundler,
+                    "to": entrypoint,
+                    "data": call_data,
+                    "type": "0x4",
+                    "authorizationList": auth_list,
+                },
+                "pending",
+            ]
+        )
+        if "result" not in result:
+            logging.warning(
+                f"eip7702 bundle gas estimation failed: {result.get('error')}")
+            return bundle_gas_limit
+        estimated_gas = math.ceil(int(result["result"], 16) * 1.1)
+        return max(bundle_gas_limit, estimated_gas)
 
     async def handle_useroperation_banning(
         self,

@@ -25,6 +25,8 @@ from voltaire_bundler.utils.eth_client_utils import \
     send_rpc_request_to_eth_client
 
 MIN_CALL_GAS_LIMIT = 21_000
+# EIP-7702 intrinsic cost per authorization tuple
+PER_EMPTY_ACCOUNT_COST = 25_000
 
 
 class GasManagerV7V8V9(GasManager):
@@ -120,6 +122,10 @@ class GasManagerV7V8V9(GasManager):
                 user_operation,
                 entrypoint,
             ) + 1000  # 1000 buffer overhead
+            if user_operation.eip7702_auth is not None:
+                result_preverification_gas += (
+                    await self.estimate_eip7702_auth_gas(user_operation.eip7702_auth)
+                )
         else:
             result_preverification_gas = user_operation.pre_verification_gas
 
@@ -128,6 +134,32 @@ class GasManagerV7V8V9(GasManager):
             hex(result_preverification_gas),
             hex(result_verification_gas_limit),
         )
+
+    async def estimate_eip7702_auth_gas(self, eip7702_auth: dict[str, str]) -> int:
+        """
+        Intrinsic gas the bundle transaction pays for the operation's
+        authorization tuple. It depends on the chain rules and on the
+        authority's state (an empty authority costs more), so it is measured
+        as the difference between estimating a plain transfer with and
+        without the tuple.
+        """
+        tx = {"from": self.bundler_address, "to": self.bundler_address, "data": "0x"}
+        tx_with_auth = tx | {"type": "0x4", "authorizationList": [eip7702_auth]}
+        try:
+            without_auth, with_auth = await asyncio.gather(
+                send_rpc_request_to_eth_client(
+                    self.ethereum_node_urls, "eth_estimateGas", [tx, "latest"]),
+                send_rpc_request_to_eth_client(
+                    self.ethereum_node_urls, "eth_estimateGas", [tx_with_auth, "latest"]),
+            )
+            return max(
+                int(with_auth["result"], 16) - int(without_auth["result"], 16), 0)
+        except Exception as excp:
+            logging.warning(
+                f"eip7702 authorization gas estimation failed: {excp}. "
+                f"falling back to {PER_EMPTY_ACCOUNT_COST}"
+            )
+            return PER_EMPTY_ACCOUNT_COST
 
     async def estimate_call_gas_and_verificationgas_limit(
         self,
