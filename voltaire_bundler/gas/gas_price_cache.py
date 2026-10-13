@@ -34,12 +34,23 @@ snapshot are rejected unless several consecutive samples agree (see
 decision — ``eth_maxPriorityFeePerGas`` drives the tip the bundler pays —
 so one buggy or hostile endpoint must not be able to set the price alone.
 
+Fallback (``fallback_node_urls``): in public-node mode the cache can also
+be given the bundler's own ``ethereum_node_url`` list. It is consulted only
+on a tick where every public node failed, primary-first and under the same
+per-node deadline, so the paid provider sees the two fee calls only for
+the duration of a public-list outage. Its samples are trusted and bypass
+the outlier clamp, and a fallback refresh is a successful refresh (no
+stale escalation). Without a public list the primary list is the only
+list and nothing changes.
+
 Logging: the loop ticks every few seconds forever, so it logs on *state
 changes*, not on every tick. A node's first failure (or outlier sample) is
 a warning, its recovery an info line, and while it stays broken a single
 reminder is logged every ``_PROBLEM_HEARTBEAT_SECONDS``; the ticks in
-between are debug. The same applies to the refresh as a whole, with one
-escalation to error at the moment the served value turns stale. Fetches
+between log nothing, even at debug level, since the reminder carries the
+running count and the latest error. The same applies to the refresh as a
+whole, with one escalation to error at the moment the served value turns
+stale. Fetches
 go through ``send_rpc_request_once`` (one attempt, no logging) because the
 cache already has its own per-node deadline and failover; the retrying
 helper would add an error line plus a traceback for every attempt.
@@ -95,7 +106,7 @@ _PER_NODE_TIMEOUT_SECONDS = 5.0
 _STALE_ERROR_AFTER_SECONDS = 60.0
 
 # While a node, or the refresh as a whole, keeps failing tick after tick,
-# one reminder line is logged this often; the ticks in between are debug.
+# one reminder line is logged this often; the ticks in between are silent.
 _PROBLEM_HEARTBEAT_SECONDS = 60.0
 
 # Outlier rejection, active only in public-node mode. A fetched value that
@@ -157,12 +168,15 @@ class GasPriceCache:
         is_legacy_mode: bool,
         refresh_interval_seconds: float,
         public_nodes: bool = False,
+        fallback_node_urls: list[str] | None = None,
     ):
         """``public_nodes`` switches the node-selection policy from
         primary-first (walk the list from index 0 every refresh, so a
         trusted primary always answers when healthy) to round-robin with
-        outlier rejection, for lists of untrusted public endpoints. See
-        the module docstring."""
+        outlier rejection, for lists of untrusted public endpoints.
+        ``fallback_node_urls`` are trusted nodes tried primary-first only
+        when every node in ``ethereum_node_urls`` failed. See the module
+        docstring."""
         # Reject non-positive intervals at construction: a zero or
         # negative interval would turn run()'s sleep into a hot loop.
         if refresh_interval_seconds <= 0:
@@ -174,6 +188,13 @@ class GasPriceCache:
             raise ValueError("GasPriceCache needs at least one node URL")
         self._ethereum_node_urls = ethereum_node_urls
         self._public_nodes = public_nodes
+        self._fallback_node_urls = list(fallback_node_urls or [])
+        # Fallback log state (see _note_fallback_used): consecutive
+        # refreshes served by a fallback node, when that run started and
+        # when it was last logged.
+        self._fallback_streak = 0
+        self._fallback_since = 0.0
+        self._fallback_logged_at = 0.0
         # Index of the node the next refresh starts from (round-robin).
         self._next_start = 0
         # Consecutive samples rejected by the outlier clamp.
@@ -386,6 +407,11 @@ class GasPriceCache:
             self._note_node_ok(index)
             break
 
+        if parsed is None and self._fallback_node_urls:
+            parsed, last_exc = await self._refresh_from_fallback(last_exc)
+        else:
+            self._note_fallback_over()
+
         if parsed is None:
             assert last_exc is not None
             raise last_exc
@@ -398,14 +424,72 @@ class GasPriceCache:
             fetched_at_monotonic=time.monotonic(),
         )
 
+    async def _refresh_from_fallback(
+        self, last_exc: Exception | None
+    ) -> tuple[tuple[int, int | None] | None, Exception | None]:
+        """Every configured node failed this tick: try the trusted
+        fallback nodes primary-first. Their samples are not clamped (the
+        clamp guards against untrusted public input; these are the nodes
+        the bundler trusts for everything else). Returns the sample and
+        the last error seen, so a fully failed tick still reports the
+        fallback's error."""
+        for index, node_url in enumerate(self._fallback_node_urls):
+            try:
+                candidate = await self._fetch_from_node(node_url)
+            except Exception as exc:
+                last_exc = exc
+                continue
+            self._note_fallback_used(index)
+            return candidate, last_exc
+        return None, last_exc
+
     # ------------------------------------------------------------- logging
+    def _note_fallback_used(self, index: int) -> None:
+        """A fallback node served this refresh because every public node
+        failed. One warning when that starts, a reminder every
+        ``_PROBLEM_HEARTBEAT_SECONDS`` while it continues, silent in
+        between."""
+        now = time.monotonic()
+        public_count = len(self._ethereum_node_urls)
+        fallback_count = len(self._fallback_node_urls)
+        self._fallback_streak += 1
+        if self._fallback_streak == 1:
+            self._fallback_since = now
+            self._fallback_logged_at = now
+            logging.warning(
+                "GasPriceCache: all %d public gas-price nodes failed; "
+                "refreshed from fallback node %d/%d (ethereum_node_url)",
+                public_count, index + 1, fallback_count,
+            )
+            return
+        if now - self._fallback_logged_at >= _PROBLEM_HEARTBEAT_SECONDS:
+            self._fallback_logged_at = now
+            logging.warning(
+                "GasPriceCache: still on fallback node %d/%d: %d "
+                "consecutive refreshes over %.0fs with all %d public "
+                "gas-price nodes failing",
+                index + 1, fallback_count, self._fallback_streak,
+                now - self._fallback_since, public_count,
+            )
+
+    def _note_fallback_over(self) -> None:
+        """A public node served again; closes the fallback run, if any."""
+        if self._fallback_streak == 0:
+            return
+        logging.info(
+            "GasPriceCache: back on the public gas-price nodes after %d "
+            "fallback refreshes over %.0fs",
+            self._fallback_streak, time.monotonic() - self._fallback_since,
+        )
+        self._fallback_streak = 0
+
     def _note_node_problem(
         self, index: int, description: str, is_last: bool
     ) -> None:
         """A node failed to produce a usable sample this tick. Logged at
         warning the first time, then as a reminder every
-        ``_PROBLEM_HEARTBEAT_SECONDS`` while it keeps happening, and at
-        debug in between."""
+        ``_PROBLEM_HEARTBEAT_SECONDS`` while it keeps happening; silent
+        in between."""
         now = time.monotonic()
         node_count = len(self._ethereum_node_urls)
         count = self._node_problems[index] + 1
@@ -419,20 +503,14 @@ class GasPriceCache:
                 index + 1, node_count, description, suffix,
             )
             return
-        since = now - self._node_problem_since[index]
         if now - self._node_problem_logged_at[index] >= _PROBLEM_HEARTBEAT_SECONDS:
             self._node_problem_logged_at[index] = now
             logging.warning(
                 "GasPriceCache: node %d/%d still failing: %d consecutive "
                 "problems over %.0fs, latest: %s%s",
-                index + 1, node_count, count, since, description, suffix,
+                index + 1, node_count, count,
+                now - self._node_problem_since[index], description, suffix,
             )
-            return
-        logging.debug(
-            "GasPriceCache: node %d/%d %s (%d consecutive problems over "
-            "%.0fs)%s",
-            index + 1, node_count, description, count, since, suffix,
-        )
 
     def _note_node_ok(self, index: int) -> None:
         """A node produced an accepted sample; closes its problem run, if
@@ -452,8 +530,8 @@ class GasPriceCache:
         """Every node failed this tick. First failure is a warning (error if
         nothing has ever been cached), the moment the served value turns
         stale is one error, then a reminder every
-        ``_PROBLEM_HEARTBEAT_SECONDS`` at the matching level; the ticks in
-        between are debug."""
+        ``_PROBLEM_HEARTBEAT_SECONDS`` at the matching level; silent in
+        between."""
         now = time.monotonic()
         snap = self._snapshot
         age = now - snap.fetched_at_monotonic if snap is not None else None
@@ -493,12 +571,6 @@ class GasPriceCache:
                 "(latest: %r)",
                 count, since, age_text, exc,
             )
-            return
-        logging.debug(
-            "GasPriceCache: refresh failed again: %r (%d consecutive "
-            "failures over %.0fs; serving cached value aged %s)",
-            exc, count, since, age_text,
-        )
 
     def _on_refresh_success(self) -> None:
         count = self._refresh_failures

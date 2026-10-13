@@ -432,7 +432,9 @@ def initialize_argument_parser() -> ArgumentParser:
             "endpoints: requests round-robin across the list so each "
             "node sees 1/N of the refresh rate, and a value that "
             "deviates >5x from the cached price is rejected unless "
-            "three consecutive samples agree."
+            "three consecutive samples agree. ethereum_node_url stays "
+            "the trusted fallback for refreshes on which every node in "
+            "this list fails."
         ),
         nargs="?",
         default=_get_env_or_default(
@@ -1145,16 +1147,20 @@ async def get_init_data(args: Namespace) -> InitData:
 
     # Dedicated gas-price node list. Unlike the lists above this one is
     # meant for untrusted public endpoints, so the cache rotates across
-    # it and rejects outliers (GasPriceCache(public_nodes=True)). The
-    # chain-id probe also reorders reachable nodes first, which only
-    # affects which node the warm fetch hits. A wrong-chain public URL
-    # would otherwise feed garbage prices into fee validation.
+    # it and rejects outliers (GasPriceCache(public_nodes=True)), and the
+    # bundler's own node list is kept as a trusted fallback for ticks on
+    # which every public node fails. The chain-id probe also reorders
+    # reachable nodes first, which only affects which node the warm
+    # fetch hits. A wrong-chain public URL would otherwise feed garbage
+    # prices into fee validation.
+    gas_price_fallback_node_urls: list[str] | None = None
     if args.gas_price_node_url is None:
         gas_price_node_urls = ethereum_node_urls_rearranged
         gas_price_public_nodes = False
     else:
         gas_price_node_urls = args.gas_price_node_url.split(',')
         gas_price_public_nodes = True
+        gas_price_fallback_node_urls = ethereum_node_urls_rearranged
         gas_price_chain_id_hex, gas_price_node_urls = (
             await check_and_rearrange_valid_ethereum_rpc_nodes_and_get_chain_id(
                 gas_price_node_urls
@@ -1192,6 +1198,7 @@ async def get_init_data(args: Namespace) -> InitData:
         args.legacy_mode,
         gas_price_refresh_interval,
         public_nodes=gas_price_public_nodes,
+        fallback_node_urls=gas_price_fallback_node_urls,
     )
     try:
         await gas_price_cache.warm()
@@ -1199,7 +1206,11 @@ async def get_init_data(args: Namespace) -> InitData:
             "Gas-price cache warmed (refresh interval: "
             f"{gas_price_refresh_interval}s, "
             f"{len(gas_price_node_urls)} node(s), "
-            f"{'round-robin' if gas_price_public_nodes else 'primary-first'})."
+            f"{'round-robin' if gas_price_public_nodes else 'primary-first'}"
+            + (
+                f", {len(gas_price_fallback_node_urls)} fallback node(s))."
+                if gas_price_fallback_node_urls else ")."
+            )
         )
     except Exception as exc:
         # Soft-fail — a transient node hiccup at container start (DNS,
