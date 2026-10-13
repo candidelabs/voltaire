@@ -41,6 +41,11 @@ contract EntryPointSimulationsV6WithBinarySearch is IEntryPoint, StakeManager, N
 
     uint256 private constant REVERT_REASON_MAX_LEN = 2048;
 
+    // gas used by the account's validateUserOp call during the last validation (see
+    // _estimatedVerificationGasLimit); this contract is only ever run through eth_call
+    // state overrides, so the storage write costs nothing real
+    uint256 private _accountValidationGas;
+
     /**
      * for simulation purposes, validateUserOp (and validatePaymasterUserOp) must return this value
      * in case of signature failure, instead of revert.
@@ -247,7 +252,7 @@ contract EntryPointSimulationsV6WithBinarySearch is IEntryPoint, StakeManager, N
             if(args.isCheckOnce) {
                 // return the measured gasUsed so the bundler can seed an
                 // externally-driven (one probe per eth_call) search from a single probe
-                revert SimulationResult(opInfo.preOpGas - op.preVerificationGas, gasUsed, 0);
+                revert SimulationResult(_estimatedVerificationGasLimit(op, opInfo), gasUsed, 0);
             }
             callGasLimitMin = gasUsed;
         }
@@ -278,7 +283,20 @@ contract EntryPointSimulationsV6WithBinarySearch is IEntryPoint, StakeManager, N
             }
             guess = callGasLimitMin + ((callGasLimitMax - callGasLimitMin) / 2);
         }
-        revert SimulationResult(opInfo.preOpGas - op.preVerificationGas, callGasLimitMax, numRounds);
+        revert SimulationResult(_estimatedVerificationGasLimit(op, opInfo), callGasLimitMax, numRounds);
+    }
+
+    /**
+     * The account's validateUserOp runs under a hard cap of verificationGasLimit, but preOpGas is only
+     * the net gas of _validatePrepayment. When the sender's deposit starts at zero, the prefund it sends
+     * creates a fresh deposit slot that _validateAccountPrepayment then resets to zero, and chains that
+     * credit state-creation gas back on reset inside the frame (EIP-8037, Glamsterdam) make the net
+     * figure far smaller than what the account call needed. Report the larger of the two.
+     */
+    function _estimatedVerificationGasLimit(UserOperation calldata op, UserOpInfo memory opInfo) private view returns (uint256) {
+        uint256 netGas = opInfo.preOpGas - op.preVerificationGas;
+        uint256 accountGas = _accountValidationGas;
+        return accountGas > netGas ? accountGas : netGas;
     }
 
     error _InnerCallResult(bool success, uint256 gasUsed, bytes revertData);
@@ -545,6 +563,7 @@ contract EntryPointSimulationsV6WithBinarySearch is IEntryPoint, StakeManager, N
             uint256 bal = balanceOf(sender);
             missingAccountFunds = bal > requiredPrefund ? 0 : requiredPrefund - bal;
         }
+        uint256 preAccountGas = gasleft();
         try IAccount(sender).validateUserOp{gas : mUserOp.verificationGasLimit}(op, opInfo.userOpHash, missingAccountFunds)
         returns (uint256 _validationData) {
             validationData = _validationData;
@@ -553,6 +572,9 @@ contract EntryPointSimulationsV6WithBinarySearch is IEntryPoint, StakeManager, N
         } catch {
             revert FailedOp(opIndex, "AA23 reverted (or OOG)");
         }
+        // measured before the deposit decrement below, which on EIP-8037 chains refills the
+        // state-creation gas of a deposit slot the account just created (see _estimatedVerificationGasLimit)
+        _accountValidationGas = preAccountGas - gasleft();
         if (paymaster == address(0)) {
             DepositInfo storage senderInfo = deposits[sender];
             uint256 deposit = senderInfo.deposit;

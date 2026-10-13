@@ -197,16 +197,14 @@ contract EntryPointSimulationsV7WithBinarySearch is EntryPoint, IEntryPointSimul
 
     error SimulationResult(uint256 verificationGasLimit, uint256 callGasLimitMax, uint256 numRounds);
 
-    error _AccountValidationGasResult(uint256 gasUsed);
-
     function simulateHandleOpMod(PackedUserOperation calldata op, EstimateCallGasArgs calldata args) external {
          UserOpInfo memory opInfo;
         _simulationOnlyValidations(op);
-        uint256 accountValidationGas = accountValidationGas(op);
         (
             uint256 validationData,
-            uint256 paymasterValidationData
-        ) = _validatePrepayment(0, op, opInfo);
+            uint256 paymasterValidationData,
+            uint256 accountValidationGas
+        ) = _validatePrepaymentSim(0, op, opInfo);
 
         // Handle IAccountExecute: if callData starts with executeUserOp selector,
         // rewrite to abi.encodeCall(IAccountExecute.executeUserOp, (op, userOpHash))
@@ -244,7 +242,7 @@ contract EntryPointSimulationsV7WithBinarySearch is EntryPoint, IEntryPointSimul
             if(args.isCheckOnce) {
                 // return the measured gasUsed so the bundler can seed an
                 // externally-driven (one probe per eth_call) search from a single probe
-                revert SimulationResult(estimatedVerificationGasLimit(op, opInfo, accountValidationGas), gasUsed, 0);
+                revert SimulationResult(_estimatedVerificationGasLimit(op, opInfo, accountValidationGas), gasUsed, 0);
             }
             callGasLimitMin = gasUsed;
         }
@@ -275,18 +273,20 @@ contract EntryPointSimulationsV7WithBinarySearch is EntryPoint, IEntryPointSimul
             }
             guess = callGasLimitMin + ((callGasLimitMax - callGasLimitMin) / 2);
         }
-        revert SimulationResult(estimatedVerificationGasLimit(op, opInfo, accountValidationGas), callGasLimitMax, numRounds);
+        revert SimulationResult(_estimatedVerificationGasLimit(op, opInfo, accountValidationGas), callGasLimitMax, numRounds);
     }
+
+    // Mirrors EntryPoint.REVERT_REASON_MAX_LEN, which is private to the base contract.
+    uint256 private constant SIM_REVERT_REASON_MAX_LEN = 2048;
 
     /**
      * The account's validateUserOp runs under a hard cap of verificationGasLimit, but preOpGas is only
      * the net gas of _validatePrepayment. When the sender's deposit starts at zero, the prefund it sends
-     * creates a fresh storage slot that _validateAccountPrepayment then resets to zero, and chains that
-     * credit state-creation gas back on reset make the net figure far smaller than what the account call
-     * needed. v0.7's _validateAccountPrepayment is not virtual, so the account call is measured in a
-     * reverted self-call (accountValidationGasCheck) run before the real validation.
+     * creates a fresh deposit slot that _validateAccountPrepayment then resets to zero, and chains that
+     * credit state-creation gas back on reset inside the frame (EIP-8037, Glamsterdam) make the net
+     * figure far smaller than what the account call needed. Report the larger of the two.
      */
-    function estimatedVerificationGasLimit(
+    function _estimatedVerificationGasLimit(
         PackedUserOperation calldata op,
         UserOpInfo memory opInfo,
         uint256 accountGas
@@ -295,45 +295,116 @@ contract EntryPointSimulationsV7WithBinarySearch is EntryPoint, IEntryPointSimul
         return accountGas > netGas ? accountGas : netGas;
     }
 
-    function accountValidationGas(PackedUserOperation calldata op) private returns (uint256 gasUsed) {
-        try this.accountValidationGasCheck(op) {
-            // Should never happen. accountValidationGasCheck should always revert.
-            revert();
-        } catch (bytes memory revertData) {
-            // any other revert (e.g. a failing factory) is left for _validatePrepayment to report
-            if (revertData.length != 36 || bytes4(revertData) != _AccountValidationGasResult.selector) {
-                return 0;
+    /**
+     * Copy of EntryPoint._validatePrepayment (not virtual in v0.7) that also returns the gas used by
+     * the account's validateUserOp call. Keep in sync with the base contract.
+     */
+    function _validatePrepaymentSim(
+        uint256 opIndex,
+        PackedUserOperation calldata userOp,
+        UserOpInfo memory outOpInfo
+    )
+    private
+    returns (uint256 validationData, uint256 paymasterValidationData, uint256 accountValidationGas) {
+        uint256 preGas = gasleft();
+        MemoryUserOp memory mUserOp = outOpInfo.mUserOp;
+        _copyUserOpToMemory(userOp, mUserOp);
+        outOpInfo.userOpHash = getUserOpHash(userOp);
+
+        // Validate all numeric values in userOp are well below 128 bit, so they can safely be added
+        // and multiplied without causing overflow.
+        uint256 verificationGasLimit = mUserOp.verificationGasLimit;
+        uint256 maxGasValues = mUserOp.preVerificationGas |
+            verificationGasLimit |
+            mUserOp.callGasLimit |
+            mUserOp.paymasterVerificationGasLimit |
+            mUserOp.paymasterPostOpGasLimit |
+            mUserOp.maxFeePerGas |
+            mUserOp.maxPriorityFeePerGas;
+        require(maxGasValues <= type(uint120).max, "AA94 gas values overflow");
+
+        uint256 requiredPreFund = _getRequiredPrefund(mUserOp);
+        (validationData, accountValidationGas) = _validateAccountPrepaymentSim(
+            opIndex,
+            userOp,
+            outOpInfo,
+            requiredPreFund,
+            verificationGasLimit
+        );
+
+        if (!_validateAndUpdateNonce(mUserOp.sender, mUserOp.nonce)) {
+            revert FailedOp(opIndex, "AA25 invalid account nonce");
+        }
+
+        unchecked {
+            if (preGas - gasleft() > verificationGasLimit) {
+                revert FailedOp(opIndex, "AA26 over verificationGasLimit");
             }
-            assembly {
-                gasUsed := mload(add(revertData, 0x24))
-            }
+        }
+
+        bytes memory context;
+        if (mUserOp.paymaster != address(0)) {
+            (context, paymasterValidationData) = _validatePaymasterPrepayment(
+                opIndex,
+                userOp,
+                outOpInfo,
+                requiredPreFund
+            );
+        }
+        unchecked {
+            outOpInfo.prefund = requiredPreFund;
+            outOpInfo.contextOffset = getOffsetOfMemoryBytes(context);
+            outOpInfo.preOpGas = preGas - gasleft() + userOp.preVerificationGas;
         }
     }
 
     /**
-     * Mirror _validateAccountPrepayment up to the return of the account's validateUserOp call, and
-     * revert with the gas that call used so that the sender deployment and prefund deposit are rolled
-     * back. Sender deployment has its own verificationGasLimit cap and stays in the net figure, so it
-     * is not measured here.
-     * @param op the UserOperation to validate.
+     * Copy of EntryPoint._validateAccountPrepayment (not virtual in v0.7) that measures the gas used
+     * by the account's validateUserOp call itself, before the deposit is decremented. Sender deployment
+     * has its own verificationGasLimit cap and stays in the net figure, so it is not included.
+     * Keep in sync with the base contract.
      */
-    function accountValidationGasCheck(PackedUserOperation calldata op) external {
-        UserOpInfo memory opInfo;
-        MemoryUserOp memory mUserOp = opInfo.mUserOp;
-        _copyUserOpToMemory(op, mUserOp);
-        opInfo.userOpHash = getUserOpHash(op);
-        uint256 requiredPrefund = _getRequiredPrefund(mUserOp);
-        _createSenderIfNeeded(0, opInfo, op.initCode);
-        uint256 missingAccountFunds = 0;
-        if (mUserOp.paymaster == address(0)) {
-            uint256 bal = balanceOf(mUserOp.sender);
-            missingAccountFunds = bal > requiredPrefund ? 0 : requiredPrefund - bal;
+    function _validateAccountPrepaymentSim(
+        uint256 opIndex,
+        PackedUserOperation calldata op,
+        UserOpInfo memory opInfo,
+        uint256 requiredPrefund,
+        uint256 verificationGasLimit
+    )
+    private
+    returns (uint256 validationData, uint256 accountValidationGas) {
+        unchecked {
+            MemoryUserOp memory mUserOp = opInfo.mUserOp;
+            address sender = mUserOp.sender;
+            _createSenderIfNeeded(opIndex, opInfo, op.initCode);
+            address paymaster = mUserOp.paymaster;
+            uint256 missingAccountFunds = 0;
+            if (paymaster == address(0)) {
+                uint256 bal = balanceOf(sender);
+                missingAccountFunds = bal > requiredPrefund
+                    ? 0
+                    : requiredPrefund - bal;
+            }
+            uint256 preGas = gasleft();
+            try
+                IAccount(sender).validateUserOp{
+                    gas: verificationGasLimit
+                }(op, opInfo.userOpHash, missingAccountFunds)
+            returns (uint256 _validationData) {
+                validationData = _validationData;
+            } catch {
+                revert FailedOpWithRevert(opIndex, "AA23 reverted", Exec.getReturnData(SIM_REVERT_REASON_MAX_LEN));
+            }
+            accountValidationGas = preGas - gasleft();
+            if (paymaster == address(0)) {
+                DepositInfo storage senderInfo = deposits[sender];
+                uint256 deposit = senderInfo.deposit;
+                if (requiredPrefund > deposit) {
+                    revert FailedOp(opIndex, "AA21 didn't pay prefund");
+                }
+                senderInfo.deposit = deposit - requiredPrefund;
+            }
         }
-        uint256 preGas = gasleft();
-        try IAccount(mUserOp.sender).validateUserOp{gas: mUserOp.verificationGasLimit}(
-            op, opInfo.userOpHash, missingAccountFunds
-        ) {} catch {}
-        revert _AccountValidationGasResult(preGas - gasleft());
     }
 
     error _InnerCallResult(bool success, uint256 gasUsed, bytes revertData);
