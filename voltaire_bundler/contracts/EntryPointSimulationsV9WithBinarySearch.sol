@@ -234,28 +234,25 @@ contract EntryPointSimulationsV9WithBinarySearch is EntryPoint, IEntryPointSimul
 
     error SimulationResult(uint256 verificationGasLimit, uint256 callGasLimitMax, uint256 numRounds);
 
-    // gasleft() when simulateHandleOpMod enters _validatePrepayment
-    uint256 transient private _validationStartGas;
-    // validation gas consumed up to the moment the account's validateUserOp returned
+    // gas used by the account's validateUserOp call
     uint256 transient private _accountValidationGas;
 
     // The account's validateUserOp runs under a hard cap of verificationGasLimit, but preOpGas
     // is only the net gas of _validatePrepayment. When the sender's deposit starts at zero, the
     // prefund it sends creates a fresh storage slot that _tryDecrementDeposit then resets to
     // zero, and chains that credit state-creation gas back on reset make the net figure far
-    // smaller than what the account call needed. Record the gas used right after the call,
-    // before the deposit is decremented.
+    // smaller than what the account call needed. Record the gas the call itself used, before
+    // the deposit is decremented. Sender deployment has its own verificationGasLimit cap and
+    // stays in the net figure, so it is not included here.
     function _callValidateUserOp(
         uint256 opIndex,
         PackedUserOperation calldata op,
         UserOpInfo memory opInfo,
         uint256 missingAccountFunds
     ) internal virtual override returns (uint256 validationData) {
+        uint256 preGas = gasleft();
         validationData = super._callValidateUserOp(opIndex, op, opInfo, missingAccountFunds);
-        uint256 startGas = _validationStartGas;
-        if (startGas != 0) {
-            _accountValidationGas = startGas - gasleft();
-        }
+        _accountValidationGas = preGas - gasleft();
     }
 
     function _estimatedVerificationGasLimit(
@@ -270,7 +267,6 @@ contract EntryPointSimulationsV9WithBinarySearch is EntryPoint, IEntryPointSimul
     function simulateHandleOpMod(PackedUserOperation calldata op, EstimateCallGasArgs calldata args) external {
          UserOpInfo memory opInfo;
         _simulationOnlyValidations(op);
-        _validationStartGas = gasleft();
         (
             uint256 validationData,
             uint256 paymasterValidationData
