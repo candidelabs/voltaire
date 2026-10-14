@@ -110,6 +110,12 @@ class GasManagerV7V8V9(GasManager):
                 result_verification_gas_limit = math.ceil(
                     result_verification_gas_limit*1.5
                 )
+            # the estimate ran with max_verification_gas as the op's limit, so
+            # the cap is known to fit, and a higher value would be rejected
+            # by eth_sendUserOperation
+            result_verification_gas_limit = min(
+                result_verification_gas_limit, self.max_verification_gas
+            )
         else:
             result_verification_gas_limit = input_verification_gas_limit
 

@@ -302,3 +302,21 @@ async def test_verify_pass_only_runs_on_eip8037_chains(version):
     # (60_000 + 10_000 [+ 6_000 from v0.7]) * 1.1 for chain 1337
     assert int(ver_gas_hex, 16) == (77_000 if version == "v6" else 83_600)
     assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_buffered_estimate_is_capped_at_max_verification_gas():
+    """Near the cap, 10_000 + 10% would exceed max_verification_gas, which
+    eth_sendUserOperation rejects; validation fit under the cap during the
+    estimate, so the quote is the cap."""
+    gas_manager = _make_gas_manager("v7")
+    gas_manager.chain_id = 1337
+    estimated = MAX_VERIFICATION_GAS - 50_000
+    responder, calls = _responder("v7", estimated_vgl=estimated, required_vgl=0)
+
+    with patch(RPC_PATH["v7"], new_callable=AsyncMock, side_effect=responder):
+        _, _, ver_gas_hex = await gas_manager.estimate_user_operation_gas(
+            _make_user_operation("v7"), ENTRYPOINT["v7"], {}
+        )
+
+    assert int(ver_gas_hex, 16) == MAX_VERIFICATION_GAS
