@@ -91,8 +91,14 @@ class GasManagerV7V8V9(GasManager):
         )
 
         if input_verification_gas_limit == 0:
-            # 10_000 buffer overhead
-            result_verification_gas_limit = estimated_verification_gas_limit + 10_000
+            # 10_000 + 10% buffer overhead. The estimate is measured with the
+            # caller's dummy signature, which can take a cheaper path than the
+            # real one (e.g. WebAuthn validators that check the challenge before
+            # the P256 verification), so a fixed buffer is not enough.
+            result_verification_gas_limit = (
+                estimated_verification_gas_limit + 10_000
+                + estimated_verification_gas_limit // 10
+            )
             # increase verification gas estimation by 10% for Polygon
             # due to Giugliano hard fork
             if self.chain_id in (137, 80002, 1337):

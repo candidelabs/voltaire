@@ -328,8 +328,8 @@ async def test_estimate_user_operation_gas_full_flow():
 
         # call gas = estimated (20_000) + 3_000 buffer
         assert call_gas == 23_000
-        # verification gas = estimated (50_000) + 10_000 buffer
-        assert ver_gas == 60_000
+        # verification gas = estimated (50_000) + 10_000 + 10% buffer
+        assert ver_gas == 65_000
         assert prever_gas > 0
 
 
