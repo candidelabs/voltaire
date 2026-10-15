@@ -1,4 +1,3 @@
-import asyncio
 import os
 import logging
 from typing import Any
@@ -10,7 +9,10 @@ from eth_keys.exceptions import BadSignature
 from rlp import encode as rlp_encode
 import voltaire_bundler
 from voltaire_bundler.bundle.exceptions import \
+    OtherJsonRpcErrorCode, OtherJsonRpcErrorException, \
     ValidationException, ValidationExceptionCode
+from voltaire_bundler.gas.eip7702_auth_gas import \
+    AccountState, fetch_account_state
 from voltaire_bundler.user_operation.user_operation_handler import decode_failed_op_event, decode_failed_op_with_revert_event
 from voltaire_bundler.utils import latest_block_cache
 from voltaire_bundler.user_operation.user_operation_v7v8v9 import UserOperationV7V8V9
@@ -272,8 +274,7 @@ class ValidationManagerV7V8V9(ValidationManager):
 
         if user_operation.eip7702_auth is not None:
             new_code = await self.verify_authorization_and_get_code(
-                user_operation.sender_address,
-                user_operation.eip7702_auth
+                user_operation
             )
             if new_code is not None:
                 state_overrides[user_operation.sender_address] = {"code": new_code}
@@ -395,8 +396,7 @@ class ValidationManagerV7V8V9(ValidationManager):
 
         if user_operation.eip7702_auth is not None:
             new_code = await self.verify_authorization_and_get_code(
-                user_operation.sender_address,
-                user_operation.eip7702_auth
+                user_operation
             )
             if new_code is not None:
                 state_overrides[user_operation.sender_address] = {"code": new_code}
@@ -479,84 +479,32 @@ class ValidationManagerV7V8V9(ValidationManager):
 
     async def verify_authorization_and_get_code(
         self,
-        sender_address: Address,
-        authorization: dict[str, str],
+        user_operation: UserOperationV7V8V9,
     ) -> str | None:
-        chain_id_hex = authorization["chainId"][2:]
-        chain_id = int(chain_id_hex, 16)
-        if chain_id != self.chain_id and chain_id != 0:
-            raise ValidationException(
-                ValidationExceptionCode.InvalidFields,
-                "Invalid eip7702Auth chainId.",
-            )
-
-        auth_hash = keccak(
-            bytes.fromhex(
-                "05" +  # magic value
-                rlp_encode(
-                    format_hex_array_for_rlp_encode(
-                        [
-                            authorization["chainId"],
-                            authorization["address"],
-                            authorization["nonce"],
-                        ]
-                    )
-                ).hex()
-            )
-        )
-        try:
-            y_parity = authorization["yParity"]
-            r = authorization["r"]
-            s = authorization["s"]
-            signature = KeyAPI.Signature(
-                vrs=(
-                    int(y_parity, 16),
-                    int(r, 16),
-                    int(s, 16)
+        """Check the operation's EIP-7702 tuple and return the delegation
+        code to override the sender with for simulation, or None when the
+        tuple is a no-op (already delegated to that address, or stale
+        nonce). The sender's state is taken from the operation when the
+        preVerificationGas check of the same submit already read it, and
+        consumed, so a re-validation at bundle time reads fresh state."""
+        assert user_operation.eip7702_auth is not None
+        state = user_operation.eip7702_account_state
+        user_operation.eip7702_account_state = None
+        if state is None:
+            try:
+                state = await fetch_account_state(
+                    self.ethereum_node_urls, user_operation.sender_address
                 )
-            )
-            auth_signer_address = signature.recover_public_key_from_msg_hash(
-                auth_hash
-            ).to_address()
-        except (EthUtilsValidationError, BadSignature) as excp:
-            logging.error(
-                f"Failed to recover authorization for address: {authorization["address"]}."
-                f"error:{str(excp)}"
-            )
-            raise ValidationException(
-                ValidationExceptionCode.InvalidFields,
-                f"Failed to recover authorization for address: {authorization["address"]}."
-            )
-        if sender_address.lower() != auth_signer_address.lower():
-            raise ValidationException(
-                ValidationExceptionCode.InvalidFields,
-                f"Userop sender: {sender_address} is not equal to auth signer "
-                f"recovered address {auth_signer_address}"
-            )
-
-        existing_code_op = send_rpc_request_to_eth_client(
-            self.ethereum_node_urls,
-            "eth_getCode",
-            [sender_address, "latest"],
-            None, "result"
+            except Exception as exc:
+                raise OtherJsonRpcErrorException(
+                    OtherJsonRpcErrorCode.InternalError,
+                    "could not read the sender's state to check its "
+                    f"eip7702Auth: {exc!r}",
+                )
+        return check_authorization_and_get_code(
+            user_operation.sender_address, user_operation.eip7702_auth,
+            state, self.chain_id,
         )
-        nonce_op = send_rpc_request_to_eth_client(
-            self.ethereum_node_urls,
-            "eth_getTransactionCount",
-            [sender_address, "latest"], None, "result"
-        )
-        tasks_arr = [existing_code_op, nonce_op]
-        tasks = await asyncio.gather(*tasks_arr)
-        existing_code = tasks[0]["result"]
-        current_nonce = tasks[1]["result"]
-
-        new_code = "0xef0100" + authorization["address"][2:]
-        if (
-                existing_code == new_code or
-                int(authorization["nonce"], 16) != int(current_nonce, 16)
-        ):
-            return None
-        return new_code
 
     @staticmethod
     def decode_validation_result(
@@ -696,3 +644,74 @@ class ValidationManagerV7V8V9(ValidationManager):
             ]
         )
         return function_selector + params.hex()
+
+
+def check_authorization_and_get_code(
+    sender_address: Address,
+    authorization: dict[str, str],
+    state: AccountState,
+    bundler_chain_id: int,
+) -> str | None:
+    """Pure part of the EIP-7702 tuple check: chain id, signature recovers
+    to the sender, then the delegation code to simulate with, or None
+    when the tuple would be skipped on chain (already delegated to that
+    address, or the nonce does not match the authority's)."""
+    chain_id = int(authorization["chainId"], 16)
+    if chain_id != bundler_chain_id and chain_id != 0:
+        raise ValidationException(
+            ValidationExceptionCode.InvalidFields,
+            "Invalid eip7702Auth chainId.",
+        )
+
+    auth_hash = keccak(
+        bytes.fromhex(
+            "05" +  # magic value
+            rlp_encode(
+                format_hex_array_for_rlp_encode(
+                    [
+                        authorization["chainId"],
+                        authorization["address"],
+                        authorization["nonce"],
+                    ]
+                )
+            ).hex()
+        )
+    )
+    try:
+        y_parity = authorization["yParity"]
+        r = authorization["r"]
+        s = authorization["s"]
+        signature = KeyAPI.Signature(
+            vrs=(
+                int(y_parity, 16),
+                int(r, 16),
+                int(s, 16)
+            )
+        )
+        auth_signer_address = signature.recover_public_key_from_msg_hash(
+            auth_hash
+        ).to_address()
+    except (EthUtilsValidationError, BadSignature) as excp:
+        logging.error(
+            f"Failed to recover authorization for address: {authorization["address"]}."
+            f"error:{str(excp)}"
+        )
+        raise ValidationException(
+            ValidationExceptionCode.InvalidFields,
+            f"Failed to recover authorization for address: {authorization["address"]}."
+        )
+    if sender_address.lower() != auth_signer_address.lower():
+        raise ValidationException(
+            ValidationExceptionCode.InvalidFields,
+            f"Userop sender: {sender_address} is not equal to auth signer "
+            f"recovered address {auth_signer_address}"
+        )
+
+    new_code = "0xef0100" + authorization["address"][2:]
+    new_code_hash = "0x" + keccak(hexstr=new_code).hex()
+    if (
+            state.code_hash.lower() == new_code_hash or
+            int(authorization["nonce"], 16) != state.nonce
+    ):
+        return None
+    return new_code

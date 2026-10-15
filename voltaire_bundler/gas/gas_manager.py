@@ -253,21 +253,9 @@ class GasManager(ABC, Generic[UserOperationType]):
                     f"useroperation hash: {user_operation.user_operation_hash}"
                 )
 
-        # The bundle transaction pays an intrinsic cost per EIP-7702
-        # authorization tuple that nothing inside the EVM can measure;
-        # charge it here so both the estimate and the submit-time
-        # preVerificationGas check carry it (see eip7702_auth_gas.py).
-        auth_gas = 0
-        if (
-            user_operation.eip7702_auth is not None
-            and self.eip7702_auth_gas is not None
-        ):
-            auth_gas = await self.eip7702_auth_gas.auth_gas_for(
-                user_operation.sender_address
-            )
-
         calculated_preverification_gas = (
-            base_preverification_gas + l1_gas + auth_gas
+            base_preverification_gas + l1_gas
+            + await self._eip7702_authorization_gas(user_operation)
         )
 
         adjusted_preverification_gas = math.ceil(
@@ -280,6 +268,28 @@ class GasManager(ABC, Generic[UserOperationType]):
         )
 
         return adjusted_preverification_gas
+
+    async def _eip7702_authorization_gas(
+        self, user_operation: UserOperationType
+    ) -> int:
+        """Intrinsic cost of the operation's EIP-7702 tuple, which nothing
+        inside the EVM can measure; charged in preVerificationGas so both
+        the estimate and the submit-time check carry it (see
+        eip7702_auth_gas.py). 0 for operations without a tuple."""
+        if (
+            user_operation.eip7702_auth is None
+            or self.eip7702_auth_gas is None
+        ):
+            return 0
+        state = user_operation.eip7702_account_state
+        if state is None:
+            state = await self.eip7702_auth_gas.account_state(
+                user_operation.sender_address
+            )
+            # leave it for the authorization check that follows a submit,
+            # so the sender is read once per request
+            user_operation.eip7702_account_state = state
+        return self.eip7702_auth_gas.cost_for(state)
 
     async def calc_l1_gas_estimate_optimism(
         self,

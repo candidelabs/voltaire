@@ -6,11 +6,14 @@ Mock-RPC unit tests at the tests/ top level (tests/v6/conftest.py autouses
 geth-docker fixtures for that directory)."""
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from eth_account import Account
 
 import voltaire_bundler.gas.eip7702_auth_gas as eag
 from voltaire_bundler.gas.eip7702_auth_gas import (
+    AccountState,
     AUTHORITY_DELEGATED,
     AUTHORITY_EMPTY,
     AUTHORITY_EXISTING,
@@ -24,6 +27,11 @@ from voltaire_bundler.gas.gas_manager_v7v8v9 import GasManagerV7V8V9
 from voltaire_bundler.gas.gas_price_cache import GasPriceCache
 from voltaire_bundler.user_operation.user_operation_v7v8v9 import UserOperationV7V8V9
 from voltaire_bundler.utils.eth_client_utils import RpcRequestError
+from voltaire_bundler.validation.validation_manager_v7v8v9 import (
+    check_authorization_and_get_code,
+)
+from voltaire_bundler.bundle.exceptions import ValidationException
+from eth_abi import encode
 
 BUNDLER = "0x6eb0296e64fB8d9D946c7b819E4FF55c7167B0Ce"
 SENDER = "0x7e25461EEE6853f89e5bA2bDf87F47a8965EbE04"
@@ -98,6 +106,13 @@ class FakeNode:
 def _table(node: FakeNode, monkeypatch) -> Eip7702AuthGas:
     monkeypatch.setattr(eag, "send_rpc_request_once", node)
     return Eip7702AuthGas(["http://a"], BUNDLER, CHAIN_ID)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_get_proof_decision(monkeypatch):
+    """The eth_getProof-or-fallback decision is made once per process;
+    every test starts undecided."""
+    monkeypatch.setattr(eag, "_get_proof_supported", None)
 
 
 # ---------------------------------------------------------- classification
@@ -252,7 +267,8 @@ async def test_unclassifiable_sender_is_charged_the_empty_class(
     caplog.set_level("WARNING")
 
     assert await table.auth_gas_for(SENDER) == SEPOLIA_COSTS[AUTHORITY_EMPTY]
-    assert any("could not classify" in r.getMessage() for r in caplog.records)
+    assert any("could not read EIP-7702 authority" in r.getMessage()
+               for r in caplog.records)
 
 
 @pytest.mark.asyncio
@@ -330,3 +346,183 @@ async def test_preverification_gas_unchanged_without_a_table(monkeypatch):
 
     assert with_auth == without_auth
     assert node.calls == []
+
+
+# ---------------------------------------- one sender read per request
+
+def _simulation_result(verification_gas: int, call_gas: int) -> dict:
+    encoded = encode(["uint256", "uint256", "uint256"],
+                     [verification_gas, call_gas, 0])
+    return {"error": {"message": "execution reverted",
+                      "data": "0xdeb13018" + encoded.hex()}}
+
+
+@pytest.mark.asyncio
+async def test_estimation_reads_the_sender_once_concurrently_with_simulation(
+    monkeypatch
+):
+    """During eth_estimateUserOperationGas the eth_getProof is started
+    before the simulation and awaited only for preVerificationGas: one
+    read, already in flight while the simulation runs, and left on the
+    operation."""
+    node = FakeNode(accounts={SENDER: (0, 0, "0x")})
+    table = _table(node, monkeypatch)
+    await table.measure()
+    node.calls.clear()
+    manager = _gas_manager(table)
+    order: list[str] = []
+
+    async def simulation_rpc(nodes, method, params, *args):
+        order.append("simulation")
+        await asyncio.sleep(0.01)  # the eth_getProof completes meanwhile
+        return _simulation_result(50_000, 20_000)
+
+    original = node.__call__
+
+    async def tracked(node_url, method, params=None):
+        order.append(method)
+        return await original(node_url, method, params)
+
+    monkeypatch.setattr(eag, "send_rpc_request_once", tracked)
+    monkeypatch.setattr(
+        "voltaire_bundler.gas.gas_manager_v7v8v9.send_rpc_request_to_eth_client",
+        simulation_rpc,
+    )
+    user_operation = _user_operation(True)
+    user_operation.call_gas_limit = 0
+    user_operation.verification_gas_limit = 0
+
+    _, prever_gas_hex, _ = await manager.estimate_user_operation_gas(
+        user_operation, "0x0000000071727De22E5E9d8BAf0edAc6f37da032", {}
+    )
+
+    assert order.count("eth_getProof") == 1
+    # the read ran while the (sleeping) simulation was in flight
+    assert order[:2] == ["simulation", "eth_getProof"] or \
+        order[:2] == ["eth_getProof", "simulation"]
+    assert user_operation.eip7702_account_state == \
+        AccountState(0, 0, EMPTY_CODE_HASH)
+    assert int(prever_gas_hex, 16) > SEPOLIA_COSTS[AUTHORITY_EMPTY]
+
+
+@pytest.mark.asyncio
+async def test_preverification_check_leaves_state_for_the_authorization_check(
+    monkeypatch
+):
+    node = FakeNode(accounts={SENDER: (3, 10**18, "0x")})
+    table = _table(node, monkeypatch)
+    await table.measure()
+    node.calls.clear()
+    manager = _gas_manager(table)
+    user_operation = _user_operation(True)
+
+    await manager.get_preverification_gas(
+        user_operation, "0x0000000071727De22E5E9d8BAf0edAc6f37da032")
+
+    assert user_operation.eip7702_account_state == \
+        AccountState(3, 10**18, EMPTY_CODE_HASH)
+    assert [c[1] for c in node.calls] == ["eth_getProof"]
+
+    # a state already on the operation is reused, not re-read
+    await manager.get_preverification_gas(
+        user_operation, "0x0000000071727De22E5E9d8BAf0edAc6f37da032")
+    assert [c[1] for c in node.calls] == ["eth_getProof"]
+
+
+@pytest.mark.asyncio
+async def test_fallback_state_carries_the_real_code_hash(monkeypatch):
+    """Through the three-call path the code hash is computed locally, so
+    the authorization check can still compare it."""
+    delegation = "0xef0100" + "11" * 20
+    node = FakeNode(accounts={SENDER: (1, 0, delegation)},
+                    fail={"eth_getProof"})
+    _table(node, monkeypatch)
+
+    state = await eag.fetch_account_state(["http://a"], SENDER)
+
+    from eth_utils import keccak
+    assert state.code_hash == "0x" + keccak(hexstr=delegation).hex()
+    assert state.has_code and state.authority_class == AUTHORITY_DELEGATED
+
+
+# --------------------------------------------- authorization check (pure)
+
+def _signed_authorization(key, address: str, nonce: int, chain_id: int = CHAIN_ID):
+    signed = Account.sign_authorization(
+        {"chainId": chain_id, "address": address, "nonce": nonce}, key)
+    return {
+        "chainId": hex(chain_id), "address": address, "nonce": hex(nonce),
+        "yParity": hex(signed.y_parity), "r": hex(signed.r), "s": hex(signed.s),
+    }
+
+
+def test_authorization_check_returns_delegation_code_for_a_fresh_tuple():
+    key = Account.create()
+    target = "0x" + "11" * 20
+    auth = _signed_authorization(key.key, target, nonce=7)
+
+    code = check_authorization_and_get_code(
+        key.address, auth, AccountState(7, 0, EMPTY_CODE_HASH), CHAIN_ID)
+
+    assert code == "0xef0100" + "11" * 20
+
+
+def test_authorization_check_is_a_noop_when_already_delegated_there():
+    from eth_utils import keccak
+    key = Account.create()
+    target = "0x" + "11" * 20
+    auth = _signed_authorization(key.key, target, nonce=7)
+    already = "0x" + keccak(hexstr="0xef0100" + "11" * 20).hex()
+
+    assert check_authorization_and_get_code(
+        key.address, auth, AccountState(7, 0, already), CHAIN_ID) is None
+
+
+def test_authorization_check_is_a_noop_on_nonce_mismatch():
+    key = Account.create()
+    auth = _signed_authorization(key.key, "0x" + "11" * 20, nonce=7)
+
+    assert check_authorization_and_get_code(
+        key.address, auth, AccountState(8, 0, EMPTY_CODE_HASH), CHAIN_ID) is None
+
+
+def test_authorization_check_rejects_another_signer_and_wrong_chain():
+    key = Account.create()
+    auth = _signed_authorization(key.key, "0x" + "11" * 20, nonce=0)
+    with pytest.raises(ValidationException):
+        check_authorization_and_get_code(
+            SENDER, auth, AccountState(0, 0, EMPTY_CODE_HASH), CHAIN_ID)
+    with pytest.raises(ValidationException):
+        check_authorization_and_get_code(
+            key.address, auth, AccountState(0, 0, EMPTY_CODE_HASH), CHAIN_ID + 1)
+
+
+@pytest.mark.asyncio
+async def test_validation_consumes_the_state_left_by_the_submit(monkeypatch):
+    """The authorization check uses the state the preVerificationGas
+    check left on the operation and clears it, so the re-validation at
+    bundle time reads fresh state."""
+    from voltaire_bundler.validation.validation_manager_v7v8v9 import (
+        ValidationManagerV7V8V9,
+    )
+    key = Account.create()
+    target = "0x" + "11" * 20
+    node = FakeNode(accounts={key.address: (7, 0, "0x")})
+    monkeypatch.setattr(eag, "send_rpc_request_once", node)
+    manager = ValidationManagerV7V8V9(
+        object(), ["http://a"], BUNDLER, CHAIN_ID, True, False, 10, 10,
+        ["http://a"])
+    user_operation = _user_operation(True)
+    user_operation.sender_address = key.address
+    user_operation.eip7702_auth = _signed_authorization(key.key, target, nonce=7)
+    user_operation.eip7702_account_state = AccountState(7, 0, EMPTY_CODE_HASH)
+
+    code = await manager.verify_authorization_and_get_code(user_operation)
+
+    assert code == "0xef0100" + "11" * 20
+    assert node.calls == []  # no read, the submit's state was used
+    assert user_operation.eip7702_account_state is None
+
+    code = await manager.verify_authorization_and_get_code(user_operation)
+    assert code == "0xef0100" + "11" * 20
+    assert [c[1] for c in node.calls] == ["eth_getProof"]  # fresh read
