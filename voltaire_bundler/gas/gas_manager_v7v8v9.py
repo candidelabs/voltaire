@@ -12,6 +12,7 @@ from voltaire_bundler.gas.gas_manager import \
     GasManager, calculate_deposit_slot_index, deep_union
 from voltaire_bundler.gas.somnia_gas_estimation import \
     SOMNIA_CHAIN_IDS, estimate_call_gas_somnia
+from voltaire_bundler.gas.eip7702_auth_gas import Eip7702AuthGas
 from voltaire_bundler.gas.gas_price_cache import GasPriceCache
 from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.models import FailedOp, FailedOpWithRevert
@@ -48,8 +49,10 @@ class GasManagerV7V8V9(GasManager):
         max_verification_gas,
         max_call_data_gas,
         gas_price_cache: GasPriceCache,
+        eip7702_auth_gas: Eip7702AuthGas | None = None,
     ):
         self.ethereum_node_urls = ethereum_node_urls
+        self.eip7702_auth_gas = eip7702_auth_gas
         self.chain_id = chain_id
         self.bundler_address = bundler_address
         self.is_legacy_mode = is_legacy_mode

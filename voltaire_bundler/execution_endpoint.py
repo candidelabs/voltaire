@@ -28,6 +28,7 @@ from voltaire_bundler.user_operation.user_operation_handler_v7v8v9 import \
     UserOperationHandlerV7V8V9
 from voltaire_bundler.user_operation.user_operation_handler import \
     fell_user_operation_optional_parameters_for_estimateUserOperationGas
+from voltaire_bundler.gas.eip7702_auth_gas import Eip7702AuthGas
 from voltaire_bundler.gas.gas_price_cache import \
     GasPriceCache, GasPriceUnavailableError
 from voltaire_bundler.utils.cache import PersistentFIFOCache
@@ -127,6 +128,7 @@ class ExecutionEndpoint(Endpoint):
         enable_banning: bool,
         logs_fallback_recent_window: int,
         gas_price_cache: GasPriceCache,
+        eip7702_auth_gas: Eip7702AuthGas | None = None,
     ):
         super().__init__("bundler_endpoint")
         self.ethereum_node_urls = ethereum_node_urls
@@ -153,6 +155,7 @@ class ExecutionEndpoint(Endpoint):
             logs_number_of_ranges,
             logs_fallback_recent_window,
             gas_price_cache,
+            eip7702_auth_gas=eip7702_auth_gas,
         )
 
         self.local_mempool_manager_v9 = LocalMempoolManagerV9(

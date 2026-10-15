@@ -9,6 +9,7 @@ from eth_abi import encode, decode
 from eth_utils import keccak
 
 from voltaire_bundler.custom_types import Address
+from voltaire_bundler.gas.eip7702_auth_gas import Eip7702AuthGas
 from voltaire_bundler.gas.gas_price_cache import GasPriceCache
 from voltaire_bundler.user_operation.models import UserOperationType
 from voltaire_bundler.bundle.exceptions import \
@@ -44,6 +45,9 @@ class GasManager(ABC, Generic[UserOperationType]):
     max_call_data_gas: int
     entrypoint_code_override: str
     gas_price_cache: GasPriceCache
+    # Per-class EIP-7702 authorization gas table; None when --eip7702 is
+    # off (7702 ops are then rejected before any gas work) or for v0.6.
+    eip7702_auth_gas: Eip7702AuthGas | None = None
 
     async def verify_gas_fees_and_get_price(
         self, user_operation: UserOperationType,
@@ -249,7 +253,22 @@ class GasManager(ABC, Generic[UserOperationType]):
                     f"useroperation hash: {user_operation.user_operation_hash}"
                 )
 
-        calculated_preverification_gas = base_preverification_gas + l1_gas
+        # The bundle transaction pays an intrinsic cost per EIP-7702
+        # authorization tuple that nothing inside the EVM can measure;
+        # charge it here so both the estimate and the submit-time
+        # preVerificationGas check carry it (see eip7702_auth_gas.py).
+        auth_gas = 0
+        if (
+            user_operation.eip7702_auth is not None
+            and self.eip7702_auth_gas is not None
+        ):
+            auth_gas = await self.eip7702_auth_gas.auth_gas_for(
+                user_operation.sender_address
+            )
+
+        calculated_preverification_gas = (
+            base_preverification_gas + l1_gas + auth_gas
+        )
 
         adjusted_preverification_gas = math.ceil(
             (
