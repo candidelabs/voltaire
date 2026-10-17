@@ -199,6 +199,10 @@ class Eip7702AuthGas:
         }
         self.measured = False
 
+    @property
+    def chain_id(self) -> int:
+        return self._chain_id
+
     async def _rpc(self, method: str, params: list[Any]) -> Any:
         return await _rpc(self._ethereum_node_urls, method, params)
 

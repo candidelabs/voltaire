@@ -10,7 +10,8 @@ from importlib.metadata import version
 
 import aiohttp
 
-from voltaire_bundler.gas.eip7702_auth_gas import Eip7702AuthGas
+from voltaire_bundler.gas.eip7702_auth_gas import (
+    AUTHORITY_CLASSES, Eip7702AuthGas)
 from voltaire_bundler.gas.gas_price_cache import (
     GasPriceCache,
     DEFAULT_REFRESH_INTERVAL_SECONDS,
@@ -1077,6 +1078,24 @@ async def _init_eip7702_auth_gas(
     return eip7702_auth_gas
 
 
+def print_eip7702_auth_gas(eip7702_auth_gas: Eip7702AuthGas) -> None:
+    """Show the per-class authorization gas the bundler will charge. Printed
+    rather than logged so it is visible without --verbose: an empty-authority
+    figure far above 25,000 is how an operator can tell the chain prices
+    state creation per EIP-8037, and the 25,000 default after a failed
+    measurement is worth noticing on such a chain."""
+    source = (
+        "measured at startup" if eip7702_auth_gas.measured
+        else "default, measurement failed"
+    )
+    print(
+        f"EIP-7702 authorization gas on chain {eip7702_auth_gas.chain_id} "
+        f"({source}):"
+    )
+    for cls in AUTHORITY_CLASSES:
+        print(f"  {cls + ' authority':<20} {eip7702_auth_gas.costs[cls]:>9,}")
+
+
 async def get_init_data(args: Namespace) -> InitData:
     init_logging(args)
 
@@ -1407,6 +1426,8 @@ async def get_init_data(args: Namespace) -> InitData:
     if args.verbose:
         print(VOLTAIRE_HEADER)
         print("version : " + __version__)
+    if eip7702_auth_gas is not None:
+        print_eip7702_auth_gas(eip7702_auth_gas)
 
     logging.info("Starting *** Voltaire *** - Python 4337 Bundler")
 

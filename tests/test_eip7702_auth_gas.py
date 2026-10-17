@@ -164,6 +164,27 @@ async def test_flat_cost_chain_measures_25k_everywhere(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_startup_print_shows_measured_table(monkeypatch, capsys):
+    """The operator sees the per-class costs at startup without --verbose,
+    and whether they were measured or are the 25k default."""
+    from voltaire_bundler.cli_manager import print_eip7702_auth_gas
+
+    table = _table(FakeNode(), monkeypatch)
+    await table.measure()
+    print_eip7702_auth_gas(table)
+    out = capsys.readouterr().out
+    assert f"chain {CHAIN_ID} (measured at startup)" in out
+    assert "empty authority" in out and "238,738" in out
+    assert "existing authority" in out and "52,843" in out
+    assert "delegated authority" in out and "17,164" in out
+
+    print_eip7702_auth_gas(_table(FakeNode(), monkeypatch))
+    out = capsys.readouterr().out
+    assert "(default, measurement failed)" in out
+    assert out.count("25,000") == 3
+
+
+@pytest.mark.asyncio
 async def test_measure_failure_keeps_defaults_and_raises(monkeypatch):
     node = FakeNode(fail={"eth_estimateGas"})
     table = _table(node, monkeypatch)
