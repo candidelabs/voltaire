@@ -162,14 +162,16 @@ async def test_estimate_is_verified_once_under_its_own_cap(version):
             _make_user_operation(version), ENTRYPOINT[version], {}
         )
 
-    assert int(ver_gas_hex, 16) == 60_000  # estimate + 10_000 buffer
+    # estimate + 10_000 buffer (+ 10% of the estimate from v0.7)
+    expected_vgl = 60_000 if version == "v6" else 65_000
+    assert int(ver_gas_hex, 16) == expected_vgl
     assert int(call_gas_hex, 16) == 23_000  # estimate + 3_000 buffer
     assert len(calls) == 2
     estimate_vgl, _, estimate_args = calls[0]
     assert estimate_vgl == MAX_VERIFICATION_GAS
     assert estimate_args[4] is False
     verify_vgl, verify_cgl, verify_args = calls[1]
-    assert verify_vgl == 60_000
+    assert verify_vgl == expected_vgl
     assert verify_cgl == 23_000
     assert verify_args == (0, MAX_CALL_DATA_GAS, 10, False, True)
 
@@ -177,9 +179,10 @@ async def test_estimate_is_verified_once_under_its_own_cap(version):
 @pytest.mark.parametrize("version", ["v6", "v7"])
 @pytest.mark.asyncio
 async def test_shortfall_is_doubled_then_bisected(version):
-    """The measurement says 60k (+10k buffer) but validation needs 200k
-    under its cap: 70k and 140k fail, 280k fits, then bisection of
-    (140k, 280k] tightens the quote to 210k within 3 rounds."""
+    """The measurement says 60k (+buffer) but validation needs 200k
+    under its cap: v0.6 quotes 70k, so 70k and 140k fail, 280k fits, then
+    bisection of (140k, 280k] tightens the quote to 210k within 3 rounds.
+    From v0.7 the quote is 76k (10_000 + 10%) and the same steps follow."""
     gas_manager = _make_gas_manager(version)
     responder, calls = _responder(version, estimated_vgl=60_000, required_vgl=200_000)
 
@@ -188,9 +191,13 @@ async def test_shortfall_is_doubled_then_bisected(version):
             _make_user_operation(version), ENTRYPOINT[version], {}
         )
 
-    assert int(ver_gas_hex, 16) == 210_000
     probed = [vgl for vgl, _, args in calls if args[4]]
-    assert probed == [70_000, 140_000, 280_000, 210_000, 175_000, 192_500]
+    if version == "v6":
+        assert int(ver_gas_hex, 16) == 210_000
+        assert probed == [70_000, 140_000, 280_000, 210_000, 175_000, 192_500]
+    else:
+        assert int(ver_gas_hex, 16) == 209_000
+        assert probed == [76_000, 152_000, 304_000, 228_000, 190_000, 209_000]
     assert len(calls) == 1 + len(probed)
 
 
@@ -256,7 +263,8 @@ async def test_shortfall_at_max_verification_gas_propagates(version):
 
     assert "AA23" in excinfo.value.message
     probed = [vgl for vgl, _, args in calls if args[4]]
-    assert probed == [70_000, 140_000, 280_000, 560_000, MAX_VERIFICATION_GAS]
+    first = 70_000 if version == "v6" else 76_000
+    assert probed == [first, 2 * first, 4 * first, 8 * first, MAX_VERIFICATION_GAS]
 
 
 @pytest.mark.parametrize("version", ["v6", "v7"])
@@ -291,5 +299,24 @@ async def test_verify_pass_only_runs_on_eip8037_chains(version):
             _make_user_operation(version), ENTRYPOINT[version], {}
         )
 
-    assert int(ver_gas_hex, 16) == 77_000  # (60_000 + 10_000) * 1.1 for chain 1337
+    # (60_000 + 10_000 [+ 6_000 from v0.7]) * 1.1 for chain 1337
+    assert int(ver_gas_hex, 16) == (77_000 if version == "v6" else 83_600)
     assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_buffered_estimate_is_capped_at_max_verification_gas():
+    """Near the cap, 10_000 + 10% would exceed max_verification_gas, which
+    eth_sendUserOperation rejects; validation fit under the cap during the
+    estimate, so the quote is the cap."""
+    gas_manager = _make_gas_manager("v7")
+    gas_manager.chain_id = 1337
+    estimated = MAX_VERIFICATION_GAS - 50_000
+    responder, calls = _responder("v7", estimated_vgl=estimated, required_vgl=0)
+
+    with patch(RPC_PATH["v7"], new_callable=AsyncMock, side_effect=responder):
+        _, _, ver_gas_hex = await gas_manager.estimate_user_operation_gas(
+            _make_user_operation("v7"), ENTRYPOINT["v7"], {}
+        )
+
+    assert int(ver_gas_hex, 16) == MAX_VERIFICATION_GAS
