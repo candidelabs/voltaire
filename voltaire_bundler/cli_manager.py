@@ -10,6 +10,8 @@ from importlib.metadata import version
 
 import aiohttp
 
+from voltaire_bundler.gas.eip7702_auth_gas import (
+    AUTHORITY_CLASSES, Eip7702AuthGas)
 from voltaire_bundler.gas.gas_price_cache import (
     GasPriceCache,
     DEFAULT_REFRESH_INTERVAL_SECONDS,
@@ -120,6 +122,9 @@ class InitData:
     # Warmed synchronously in get_init_data so a bad ethereum node URL is
     # caught at startup. Started as a TaskGroup child in main().
     gas_price_cache: GasPriceCache
+    # Per-class EIP-7702 authorization gas table, measured at startup
+    # (soft-fails to 25k per class); None unless --eip7702 is set.
+    eip7702_auth_gas: Eip7702AuthGas | None = None
 
 
 def address(ep: str):
@@ -1047,6 +1052,50 @@ async def check_valid_entrypoints(ethereum_node_url: str, disable_v6: bool):
     )
 
 
+async def _init_eip7702_auth_gas(
+    enabled: bool,
+    ethereum_node_urls: list[str],
+    bundler_address: Address,
+    chain_id: int,
+) -> Eip7702AuthGas | None:
+    """Measure the per-class EIP-7702 authorization gas once (six
+    eth_estimateGas calls). The values only change at a hard fork, for
+    which the bundler is restarted. Soft-fails like the gas-price warm: a
+    node that cannot serve the measurement leaves the 25k-per-class
+    default in place."""
+    if not enabled:
+        return None
+    eip7702_auth_gas = Eip7702AuthGas(
+        ethereum_node_urls, bundler_address, chain_id
+    )
+    try:
+        await eip7702_auth_gas.measure()
+    except Exception as exc:
+        logging.warning(
+            "EIP-7702 authorization gas measurement failed at startup "
+            "(%r); charging 25,000 per authorization until restart", exc,
+        )
+    return eip7702_auth_gas
+
+
+def print_eip7702_auth_gas(eip7702_auth_gas: Eip7702AuthGas) -> None:
+    """Show the per-class authorization gas the bundler will charge. Printed
+    rather than logged so it is visible without --verbose: an empty-authority
+    figure far above 25,000 is how an operator can tell the chain prices
+    state creation per EIP-8037, and the 25,000 default after a failed
+    measurement is worth noticing on such a chain."""
+    source = (
+        "measured at startup" if eip7702_auth_gas.measured
+        else "default, measurement failed"
+    )
+    print(
+        f"EIP-7702 authorization gas on chain {eip7702_auth_gas.chain_id} "
+        f"({source}):"
+    )
+    for cls in AUTHORITY_CLASSES:
+        print(f"  {cls + ' authority':<20} {eip7702_auth_gas.costs[cls]:>9,}")
+
+
 async def get_init_data(args: Namespace) -> InitData:
     init_logging(args)
 
@@ -1236,6 +1285,15 @@ async def get_init_data(args: Namespace) -> InitData:
             f"the first refresh succeeds."
         )
 
+    # Measure the per-class EIP-7702 authorization gas once (six
+    # eth_estimateGas calls). Soft-fail like the gas-price warm: a node
+    # that cannot serve the measurement leaves the 25k-per-class default
+    # in place and the hourly background re-measurement keeps trying.
+    eip7702_auth_gas = await _init_eip7702_auth_gas(
+        args.eip7702, ethereum_node_urls_rearranged,
+        bundler_secrets_per_ep["v7"][0], args.chain_id,
+    )
+
     # Warm the chain-head cache for the same reason as gas_price_cache:
     # the coalesced eth_getLogs sweep in bundle_manager pins toBlock to
     # this resolved head; without a warmup, the first cron tick after
@@ -1362,11 +1420,14 @@ async def get_init_data(args: Namespace) -> InitData:
         args.enable_banning,
         args.logs_fallback_recent_window,
         gas_price_cache,
+        eip7702_auth_gas=eip7702_auth_gas,
     )
 
     if args.verbose:
         print(VOLTAIRE_HEADER)
         print("version : " + __version__)
+    if eip7702_auth_gas is not None:
+        print_eip7702_auth_gas(eip7702_auth_gas)
 
     logging.info("Starting *** Voltaire *** - Python 4337 Bundler")
 

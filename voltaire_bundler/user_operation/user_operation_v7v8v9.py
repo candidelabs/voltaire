@@ -48,6 +48,7 @@ class UserOperationV7V8V9(UserOperation):
             )
         else:
             self.eip7702_auth = None
+        self.eip7702_account_state = None
 
         self.sender_address = verify_and_get_address(
             "sender", jsonRequestDict["sender"])

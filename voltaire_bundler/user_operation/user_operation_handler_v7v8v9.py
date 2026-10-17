@@ -11,6 +11,7 @@ from voltaire_bundler.user_operation.user_operation_handler import (
     del_user_operation_logs_cache_entry,
     get_transaction_by_hash,
 )
+from ..gas.eip7702_auth_gas import Eip7702AuthGas
 from ..gas.gas_manager_v7v8v9 import GasManagerV7V8V9
 from ..gas.gas_price_cache import GasPriceCache
 
@@ -30,6 +31,7 @@ class UserOperationHandlerV7V8V9(UserOperationHandler):
         logs_number_of_ranges: int,
         logs_fallback_recent_window: int,
         gas_price_cache: GasPriceCache,
+        eip7702_auth_gas: Eip7702AuthGas | None = None,
     ):
         self.ethereum_node_urls = ethereum_node_urls
         self.bundler_address = bundler_address
@@ -44,6 +46,7 @@ class UserOperationHandlerV7V8V9(UserOperationHandler):
             max_verification_gas,
             max_call_data_gas,
             gas_price_cache,
+            eip7702_auth_gas=eip7702_auth_gas,
         )
         self.logs_incremental_range = logs_incremental_range
         self.logs_number_of_ranges = logs_number_of_ranges

@@ -12,6 +12,7 @@ from voltaire_bundler.gas.gas_manager import \
     GasManager, calculate_deposit_slot_index, deep_union
 from voltaire_bundler.gas.somnia_gas_estimation import \
     SOMNIA_CHAIN_IDS, estimate_call_gas_somnia
+from voltaire_bundler.gas.eip7702_auth_gas import AccountState, Eip7702AuthGas
 from voltaire_bundler.gas.gas_price_cache import GasPriceCache
 from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.models import FailedOp, FailedOpWithRevert
@@ -48,8 +49,10 @@ class GasManagerV7V8V9(GasManager):
         max_verification_gas,
         max_call_data_gas,
         gas_price_cache: GasPriceCache,
+        eip7702_auth_gas: Eip7702AuthGas | None = None,
     ):
         self.ethereum_node_urls = ethereum_node_urls
+        self.eip7702_auth_gas = eip7702_auth_gas
         self.chain_id = chain_id
         self.bundler_address = bundler_address
         self.is_legacy_mode = is_legacy_mode
@@ -69,6 +72,36 @@ class GasManagerV7V8V9(GasManager):
         user_operation: UserOperationV7V8V9,
         entrypoint: str,
         state_override_set_dict: dict[str, Any],
+    ) -> tuple[str, str, str]:
+        # Read the sender's state for the EIP-7702 authorization cost
+        # while the gas simulation runs, so it adds no latency; the
+        # preVerificationGas step below finds it on the operation.
+        account_state_task: asyncio.Task[AccountState | None] | None = None
+        if (
+            user_operation.eip7702_auth is not None
+            and self.eip7702_auth_gas is not None
+            and user_operation.eip7702_account_state is None
+        ):
+            account_state_task = asyncio.create_task(
+                self.eip7702_auth_gas.account_state(
+                    user_operation.sender_address
+                )
+            )
+        try:
+            return await self._estimate_user_operation_gas(
+                user_operation, entrypoint, state_override_set_dict,
+                account_state_task,
+            )
+        finally:
+            if account_state_task is not None and not account_state_task.done():
+                account_state_task.cancel()
+
+    async def _estimate_user_operation_gas(
+        self,
+        user_operation: UserOperationV7V8V9,
+        entrypoint: str,
+        state_override_set_dict: dict[str, Any],
+        account_state_task: "asyncio.Task[AccountState | None] | None",
     ) -> tuple[str, str, str]:
         input_preverification_gas = user_operation.pre_verification_gas
         input_verification_gas_limit = user_operation.verification_gas_limit
@@ -124,6 +157,9 @@ class GasManagerV7V8V9(GasManager):
                     result_call_gas_limit,
                 )
             )
+
+        if account_state_task is not None:
+            user_operation.eip7702_account_state = await account_state_task
 
         if input_preverification_gas == 0:
             user_operation.call_gas_limit = result_call_gas_limit
