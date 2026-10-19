@@ -1,9 +1,13 @@
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 from datetime import datetime
 import re
 from voltaire_bundler.bundle.exceptions import \
         ValidationException, ValidationExceptionCode
 from voltaire_bundler.custom_types import Address, MempoolId
+
+if TYPE_CHECKING:
+    from voltaire_bundler.gas.eip7702_auth_gas import AccountState
 
 
 class UserOperation(ABC):
@@ -22,6 +26,10 @@ class UserOperation(ABC):
     last_add_to_mempool_date: datetime | None
     number_of_add_to_mempool_attempts: int
     eip7702_auth: dict[str, str] | None
+    # Sender state read for the EIP-7702 authorization cost, left here by
+    # the preVerificationGas check for the authorization check that
+    # follows it in the same submit (single use; see eip7702_auth_gas.py).
+    eip7702_account_state: "AccountState | None"
 
     @abstractmethod
     def get_user_operation_json(

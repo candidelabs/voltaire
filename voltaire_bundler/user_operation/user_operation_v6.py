@@ -75,6 +75,7 @@ class UserOperationV6(UserOperation):
         self.last_add_to_mempool_date = None
         self.number_of_add_to_mempool_attempts = 0
         self.eip7702_auth = None
+        self.eip7702_account_state = None
 
     @staticmethod
     def verify_fields_exist(

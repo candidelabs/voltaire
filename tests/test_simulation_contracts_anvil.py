@@ -176,3 +176,25 @@ async def test_estimation_runs_on_anvil_and_verify_pass_accepts_the_quote(anvil_
     # the in-contract search finishes in one eth_call for a trivial callData
     # (chain 1337 is not an EIP-8037 chain, so no verify probe follows)
     assert len(simulations) == 1
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_eip7702_authorization_gas_is_flat_25k_on_a_standard_chain(anvil_url):
+    """Without EIP-8037 every authority class costs PER_EMPTY_ACCOUNT_COST
+    up front; the measurement must find that on its own (no chain list),
+    and anvil must accept the type-4 estimate with state overrides."""
+    from voltaire_bundler.gas.eip7702_auth_gas import (
+        AUTHORITY_CLASSES, PER_EMPTY_ACCOUNT_COST, Eip7702AuthGas,
+    )
+    # a real EOA, not BUNDLER_ADDRESS: 0x..01 is the ecrecover precompile
+    # and anvil prices a type-4 self-call to it differently (28k)
+    table = Eip7702AuthGas(
+        [anvil_url], "0x6eb0296e64fB8d9D946c7b819E4FF55c7167B0Ce", CHAIN_ID
+    )
+
+    costs = await table.measure()
+
+    for cls in AUTHORITY_CLASSES:
+        # anvil reports one extra gas unit over the nominal figure
+        assert PER_EMPTY_ACCOUNT_COST <= costs[cls] <= PER_EMPTY_ACCOUNT_COST + 100, cls
+    assert len(set(costs.values())) == 1
