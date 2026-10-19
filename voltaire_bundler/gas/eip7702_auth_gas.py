@@ -36,8 +36,10 @@ estimation the fetch runs concurrently with the gas simulation, so it
 adds no latency there.
 
 When the node rejects the measurement call shape (no state overrides on
-``eth_estimateGas``, no type-4 estimation) the table stays at 25,000 per
-class with one warning until the bundler is restarted. When a sender
+``eth_estimateGas``, no type-4 estimation), or accepts the tuple and
+ignores it when estimating (the estimate does not grow with the tuple,
+which no real 7702 chain allows), the table stays at 25,000 per class
+with one error at startup until the bundler is restarted. When a sender
 cannot be classified at all, the most expensive class is assumed:
 the bundler must never pay a tuple out of pocket, an overpaid
 preVerificationGas is the lesser harm.
@@ -263,7 +265,21 @@ class Eip7702AuthGas:
             self._rpc("eth_estimateGas", [tx, "latest", overrides]),
             self._rpc("eth_estimateGas", [tx_with_auth, "latest", overrides]),
         )
-        return max(int(with_auth, 16) - int(without_auth, 16), 0)
+        difference = int(with_auth, 16) - int(without_auth, 16)
+        if difference <= 0:
+            # The tuple is charged up front on every 7702 chain, so an
+            # estimate that does not grow with it can only mean the node
+            # ignored the authorizationList in eth_estimateGas (drpc on
+            # Sepolia answers 0x2ee0 either way, although its eth_call
+            # applies the tuple). A table of zeros would count as
+            # measured and charge nothing for the tuple, so this is a
+            # failed measurement and the caller keeps the default.
+            raise RuntimeError(
+                f"node ignored authorizationList in eth_estimateGas: "
+                f"{cls} authority estimated {with_auth} with the tuple "
+                f"and {without_auth} without"
+            )
+        return difference
 
     # ------------------------------------------------------ classification
     async def account_state(self, sender: Address) -> AccountState | None:

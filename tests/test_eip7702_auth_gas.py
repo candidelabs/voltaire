@@ -197,6 +197,42 @@ async def test_measure_failure_keeps_defaults_and_raises(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_node_ignoring_the_tuple_fails_the_measurement(monkeypatch):
+    """drpc on Sepolia answers eth_estimateGas with the same figure with
+    and without the authorizationList. A zero per class would count as
+    measured and charge nothing for the tuple, so an estimate that does
+    not grow with the tuple is a failed measurement: the default stays."""
+    node = FakeNode(costs={cls: 0 for cls in SEPOLIA_COSTS})
+    table = _table(node, monkeypatch)
+
+    with pytest.raises(RuntimeError, match="ignored authorizationList"):
+        await table.measure()
+
+    assert not table.measured
+    assert table.costs == {cls: PER_EMPTY_ACCOUNT_COST for cls in SEPOLIA_COSTS}
+
+
+@pytest.mark.asyncio
+async def test_startup_measurement_failure_logs_an_error(monkeypatch, caplog):
+    """A failed measurement is an ERROR naming the consequence, so the
+    undercharge on an EIP-8037 chain is not hidden in a warning."""
+    from voltaire_bundler.cli_manager import _init_eip7702_auth_gas
+
+    _table(FakeNode(costs={cls: 0 for cls in SEPOLIA_COSTS}), monkeypatch)
+    caplog.set_level("ERROR")
+
+    table = await _init_eip7702_auth_gas(True, ["http://a"], BUNDLER, CHAIN_ID)
+
+    assert table is not None and not table.measured
+    errors = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert len(errors) == 1
+    message = errors[0].getMessage()
+    assert "ignored authorizationList" in message
+    assert "charging 25,000" in message
+    assert "pays the difference" in message
+
+
+@pytest.mark.asyncio
 async def test_measure_walks_nodes_on_failure(monkeypatch):
     node = FakeNode()
     original = node.__call__

@@ -1071,9 +1071,14 @@ async def _init_eip7702_auth_gas(
     try:
         await eip7702_auth_gas.measure()
     except Exception as exc:
-        logging.warning(
+        logging.error(
             "EIP-7702 authorization gas measurement failed at startup "
-            "(%r); charging 25,000 per authorization until restart", exc,
+            "(%r); charging 25,000 per authorization until restart. On a "
+            "chain that prices delegation per EIP-8037 this undercharges "
+            "every first delegation and the bundler pays the difference "
+            "(an empty authority costs ~239,000 on Sepolia). Check that "
+            "the node applies authorizationList in eth_estimateGas with "
+            "state overrides.", exc,
         )
     return eip7702_auth_gas
 
