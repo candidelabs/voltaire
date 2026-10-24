@@ -1,4 +1,4 @@
-FROM python:3.13.4-alpine3.22 AS builder
+FROM python:3.14-alpine3.22 AS builder
 
 ENV PIP_DEFAULT_TIMEOUT=100 \
     # Allow statements and log messages to immediately appear

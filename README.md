@@ -41,7 +41,7 @@ poetry install
 ### Make sure you are using the right python version
 
 ```
-poetry env use python3.11
+poetry env use python3.14
 ```
 
 ### Install Docker
