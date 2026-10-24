@@ -1401,7 +1401,7 @@ regex==2026.9.29 ; python_full_version >= "3.13.2" and python_full_version < "4.
 rlp==5.0.0 ; python_full_version >= "3.13.2" and python_version < "4" \
     --hash=sha256:9525fb895d3a6540b7401eadd11c1b64740a5eccb82e543ac7e9735d319b0977 \
     --hash=sha256:ae8ac791160c160e270f9c7df76e68f4d42bb86a13726d807b9357c312d0bac4
-toolz==1.2.0 ; python_full_version >= "3.13.2" and python_version < "4.0" and (python_version < "3.15" or implementation_name == "cpython" or implementation_name == "pypy") and (implementation_name == "pypy" or implementation_name == "cpython") \
+toolz==1.2.0 ; python_full_version >= "3.13.2" and python_full_version < "4.0.0" and (implementation_name == "cpython" or implementation_name == "pypy") \
     --hash=sha256:890f820b1cb8152785aaf9386d8707770110809035800985ca65cb24ce1120ef \
     --hash=sha256:9667a038e9d6ecba37995e26cb2f59ec6420b6ad8dd9677de59db9b956b08490
 typing-extensions==4.16.0 ; python_full_version >= "3.13.2" and python_full_version < "4.0.0" \

@@ -18,14 +18,6 @@ poetry install
 poetry env use python3.13
 ```
 
-### Linting and Type Checking
-```bash
-# Run linting and type checking
-poetry run lint
-
-# This runs both flake8 and mypy on the voltaire_bundler package
-```
-
 ### Testing
 ```bash
 # Run tests with pytest
