@@ -34,7 +34,6 @@ flake8 = "^7.1.2"
 flake8-bugbear = "^24.12.12"
 
 [tool.poetry.scripts]
-build_p2p = "scripts.build_p2p:build"
 lint = "scripts.lint:start"
 
 [build-system]

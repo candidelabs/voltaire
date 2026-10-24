@@ -84,24 +84,6 @@ poetry run python3 -m voltaire_bundler --entrypoint $ENTRYPOINT --bundler_secret
 
 Follow the instruction in <a href='https://github.com/eth-infinitism/bundler-spec-tests'>eth-infinitism/bundler-spec-tests</a> to install dependencies and run the test
 
-## P2P rust section development
-
-### Install Rust
-```
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-### Install build dependencies
-```
-sudo apt install musl-tools
-rustup target add x86_64-unknown-linux-musl
-```
-
-### Build the rust section using poetry script
-```
-poetry run build_p2p
-```
-
 ## Contributions
 
 Thank you for considering contributing to open-source code! We welcome contributions and are grateful for even the smallest of fixes. 

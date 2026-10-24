@@ -4,9 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Voltaire is a modular and lightning-fast Python-Rust Bundler for Ethereum EIP-4337 Account Abstraction. It consists of two main components:
+Voltaire is a modular and lightning-fast Python Bundler for Ethereum EIP-4337 Account Abstraction. It consists of:
 - **voltaire_bundler**: Python package handling the core bundler logic, RPC server, mempool management, and user operation processing
-- **voltaire_p2p**: Rust component providing P2P networking capabilities using libp2p
 
 ## Development Commands
 
@@ -17,18 +16,6 @@ poetry install
 
 # Set correct Python version
 poetry env use python3.13
-
-# Install Rust build dependencies (for P2P component)
-sudo apt install musl-tools
-rustup target add x86_64-unknown-linux-musl
-```
-
-### Building
-```bash
-# Build the Rust P2P component
-poetry run build_p2p
-
-# This compiles the Rust code and copies the binary to the project root
 ```
 
 ### Linting and Type Checking
@@ -111,11 +98,6 @@ poetry run python3 -m voltaire_bundler \
    - Implements EIP-4337 bundler RPC methods
    - Handles health checks and metrics
 
-5. **P2P Networking** (`voltaire_p2p/`):
-   - Rust-based P2P component using libp2p
-   - Handles mempool synchronization between bundlers
-   - Can be disabled with `--disable_p2p` flag
-
 ### User Operation Handling
 
 - **UserOperationV6**: Handles v0.6 format user operations
@@ -138,7 +120,6 @@ poetry run python3 -m voltaire_bundler \
 ## Development Notes
 
 - The project uses Python 3.13+ with async/await patterns throughout
-- Rust component is built as a static binary and integrated with Python via IPC
 - Supports multiple Ethereum node URLs for redundancy
 - Implements comprehensive reputation management and validation
 - Modular design allows running with or without P2P networking
