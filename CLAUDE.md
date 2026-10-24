@@ -41,7 +41,7 @@ poetry run pytest tests/v6/test_rpc.py
 poetry run python3 -m voltaire_bundler --bundler_secret $BUNDLER_SECRET --chain_id 1337 --verbose --ethereum_node_url $ETHEREUM_NODE_URL
 
 # Docker deployment
-docker run --net=host --rm -ti ghcr.io/candidelabs/voltaire/voltaire-bundler:latest --bundler_secret $BUNDLER_SECRET --rpc_url $RPC_URL --rpc_port $PORT --ethereum_node_url $ETHEREUM_NODE_URL --chain_id $CHAIN_ID --verbose --unsafe --disable_p2p
+docker run --net=host --rm -ti ghcr.io/candidelabs/voltaire/voltaire-bundler:latest --bundler_secret $BUNDLER_SECRET --rpc_url $RPC_URL --rpc_port $PORT --ethereum_node_url $ETHEREUM_NODE_URL --chain_id $CHAIN_ID --verbose --unsafe
 ```
 
 ### Local Development Setup
@@ -61,7 +61,7 @@ poetry run python3 -m voltaire_bundler \
   --chain_id 1337 --rpc_port 3000 \
   --ethereum_node_url http://127.0.0.1:8545 \
   --verbose --unsafe --bundle_interval 2 \
-  --disable_p2p --eip7702
+  --eip7702
 ```
 
 **Important CLI flags:**
@@ -122,7 +122,6 @@ poetry run python3 -m voltaire_bundler \
 - The project uses Python 3.13+ with async/await patterns throughout
 - Supports multiple Ethereum node URLs for redundancy
 - Implements comprehensive reputation management and validation
-- Modular design allows running with or without P2P networking
 
 ### Simulation Contracts & Bytecode
 

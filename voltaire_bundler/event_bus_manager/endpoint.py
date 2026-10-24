@@ -2,10 +2,8 @@
 This module is a simple event bus implementation for message based interprocess
 communication.
 On non-Windows systems, it uses Unix IPC sockets to send messages between
-python threads, and also between python threads and the Rust p2p thread.
+python threads.
 On Windows, it uses TCP on localhost with .port files for service discovery.
-Note: Voltaire p2p implementation is written in rust, as the python libp2p
-implementation is not maintained.
 The main architecture consist of Endpoints(server) and Clients.
 Each Endpoint can receive requests from Clients.
 Each Endpoint has its own IPC/port file which it listens to for messages
@@ -28,9 +26,8 @@ IS_WINDOWS = sys.platform == "win32"
 # Upper bound on how long a Client.request() may wait for a matching response.
 # Sized well above the slowest realistic handler (gas estimation, which chains
 # multiple upstream eth_calls) so the timeout only fires when a response was
-# truly dropped — e.g. a handler exception path or a "p2p_received" request
-# that legitimately never replies. Without this bound, a missing reply would
-# hang the caller indefinitely.
+# truly dropped — e.g. a handler exception path. Without this bound, a
+# missing reply would hang the caller indefinitely.
 _REQUEST_TIMEOUT_S = 120.0
 
 RequestEvent = Dict[str, Any]
@@ -195,9 +192,6 @@ class Endpoint:
             logging.exception(
                 "unhandled error dispatching IPC request id=%s", req_id
             )
-            return
-
-        if "p2p_received" in request_event["request_type"]:
             return
 
         try:
@@ -365,8 +359,7 @@ class Client:
             try:
                 return await asyncio.wait_for(fut, timeout=_REQUEST_TIMEOUT_S)
             except asyncio.TimeoutError:
-                # Response was dropped (handler exception path, p2p_received
-                # branch, or a peer that never replied). Surface as a timeout
+                # Response was dropped (handler exception path). Surface as a timeout
                 # rather than hanging the caller; don't retry — the connection
                 # itself is still healthy.
                 self._pending.pop(req_id, None)
@@ -381,46 +374,6 @@ class Client:
                 raise
         # Unreachable — the loop either returns or raises.
         raise RuntimeError("unreachable")
-
-    async def broadcast_only(self, request_event: RequestEvent) -> None:
-        """
-        This function establish a connection to an Endpoint and
-        sends a RequestEvent without waiting for a response.
-        Uses Unix sockets on non-Windows, TCP on localhost on Windows.
-        """
-        if IS_WINDOWS:
-            port_filepath = "p2p_endpoint.port"
-            try:
-                with open(port_filepath, 'r') as f:
-                    port = int(f.read().strip())
-                _, writer = await asyncio.open_connection(
-                        '127.0.0.1', port)
-            except (ConnectionRefusedError, FileNotFoundError, ValueError):
-                return
-        else:
-            filepath = "p2p_endpoint.ipc"
-            try:
-                _, writer = await asyncio.open_unix_connection(filepath)
-            except (ConnectionRefusedError, FileNotFoundError):
-                # FileNotFoundError: the p2p process unlinks its socket
-                # file on shutdown — same best-effort contract as the
-                # refused case (and as the Windows branch above).
-                return
-
-        try:
-            await _broadcast(request_event, writer)
-        except OSError:
-            # Same contract as the connect failures above: this is a
-            # fire-and-forget path, so the p2p endpoint going away
-            # mid-send (ConnectionResetError / BrokenPipeError) must
-            # not disturb the caller.
-            pass
-        finally:
-            writer.close()
-            try:
-                await writer.wait_closed()
-            except Exception:
-                pass
 
 
 async def _listen(

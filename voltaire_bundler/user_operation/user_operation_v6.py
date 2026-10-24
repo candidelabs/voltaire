@@ -4,7 +4,7 @@ from eth_abi import encode
 from eth_utils import keccak
 from voltaire_bundler.bundle.exceptions import \
     ValidationException, ValidationExceptionCode
-from voltaire_bundler.custom_types import Address, MempoolId
+from voltaire_bundler.custom_types import Address
 from .user_operation import \
     verify_and_get_uint, verify_and_get_bytes, verify_and_get_address
 from .user_operation import UserOperation
@@ -26,7 +26,6 @@ class UserOperationV6(UserOperation):
     code_hash: str | None
     factory_address_lowercase: Address | None
     paymaster_address_lowercase: Address | None
-    valid_mempools_ids: list[MempoolId]
     user_operation_hash: str
     jsonRequestDict: InitVar[dict[str, Address | int | bytes]]
 
@@ -67,7 +66,6 @@ class UserOperationV6(UserOperation):
 
         self.code_hash = None
         self.storage_map = None
-        self.valid_mempools_ids = []
         self.user_operation_hash = ""
         self.validated_at_block_hex = None
         self._set_factory_and_paymaster_address()

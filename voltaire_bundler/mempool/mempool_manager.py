@@ -2,9 +2,8 @@ import asyncio
 from datetime import datetime
 import logging
 import math
-from functools import cache
 from dataclasses import dataclass
-from typing import Any, List
+from typing import Any
 
 from eth_abi import encode, decode
 
@@ -14,11 +13,10 @@ from voltaire_bundler.mempool.reputation_manager import \
         ReputationManager, ReputationStatus
 from voltaire_bundler.user_operation.models import StakeInfo
 from voltaire_bundler.user_operation.user_operation_handler import UserOperationHandler, get_deposit_info
-from voltaire_bundler.event_bus_manager.endpoint import RequestEvent
 from voltaire_bundler.validation.validation_manager import ValidationManager
-from voltaire_bundler.custom_types import Address, MempoolId
+from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.user_operation import UserOperation
-from voltaire_bundler.utils.eth_client_utils import get_block_info, send_rpc_request_to_eth_client
+from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
 
 from .sender_mempool import SenderMempool
 
@@ -39,14 +37,11 @@ class LocalMempoolManager():
     enforce_gas_price_tolerance: int
     enforce_pre_verification_gas_tolerance: int
     paymasters_and_factories_to_ops_hashes_in_mempool: dict[Address, set[str]]
-    verified_useroperations_standard_mempool_gossip_queue: List[Any]
-    canonical_mempool_id: MempoolId
     seen_user_operation_hashs: set[str]
     paymaster_deposits_cache: dict[str, int]
     latest_paymaster_deposits_cache_block: int
     min_stake: int
     min_unstake_delay: int
-    MAX_OPS_PER_REQUEST = 4096
 
     def clear_user_operations(self) -> None:
         self.senders_to_senders_mempools.clear()
@@ -55,7 +50,7 @@ class LocalMempoolManager():
     async def add_user_operation(
         self,
         user_operation: UserOperation,
-    ) -> tuple[str, str, List[MempoolId]]:
+    ) -> tuple[str, str]:
         user_operation.last_add_to_mempool_date = datetime.now()
         user_operation.number_of_add_to_mempool_attempts += 1
         self._verify_banned_and_throttled_entities(
@@ -175,183 +170,12 @@ class LocalMempoolManager():
                 user_operation.paymaster_address_lowercase,
                 user_operation_hash
             )
-        valid_mempools_ids = [self.canonical_mempool_id]
-
-        user_operation.valid_mempools_ids = valid_mempools_ids
         user_operation.user_operation_hash = user_operation_hash
 
         return (
             user_operation_hash,
             validated_at_block_hash,
-            valid_mempools_ids
         )
-
-    async def add_user_operation_p2p(
-        self,
-        user_operation: UserOperation,
-        peer_id: str,
-        verified_at_block_hash: str
-    ) -> None | str:
-        try:
-            self._verify_banned_and_throttled_entities(
-                user_operation.sender_address,
-                user_operation.factory_address_lowercase,
-                user_operation.paymaster_address_lowercase,
-            )
-            await asyncio.gather(
-                self.user_operation_handler.gas_manager.verify_preverification_gas_and_verification_gas_limit(
-                    user_operation,
-                    self.entrypoint,
-                    self.enforce_pre_verification_gas_tolerance,
-                ),
-                self.user_operation_handler.gas_manager.verify_gas_fees_and_get_price(
-                    user_operation, self.enforce_gas_price_tolerance
-                )
-            )
-            # NOTE: validated_at_block_hex was previously set to
-            # verified_at_block_hash here — a 66-char block *hash*, but the
-            # field is consumed as a block *number* hex string by the
-            # coalesced monitor sweep (int(x, 16)). That produced ~2^256
-            # values, and if all monitored userops came in via p2p, min()
-            # would pick a "block number" astronomically past the chain
-            # head, tripping the to_block_int < from_block_int guard in
-            # get_user_operation_logs_for_many_hashes and skipping the
-            # sweep entirely — so p2p userops could only exit the monitor
-            # set by hitting the 20-attempt cap. The correct block-number
-            # hex is available as validated_at_block_number from
-            # validate_user_operation below; assign it after that returns.
-        except ValidationException:
-            return "No"
-
-        try:
-            (
-                sender_stake_info,
-                factory_stake_info,
-                paymaster_stake_info,
-                aggregator_stake_info,
-                user_operation_hash,
-                associated_addresses,
-                storage_map,
-                paymaster_context,
-                validated_at_block_number,
-                validated_at_block_hash
-            ) = await self.validation_manager.validate_user_operation(
-                user_operation,
-                self.entrypoint,
-                None,
-                None,
-                self.min_stake,
-                self.min_unstake_delay
-            )
-
-            # EREP-050
-            if paymaster_stake_info is not None:
-                is_paymaster_staked = self.is_staked(
-                    paymaster_stake_info.stake, paymaster_stake_info.unstakeDelaySec)
-
-                if len(paymaster_context) > 0 and not is_paymaster_staked:
-                    raise ValidationException(
-                        ValidationExceptionCode.OpcodeValidation,
-                        "An unstaked paymaster may not return a context.",
-                    )
-
-            if associated_addresses is None:
-                user_operation.code_hash = None
-            else:
-                user_operation.code_hash = (
-                    await self.validation_manager.tracer_manager.get_addresses_code_hash(
-                        associated_addresses, validated_at_block_number
-                    )
-                )
-
-            if self.is_hash_seen(user_operation_hash):
-                return "No"
-            else:
-                self.seen_user_operation_hashs.add(user_operation_hash)
-
-            # Stamp the block-number hex (NOT the hash) so the coalesced
-            # monitor sweep can compute a sane min() fromBlock. The regular
-            # add_user_operation path sets this from the same value; keep
-            # both paths in sync.
-            user_operation.validated_at_block_hex = validated_at_block_number
-
-        except ValidationException:
-            try:
-                await self.validation_manager.validate_user_operation(
-                    user_operation,
-                    self.entrypoint,
-                    verified_at_block_hash,
-                    None,
-                    self.min_stake,
-                    self.min_unstake_delay
-                )
-            except ValidationException:
-                self.reputation_manager.ban_entity(peer_id)
-
-            return "No"
-
-        self._verify_max_allowed_user_operations(
-            user_operation.sender_address,
-            user_operation.paymaster_address_lowercase,
-            sender_stake_info,
-            paymaster_stake_info,
-        )
-
-        await self.validate_paymaster_deposit(
-            user_operation, validated_at_block_number)
-
-        self.validate_multiple_roles_violation(user_operation)
-
-        new_sender = None
-        new_sender_address = user_operation.sender_address
-
-        if new_sender_address not in self.senders_to_senders_mempools:
-            self.senders_to_senders_mempools[new_sender_address] = SenderMempool(
-                new_sender_address, dict()
-            )
-
-        new_sender = self.senders_to_senders_mempools[new_sender_address]
-
-        replaced_user_operation_hash_and_paymaster = new_sender.add_user_operation(
-            user_operation, user_operation_hash, validated_at_block_hash
-        )
-        if replaced_user_operation_hash_and_paymaster is not None:
-            _, old_paymaster = replaced_user_operation_hash_and_paymaster
-            if old_paymaster is not None:
-                self.reputation_manager.update_seen_status(old_paymaster, -1)
-            if user_operation.paymaster_address_lowercase is not None:
-                self.reputation_manager.update_seen_status(
-                    user_operation.paymaster_address_lowercase
-                )
-            self._remove_hash_from_entities_ops_hashes_in_mempool(
-                user_operation_hash
-            )
-        else:
-            self.update_all_seen_status(
-                user_operation.sender_address,
-                sender_stake_info,
-                user_operation.factory_address_lowercase,
-                user_operation.paymaster_address_lowercase,
-            )
-
-        if user_operation.factory_address_lowercase is not None:
-            self._add_hash_to_entity_ops_hashes_in_mempool(
-                user_operation.factory_address_lowercase,
-                user_operation_hash
-            )
-
-        if user_operation.paymaster_address_lowercase is not None:
-            self._add_hash_to_entity_ops_hashes_in_mempool(
-                user_operation.paymaster_address_lowercase,
-                user_operation_hash
-            )
-
-        valid_mempools_ids = [self.canonical_mempool_id]
-
-        user_operation.valid_mempools_ids = valid_mempools_ids
-        user_operation.user_operation_hash = user_operation_hash
-
-        return "Ok"
 
     def is_hash_seen(self, user_operation_hash: str) -> bool:
         return user_operation_hash in self.seen_user_operation_hashs
@@ -535,69 +359,6 @@ class LocalMempoolManager():
 
             return False, None, None
 
-    def get_user_operations_hashes_with_mempool_id(
-        self, mempool_id: MempoolId, offset: int
-    ) -> tuple[List[str], int]:
-        user_operations_hashs = []
-        for sender_address in list(self.senders_to_senders_mempools):
-            sender = self.senders_to_senders_mempools[sender_address]
-            if len(sender.user_operation_hashs_to_verified_user_operation) > 0:
-                for (
-                    user_operation_hash,
-                    verified_user_operation,
-                ) in sender.user_operation_hashs_to_verified_user_operation.items():
-                    if (
-                        mempool_id
-                        in verified_user_operation.user_operation.valid_mempools_ids
-                    ):
-                        user_operations_hashs.append(
-                            list(bytes.fromhex(user_operation_hash[2:]))
-                        )
-
-        start = offset * self.MAX_OPS_PER_REQUEST
-        end = start + self.MAX_OPS_PER_REQUEST
-
-        user_operations_hashs_len = len(user_operations_hashs)
-        if user_operations_hashs_len == 0 or start >= user_operations_hashs_len:
-            return [], 0
-
-        next_cursor = 0
-        if end > user_operations_hashs_len:
-            end = user_operations_hashs_len
-        else:
-            next_cursor = math.floor(
-                (user_operations_hashs_len - end) / self.MAX_OPS_PER_REQUEST
-            )
-
-        return user_operations_hashs[start:end], next_cursor
-
-    def get_user_operations_by_hashes(
-        self, user_operations_hashs: List[str]
-    ) -> tuple[List[UserOperation], List[str]]:
-        verified_user_operations_json = []
-        found_user_operations_hashs = []
-        for sender_address in list(self.senders_to_senders_mempools):
-            sender = self.senders_to_senders_mempools[sender_address]
-            if len(sender.user_operation_hashs_to_verified_user_operation) > 0:
-                for (
-                    user_operation_hash,
-                    verified_user_operation,
-                ) in sender.user_operation_hashs_to_verified_user_operation.items():
-                    if user_operation_hash in user_operations_hashs:
-                        verified_user_operations_json.append(
-                            {
-                                "user_operation": verified_user_operation.user_operation.get_user_operation_json(),
-                                "verified_at_block_hash": verified_user_operation.verified_at_block_hash,
-                                "entry_point": self.entrypoint,
-                            }
-                        )
-                        found_user_operations_hashs.append(user_operation_hash)
-
-        remaining_user_operation_hashes = set(user_operations_hashs) - set(
-            found_user_operations_hashs
-        )
-        return verified_user_operations_json, list(remaining_user_operation_hashes)
-
     def get_all_user_operations(self) -> list[UserOperation]:
         user_operations = [
             verified_user_operation.user_operation
@@ -622,61 +383,6 @@ class LocalMempoolManager():
 
         if paymaster_address is not None:
             self.reputation_manager.update_seen_status(paymaster_address)
-
-    def queue_verified_useroperation_to_gossip_publish(
-        self,
-        user_operation_json,
-        verified_at_block_hash: str,
-        verified_at_block_number_hex: str | None,  # for arbitrum only
-        valid_mempools: List[MempoolId],
-    ) -> None:
-        verified_useroperation = dict()
-        verified_useroperation["entry_point_contract"] = encode_address(
-                self.entrypoint)
-        verified_useroperation["verified_at_block_hash"] = verified_at_block_hash
-        verified_useroperation["user_operation"] = user_operation_json
-
-        if self.chain_id == 42161 or self.chain_id == 421614:
-            verified_useroperation["verified_at_block_number"] = verified_at_block_number_hex
-
-        self.verified_useroperations_standard_mempool_gossip_queue.append(
-            verified_useroperation
-        )
-
-    async def create_p2p_gossip_requests(self) -> List[RequestEvent]:
-        requestEvents = list()
-        block_numbers_hex = list()
-        block_info_ops = list()
-        for (
-            verified_useroperation
-        ) in self.verified_useroperations_standard_mempool_gossip_queue:
-            gossib_to_broadcast = dict()
-            gossib_to_broadcast["topics"] = [self.canonical_mempool_id]
-            gossib_to_broadcast["verified_useroperation"] = verified_useroperation
-            # arbitrum One or arbitrum sepolia
-            if self.chain_id == 42161 or self.chain_id == 421614:
-                assert "verified_at_block_number" in verified_useroperation
-                verified_at_block_number = verified_useroperation[
-                    "verified_at_block_number"
-                ]
-                block_numbers_hex.append(verified_at_block_number)
-                block_info_ops.append(
-                    get_block_info(self.ethereum_node_urls, verified_at_block_number)
-                )
-            requestEvents.append(gossib_to_broadcast)
-        self.verified_useroperations_standard_mempool_gossip_queue.clear()
-        
-        if not (self.chain_id == 42161 or self.chain_id == 421614):
-            return requestEvents
-
-        # if arbtrum fetch valid block hashed and set the valid block hash
-        # for each verified user operation
-        block_info_results = await asyncio.gather(*block_info_ops)
-        for (gossib_to_broadcast, block_info) in zip(requestEvents, block_info_results):
-            _, _, _, _, block_hash = block_info
-            gossib_to_broadcast[
-                "verified_useroperation"]["verified_at_block_hash"] = block_hash
-        return requestEvents
 
     def _verify_max_allowed_user_operations(
         self,
@@ -1005,13 +711,3 @@ class LocalMempoolManager():
                 inclusion_modifier +
                 min(entity_reputation.ops_included, 10_000)
             )
-
-
-@cache
-def encode_uint256(x):
-    return encode(["uint256"], [x])
-
-
-@cache
-def encode_address(address):
-    return encode(["address"], [address])[12:]
