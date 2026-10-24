@@ -16,13 +16,12 @@ from voltaire_bundler.gas.gas_price_cache import (
     GasPriceCache,
     DEFAULT_REFRESH_INTERVAL_SECONDS,
 )
-from voltaire_bundler.mempool.mempool_info import DEFAULT_MEMPOOL_INFO
 from voltaire_bundler.user_operation import user_operation_handler
 from voltaire_bundler.utils import latest_block_cache
 from voltaire_bundler.utils.eth_client_utils import \
     send_rpc_request_to_eth_client_no_retry
 
-from .custom_types import Address, MempoolId
+from .custom_types import Address
 from .utils.import_key import (import_bundler_account,
                                public_address_from_private_key)
 
@@ -72,15 +71,6 @@ class InitData:
     enforce_pre_verification_gas_tolerance: int
     ethereum_node_debug_trace_call_urls: list[str]
     ethereum_node_eth_get_logs_urls: list[str]
-    p2p_enr_address: str
-    p2p_enr_tcp_port: int
-    p2p_enr_udp_port: int
-    p2p_target_peers_number: int
-    p2p_boot_nodes_enr: str
-    p2p_upnp_enabled: bool
-    p2p_metrics_enabled: bool
-    client_version: str
-    disable_p2p: bool
     max_verification_gas: int
     max_call_data_gas: int
     disable_v6: bool
@@ -91,9 +81,6 @@ class InitData:
     reputation_whitelist: list[str]
     reputation_blacklist: list[str]
     is_eip7702: bool
-    p2p_canonical_mempool_id_08: MempoolId | None
-    p2p_canonical_mempool_id_07: MempoolId | None
-    p2p_canonical_mempool_id_06: MempoolId | None
     min_stake: int
     min_unstake_delay: int
     bundle_gas_estimation_multiplier: float
@@ -159,7 +146,7 @@ def positive_float(value):
 
 def str_to_bool(value: str | bool) -> bool:
     # argparse's built-in type=bool treats every non-empty string as True
-    # (so `--disable_p2p false` would silently disable nothing). Accept
+    # (so `--disable_v6 false` would silently disable nothing). Accept
     # the conventional spellings and reject anything else loudly — a
     # typo like "treu" must fail startup, not silently mean False.
     if isinstance(value, bool):
@@ -399,9 +386,8 @@ def initialize_argument_parser() -> ArgumentParser:
         help=(
             "set the bundle interval in seconds for the auto bundle mode - "
             "must be strictly positive - defaults to 2 seconds. Accepts "
-            "fractional values (e.g. 0.5) for high-throughput deployments; "
-            "sub-second intervals are floored at one 100 ms heartbeat tick "
-            "when p2p is enabled. Use --debug to disable auto bundling and "
+            "fractional values (e.g. 0.5) for high-throughput deployments. "
+            "Use --debug to disable auto bundling and "
             "trigger bundles manually via debug_bundler_sendBundleNow."
         ),
         nargs="?",
@@ -517,6 +503,17 @@ def initialize_argument_parser() -> ArgumentParser:
         version="%(prog)s " + "version " + __version__,
     )
 
+    # Deprecated no-op: P2P support was removed, but existing deployments
+    # still pass this flag and must keep booting after an upgrade.
+    parser.add_argument(
+        "--disable_p2p",
+        type=str_to_bool,
+        help="DEPRECATED - has no effect, P2P support was removed",
+        nargs="?",
+        const=True,
+        default=None,
+    )
+
     parser.add_argument(
         "--disable_v6",
         type=str_to_bool,
@@ -524,80 +521,6 @@ def initialize_argument_parser() -> ArgumentParser:
         nargs="?",
         const=True,
         default=_get_env_or_default("VOLTAIRE_DISABLE_V6", False, lambda v: v.lower() == "true"),
-    )
-
-    parser.add_argument(
-        "--p2p_enr_address",
-        type=str,
-        help=(
-            "P2P - The address to broadcast to peers about which address"
-            " the bundler is listening on."
-        ),
-        default=_get_env_or_default("VOLTAIRE_P2P_ENR_ADDRESS", None, str),
-    )
-
-    parser.add_argument(
-        "--p2p_enr_tcp_port",
-        type=unsigned_int,
-        help=(
-            "P2P - The tcp ipv4 port to broadcast to peers in order to reach "
-            "back for discovery."
-        ),
-        default=_get_env_or_default("VOLTAIRE_P2P_ENR_TCP_PORT", 9000, unsigned_int),
-    )
-
-    parser.add_argument(
-        "--p2p_enr_udp_port",
-        type=unsigned_int,
-        help=(
-            "P2P - The udp ipv4 port to broadcast to peers in order to reach "
-            "back for discovery."
-        ),
-        default=_get_env_or_default("VOLTAIRE_P2P_ENR_UDP_PORT", 9000, unsigned_int),
-    )
-
-    parser.add_argument(
-        "--p2p_target_peers_number",
-        type=unsigned_int,
-        help="P2P - Target number of connected peers.",
-        default=_get_env_or_default("VOLTAIRE_P2P_TARGET_PEERS_NUMBER", 16, unsigned_int),
-    )
-
-    parser.add_argument(
-        "--p2p_boot_nodes_enr",
-        type=str,
-        default=_get_env_or_default("VOLTAIRE_P2P_BOOT_NODES_ENR", None, list),
-        help=(
-            "P2P - One or more comma-delimited base64-encoded ENR's to "
-            "bootstrap the p2p network. Multiaddr is also supported."
-        ),
-    )
-
-    parser.add_argument(
-        "--p2p_upnp_enabled",
-        type=str_to_bool,
-        help="Attempt to construct external port mappings with UPnP.",
-        nargs="?",
-        const=True,
-        default=_get_env_or_default("VOLTAIRE_P2P_UPNP_ENABLED", False, lambda v: v.lower() == "true"),
-    )
-
-    parser.add_argument(
-        "--p2p_metrics_enabled",
-        type=str_to_bool,
-        help="Whether metrics are enabled.",
-        nargs="?",
-        const=True,
-        default=_get_env_or_default("VOLTAIRE_P2P_METRICS_ENABLED", False, lambda v: v.lower() == "true"),
-    )
-
-    parser.add_argument(
-        "--disable_p2p",
-        type=str_to_bool,
-        help="disable p2p (on by default; pass VOLTAIRE_DISABLE_P2P=false to opt in)",
-        nargs="?",
-        const=True,
-        default=_get_env_or_default("VOLTAIRE_DISABLE_P2P", True, lambda v: v.lower() == "true"),
     )
 
     parser.add_argument(
@@ -790,32 +713,6 @@ def initialize_argument_parser() -> ArgumentParser:
         )
     )
 
-    parser.add_argument(
-        "--p2p_canonical_mempool_id_08",
-        type=str,
-        help="Canonical mempool id for entrypoint v0.08",
-        nargs="?",
-        const=None,
-        default=None,
-    )
-
-    parser.add_argument(
-        "--p2p_canonical_mempool_id_07",
-        type=str,
-        help= "Canonical mempool id for entrypoint v0.07",
-        nargs="?",
-        const=None,
-        default=None,
-    )
-
-    parser.add_argument(
-        "--p2p_canonical_mempool_id_06",
-        type=str,
-        help= "Canonical mempool id for entrypoint v0.06",
-        nargs="?",
-        const=None,
-        default=None,
-    )
     parser.add_argument(
         "--min_stake",
         type=unsigned_int,
@@ -1103,6 +1000,11 @@ def print_eip7702_auth_gas(eip7702_auth_gas: Eip7702AuthGas) -> None:
 
 async def get_init_data(args: Namespace) -> InitData:
     init_logging(args)
+    if args.disable_p2p is not None or os.getenv("VOLTAIRE_DISABLE_P2P") is not None:
+        logging.warning(
+            "--disable_p2p / VOLTAIRE_DISABLE_P2P is deprecated and has no "
+            "effect: P2P support was removed. Remove it from your configuration."
+        )
 
     check_if_valid_rpc_url_and_port(args.rpc_url, args.rpc_port)
 
@@ -1337,39 +1239,6 @@ async def get_init_data(args: Namespace) -> InitData:
     if args.enable_logs_reorg_check:
         logging.info("Userop-logs cache reorg revalidation: ENABLED")
 
-    if not args.disable_p2p:
-        if args.p2p_canonical_mempool_id_08 is None:
-            if args.chain_id not in DEFAULT_MEMPOOL_INFO[
-                    "0x4337084d9e255ff0702461cf8895ce9e3b5ff108"]:
-                logging.warning(
-                    "p2p is disabled because p2p_canonical_mempool_id_08 "
-                    "not provided and no default value for the target chain."
-                )
-                args.disable_p2p = True
-            else:
-                args.p2p_canonical_mempool_id_08 = DEFAULT_MEMPOOL_INFO[
-                    "0x4337084d9e255ff0702461cf8895ce9e3b5ff108"][args.chain_id]
-
-        if args.p2p_canonical_mempool_id_07 is None:
-            if args.chain_id not in DEFAULT_MEMPOOL_INFO["0x0000000071727De22E5E9d8BAf0edAc6f37da032"]:
-                logging.warning(
-                    "p2p is disabled because p2p_canonical_mempool_id_07 "
-                    "not provided and no default value for the target chain."
-                )
-                args.disable_p2p = True
-            else:
-                args.p2p_canonical_mempool_id_07 = DEFAULT_MEMPOOL_INFO["0x0000000071727De22E5E9d8BAf0edAc6f37da032"][args.chain_id]
-
-        if not args.disable_v6 and args.p2p_canonical_mempool_id_06 is None:
-            if args.chain_id not in DEFAULT_MEMPOOL_INFO["0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"]:
-                logging.warning(
-                    "p2p is disabled because p2p_canonical_mempool_id_06 "
-                    "not provided and no default value for the target chain."
-                )
-                args.disable_p2p = True
-            else:
-                args.p2p_canonical_mempool_id_06 = DEFAULT_MEMPOOL_INFO["0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"][args.chain_id]
-
     ret = InitData(
         args.rpc_url,
         args.rpc_port,
@@ -1394,15 +1263,6 @@ async def get_init_data(args: Namespace) -> InitData:
         args.enforce_pre_verification_gas_tolerance,
         ethereum_node_debug_trace_call_urls,
         ethereum_node_eth_get_logs_urls,
-        args.p2p_enr_address,
-        args.p2p_enr_tcp_port,
-        args.p2p_enr_udp_port,
-        args.p2p_target_peers_number,
-        args.p2p_boot_nodes_enr,
-        args.p2p_upnp_enabled,
-        args.p2p_metrics_enabled,
-        __version__,
-        args.disable_p2p,
         args.max_verification_gas,
         args.max_call_data_gas,
         args.disable_v6,
@@ -1413,9 +1273,6 @@ async def get_init_data(args: Namespace) -> InitData:
         args.reputation_whitelist,
         args.reputation_blacklist,
         args.eip7702,
-        args.p2p_canonical_mempool_id_08,
-        args.p2p_canonical_mempool_id_07,
-        args.p2p_canonical_mempool_id_06,
         args.min_stake,
         args.min_unstake_delay,
         args.bundle_gas_estimation_multiplier,

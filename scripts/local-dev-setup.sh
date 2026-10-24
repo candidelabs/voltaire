@@ -262,7 +262,7 @@ poetry run python3 -m voltaire_bundler \
     --ethereum_node_url "http://127.0.0.1:${ANVIL_PORT}" \
     --verbose --unsafe \
     --bundle_interval 2 \
-    --disable_p2p \
+    \
     --eip7702 &
 BUNDLER_PID=$!
 sleep 3

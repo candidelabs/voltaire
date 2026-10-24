@@ -22,7 +22,7 @@ For a quick bundler instance, use one of our [public hosted endpoints](https://d
 Deploy Voltaire using the latest docker image
 
 ```
-docker run --net=host --rm -ti ghcr.io/candidelabs/voltaire/voltaire-bundler:latest --bundler_secret $BUNDLER_SECRET --rpc_url $RPC_URL --rpc_port $PORT --ethereum_node_url $ETHEREUM_NODE_URL --chain_id $CHAIN_ID --verbose --unsafe --disable_p2p
+docker run --net=host --rm -ti ghcr.io/candidelabs/voltaire/voltaire-bundler:latest --bundler_secret $BUNDLER_SECRET --rpc_url $RPC_URL --rpc_port $PORT --ethereum_node_url $ETHEREUM_NODE_URL --chain_id $CHAIN_ID --verbose --unsafe
 ```
 
 # Development
@@ -83,24 +83,6 @@ poetry run python3 -m voltaire_bundler --entrypoint $ENTRYPOINT --bundler_secret
 ### Test the bundler by cloning `eth-infinitism/bundler-spec-tests`
 
 Follow the instruction in <a href='https://github.com/eth-infinitism/bundler-spec-tests'>eth-infinitism/bundler-spec-tests</a> to install dependencies and run the test
-
-## P2P rust section development
-
-### Install Rust
-```
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-### Install build dependencies
-```
-sudo apt install musl-tools
-rustup target add x86_64-unknown-linux-musl
-```
-
-### Build the rust section using poetry script
-```
-poetry run build_p2p
-```
 
 ## Contributions
 

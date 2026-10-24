@@ -1,8 +1,7 @@
 from dataclasses import dataclass
 
 from .mempool_manager import LocalMempoolManager
-from .mempool_info import DEFAULT_MEMPOOL_INFO
-from voltaire_bundler.custom_types import Address, MempoolId
+from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.user_operation_handler_v6 import \
     UserOperationHandlerV6
 
@@ -54,16 +53,6 @@ class LocalMempoolManagerV6(LocalMempoolManager):
         self.enforce_pre_verification_gas_tolerance = enforce_pre_verification_gas_tolerance
         self.senders_to_senders_mempools = {}
         self.paymasters_and_factories_to_ops_hashes_in_mempool = {}
-        self.verified_useroperations_standard_mempool_gossip_queue = []
-        self.seen_user_operation_hashs = set()
-        if (
-            self.entrypoint in DEFAULT_MEMPOOL_INFO and
-            chain_id in DEFAULT_MEMPOOL_INFO[self.entrypoint]
-        ):
-            self.canonical_mempool_id = MempoolId(
-                DEFAULT_MEMPOOL_INFO[self.entrypoint][chain_id])
-        else:
-            self.canonical_mempool_id = None
 
         self.paymaster_deposits_cache = dict()
         self.latest_paymaster_deposits_cache_block = 0

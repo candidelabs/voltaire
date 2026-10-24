@@ -3,16 +3,13 @@ import logging
 import time
 import traceback
 import math
-import os
-import sys
-from typing import Any, Optional, cast
+from typing import Any, Optional
 
 from voltaire_bundler.bundle.exceptions import \
     ExecutionException, OtherJsonRpcErrorCode, OtherJsonRpcErrorException, \
     UserOpFoundException, UserOpReceiptFoundException, ValidationException, ValidationExceptionCode
 from voltaire_bundler.cli_manager import ConditionalRpc
-from voltaire_bundler.event_bus_manager.endpoint import Client, Endpoint
-from voltaire_bundler.mempool.mempool_manager import encode_address, encode_uint256
+from voltaire_bundler.event_bus_manager.endpoint import Endpoint
 from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.user_operation_handler import \
         get_deposit_info
@@ -33,7 +30,7 @@ from voltaire_bundler.gas.gas_price_cache import \
     GasPriceCache, GasPriceUnavailableError
 from voltaire_bundler.utils.cache import PersistentFIFOCache
 from voltaire_bundler.utils.deployed_simulations import check_deployed_simulations
-from voltaire_bundler.utils.eth_client_utils import get_block_info, send_rpc_request_to_eth_client
+from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
 
 from .bundle.bundle_manager import BundlerManager
 from .mempool.mempool_manager_v6 import LocalMempoolManagerV6
@@ -90,9 +87,6 @@ class ExecutionEndpoint(Endpoint):
     local_mempool_manager_v7: LocalMempoolManagerV7
     local_mempool_manager_v8: LocalMempoolManagerV8
     local_mempool_manager_v9: LocalMempoolManagerV9
-    peer_ids_to_cursor: dict[str, int]
-    peer_ids_to_user_ops_hashes_queue: dict[str, list[str]]
-    disable_p2p: bool
     is_eip7702: bool
 
     def __init__(
@@ -113,7 +107,6 @@ class ExecutionEndpoint(Endpoint):
         enforce_pre_verification_gas_tolerance: int,
         ethereum_node_debug_trace_call_urls: list[str],
         ethereum_node_eth_get_logs_urls: list[str],
-        disable_p2p: bool,
         max_verification_gas: int,
         max_call_data_gas: int,
         disable_v6: bool,
@@ -262,57 +255,13 @@ class ExecutionEndpoint(Endpoint):
             bundle_gas_estimation_multiplier,
             gas_price_cache,
         )
-        self.peer_ids_to_cursor = dict()
-        self.peer_ids_to_user_ops_hashes_queue = dict()
-        self.disable_p2p = disable_p2p
         self.disable_v6 = disable_v6
         self.is_eip7702 = is_eip7702
 
         asyncio.ensure_future(self.execute_cron_job(is_debug, bundle_interval))
 
     async def execute_cron_job(self, is_debug: bool, bundle_interval: float) -> None:
-        if not self.disable_p2p:
-            # The p2p branch has to service gossip at a much finer
-            # cadence than bundling, so we keep the 100 ms heartbeat
-            # sleep for the loop. Bundle scheduling is decoupled from
-            # the heartbeat via a monotonic deadline: heartbeat-count
-            # math truncated the configured float interval to whole
-            # 100 ms buckets (e.g. 150 ms → 100 ms) and accumulated
-            # drift from gossip + bundle work time on top of that.
-            heartbeat_interval = 0.1
-
-            p2pClient: Client = Client("p2p_endpoint")
-            p2p_file = ("p2p_endpoint.port"
-                        if sys.platform == "win32"
-                        else "p2p_endpoint.ipc")
-            while not os.path.exists(p2p_file):
-                await asyncio.sleep(1)
-
-            await self.send_pooled_user_op_hashes_to_all_peers()
-
-            next_bundle_at = time.monotonic()
-            while True:
-                try:
-                    await self.update_p2p_gossip(p2pClient)
-                    await self.update_p2p_peer_ids_to_user_ops_hashes_queue(p2pClient)
-                    if (not is_debug) and time.monotonic() >= next_bundle_at:
-                        await self.bundle_manager.send_next_bundle()
-                        # Advance by exactly bundle_interval so cadence
-                        # stays fixed-rate. If work overran so far that
-                        # the deadline is already in the past, snap it
-                        # forward to avoid a catch-up burst.
-                        next_bundle_at += bundle_interval
-                        now = time.monotonic()
-                        if next_bundle_at < now:
-                            next_bundle_at = now + bundle_interval
-                except (ValidationException, ExecutionException) as excp:
-                    logging.exception(excp.message)
-                except Exception:
-                    # Deliberately catch Exception, not bare `except`, so
-                    # asyncio.CancelledError propagates and shutdown works.
-                    logging.error(traceback.format_exc())
-                await asyncio.sleep(heartbeat_interval)
-        elif not is_debug:
+        if not is_debug:
             while True:
                 # Sleep the REMAINDER of the interval, not the full interval,
                 # so each cycle is `bundle_interval` end-to-end rather than
@@ -333,51 +282,6 @@ class ExecutionEndpoint(Endpoint):
 
                 elapsed = time.monotonic() - t0
                 await asyncio.sleep(max(0.0, bundle_interval - elapsed))
-
-    async def send_pooled_user_op_hashes_to_all_peers(self) -> None:
-        pass
-        # await self.send_pooled_user_op_hashes_request("", 0)
-
-    async def update_p2p_gossip(self, p2pClient: Client) -> None:
-        request_events_ops = [
-            self.local_mempool_manager_v9.create_p2p_gossip_requests(),
-            self.local_mempool_manager_v8.create_p2p_gossip_requests(),
-            self.local_mempool_manager_v7.create_p2p_gossip_requests()
-        ]
-        if self.local_mempool_manager_v6 is not None:
-            request_events_ops.append(
-                self.local_mempool_manager_v6.create_p2p_gossip_requests()
-            )
-        request_events_res = await asyncio.gather(*request_events_ops)
-        for request_events in request_events_res:
-            for request_event in request_events:
-                await p2pClient.broadcast_only(request_event)
-        self.local_mempool_manager_v9.verified_useroperations_standard_mempool_gossip_queue.clear()
-        self.local_mempool_manager_v8.verified_useroperations_standard_mempool_gossip_queue.clear()
-        self.local_mempool_manager_v7.verified_useroperations_standard_mempool_gossip_queue.clear()
-        if self.local_mempool_manager_v6 is not None:
-            self.local_mempool_manager_v6.verified_useroperations_standard_mempool_gossip_queue.clear()
-
-    async def update_p2p_peer_ids_to_user_ops_hashes_queue(
-            self, p2pClient: Client) -> None:
-        for (
-            peer_id, user_ops_hashes
-        ) in self.peer_ids_to_user_ops_hashes_queue.items():
-            if len(user_ops_hashes) > 0:
-                pooled_user_ops_by_hash_request = dict()
-                pooled_user_ops_by_hash_request = {"hashes": user_ops_hashes}
-                pooled_user_ops_by_hash_request_message = dict()
-                pooled_user_ops_by_hash_request_message["id"] = "0"
-                pooled_user_ops_by_hash_request_message["peer_id"] = peer_id
-                pooled_user_ops_by_hash_request_message[
-                    "pooled_user_ops_by_hash_request"
-                ] = pooled_user_ops_by_hash_request
-
-                await p2pClient.broadcast_only(
-                    pooled_user_ops_by_hash_request_message
-                )
-
-                self.peer_ids_to_user_ops_hashes_queue[peer_id] = []
 
     async def init_deployed_simulations(self) -> None:
         """Check at boot if the simulation contracts are pre-deployed at
@@ -590,37 +494,13 @@ class ExecutionEndpoint(Endpoint):
                 f"is larger than {MAX_GAS_PER_USER_OPERATION}",
             )
 
-        (user_operation_hash, verified_at_block_hash, valid_mempools) = (
-            await local_mempool.add_user_operation(user_operation)
+        user_operation_hash = await local_mempool.add_user_operation(
+            user_operation
         )
         if user_operation.validated_at_block_hex is not None:
             user_operation_seen_cache.set(
                 f"{input_entrypoint}:{user_operation_hash}",
                 user_operation.validated_at_block_hex,
-            )
-
-        if not self.disable_p2p:
-            if (input_entrypoint == LocalMempoolManagerV6.entrypoint_lowercase):
-                user_operation_json = user_operation.get_user_operation_json()
-            else:
-                user_operation_json = cast(
-                    dict[str, Address | str | dict[str, str] | None],
-                    user_operation.get_user_operation_json()
-                )
-                eip7702_auth = user_operation.eip7702_auth
-                user_operation_json["eip7702Auth"] = None if eip7702_auth is None else {
-                    "chainId": encode_uint256(int(eip7702_auth["chainId"], 16)),
-                    "address": encode_address(eip7702_auth["address"]),
-                    "nonce": encode_uint256(int(eip7702_auth["nonce"], 16)),
-                    "yParity": encode_uint256(int(eip7702_auth["yParity"], 16)),
-                    "r": encode_uint256(int(eip7702_auth["r"], 16)),
-                    "s": encode_uint256(int(eip7702_auth["s"], 16)),
-                }
-            local_mempool.queue_verified_useroperation_to_gossip_publish(
-                user_operation_json,
-                verified_at_block_hash,
-                user_operation.validated_at_block_hex,
-                valid_mempools,
             )
 
         return user_operation_hash
@@ -1078,148 +958,6 @@ class ExecutionEndpoint(Endpoint):
         mode = req_arguments[0]
         # bundling is set to manual by using the --debug flag
         return "OK"
-
-    async def _event_p2p_received_gossib(self, req_arguments: dict) -> None:
-        peer_id = req_arguments["peer_id"]
-        topic = req_arguments["topic"]
-        verified_useroperation = req_arguments["verified_useroperation"]
-        entrypoint_lowercase = verified_useroperation["entry_point_contract"]
-        verified_at_block_hash = verified_useroperation["verified_at_block_hash"]
-
-        # full topic format /account_abstraction/mempool_id/Name/Encoding
-        # sepolia example
-        # /account_abstraction/Qmf7P3CuhzSbpJa8LqXPwRzfPqsvoQ6RG7aXvthYTzGxb2/user_operation/ssz_snappy
-        user_operation = verified_useroperation["user_operation"]
-        mempool_id = topic.split('/')[2]
-        if mempool_id == self.local_mempool_manager_v9.canonical_mempool_id:
-            user_operation_obj = UserOperationV7V8V9(user_operation)
-            local_mempool = self.local_mempool_manager_v9
-        elif mempool_id == self.local_mempool_manager_v8.canonical_mempool_id:
-            user_operation_obj = UserOperationV7V8V9(user_operation)
-            local_mempool = self.local_mempool_manager_v8
-        elif mempool_id == self.local_mempool_manager_v7.canonical_mempool_id:
-            user_operation_obj = UserOperationV7V8V9(user_operation)
-            local_mempool = self.local_mempool_manager_v7
-        elif (
-                self.local_mempool_manager_v6 is not None and
-                mempool_id == self.local_mempool_manager_v6.canonical_mempool_id
-        ):
-            user_operation_obj = UserOperationV6(user_operation)
-            local_mempool = self.local_mempool_manager_v6
-        else:
-            logging.debug(f"Dropping gossib from unsupported topic : {topic}")
-            return
-
-        if entrypoint_lowercase != local_mempool.entrypoint_lowercase:
-            logging.debug(
-                "Dropping gossib from unsupported entrypoint : " +
-                f"{entrypoint_lowercase}"
-            )
-            return
-
-        try:
-            # local_mempool.reputation_manager
-            await local_mempool.add_user_operation_p2p(
-                user_operation_obj, peer_id, verified_at_block_hash
-            )
-        except ValidationException:
-            local_mempool.reputation_manager.ban_entity(peer_id)
-
-    async def _event_p2p_pooled_user_op_hashes_received(
-        self, req_arguments: dict
-    ) -> dict:
-        cursor = req_arguments["cursor"]
-        # todo: add support to other entrypoints
-        user_operations_hashs, next_cursor = (
-            self.local_mempool_manager_v7.get_user_operations_hashes_with_mempool_id(
-                self.local_mempool_manager_v7.canonical_mempool_id, cursor
-            )
-        )
-        pooled_user_op_hashes = {
-            "next_cursor": next_cursor,
-            "hashes": user_operations_hashs,
-        }
-        return pooled_user_op_hashes
-
-    async def _event_p2p_received_pooled_user_op_hashes_response(
-        self, req_arguments: dict
-    ) -> None:
-        peer_id = req_arguments["peer_id"]
-        pooled_user_op_hashes = req_arguments["pooled_user_op_hashes"]
-
-        hashes = pooled_user_op_hashes["hashes"]
-        next_cursor = pooled_user_op_hashes["next_cursor"]
-
-        if peer_id not in self.peer_ids_to_cursor:
-            self.peer_ids_to_cursor[peer_id] = 0
-
-        if peer_id not in self.peer_ids_to_user_ops_hashes_queue:
-            self.peer_ids_to_user_ops_hashes_queue[peer_id] = []
-
-        if next_cursor > 0:
-            await self.send_pooled_user_op_hashes_request(
-                peer_id, self.peer_ids_to_cursor[peer_id] + 1
-            )
-
-        self.peer_ids_to_user_ops_hashes_queue[peer_id] += hashes
-
-    async def _event_p2p_pooled_user_ops_by_hash_received(
-        self, req_arguments: dict
-    ) -> dict:
-        # todo: add support to other entrypoints
-        user_operations_hashes = list(
-            map(lambda hash: "0x" + bytes(hash).hex(), req_arguments["hashes"])
-        )
-        user_operations_to_return = []
-        (
-            verified_user_operations_json, remaining_user_operation_hashes
-        ) = (
-            self.local_mempool_manager_v7.get_user_operations_by_hashes(
-                user_operations_hashes)
-        )
-        user_operations_hashes = remaining_user_operation_hashes
-        user_operations_to_return += verified_user_operations_json
-
-        return {"list": user_operations_to_return}
-
-    async def _event_p2p_received_pooled_user_ops_by_hash_response(
-        self, req_arguments: dict
-    ) -> str:
-        verified_useroperation = req_arguments["list"]
-        # TODO
-        return "Ok"
-
-    async def _event_p2p_status_received(
-            self, _req_arguments: dict) -> dict[str, int | bytes]:
-        (
-            latest_block_number, _, _, _, latest_block_hash
-        ) = await get_block_info(
-            self.ethereum_node_urls
-        )
-        return {
-            "chain_id": self.chain_id,
-            "block_hash": bytes.fromhex(latest_block_hash[2:]),
-            "block_number": int(latest_block_number, 16),
-        }
-
-    async def _event_p2p_received_status_response(
-        self, req_arguments: dict
-    ) -> None:
-        # todo
-        return
-
-    async def send_pooled_user_op_hashes_request(
-            self, peer_id, cursor) -> None:
-        pooled_user_op_hashes_message = dict()
-        pooled_user_op_hashes_request = dict()
-        pooled_user_op_hashes_request = {"cursor": cursor}
-        pooled_user_op_hashes_message["id"] = "0"
-        pooled_user_op_hashes_message["peer_id"] = peer_id
-        pooled_user_op_hashes_message["pooled_user_op_hashes_request"] = (
-            pooled_user_op_hashes_request
-        )
-
-        # await self.p2pClient.broadcast_only(pooled_user_op_hashes_message)
 
 
 async def exception_handler_decorator(

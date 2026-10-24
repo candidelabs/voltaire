@@ -4,7 +4,7 @@ from datetime import datetime
 import re
 from voltaire_bundler.bundle.exceptions import \
         ValidationException, ValidationExceptionCode
-from voltaire_bundler.custom_types import Address, MempoolId
+from voltaire_bundler.custom_types import Address
 
 if TYPE_CHECKING:
     from voltaire_bundler.gas.eip7702_auth_gas import AccountState
@@ -17,7 +17,6 @@ class UserOperation(ABC):
     max_priority_fee_per_gas: int
     factory_address_lowercase: Address | None
     paymaster_address_lowercase: Address | None
-    valid_mempools_ids: list[MempoolId]
     user_operation_hash: str
     code_hash: str | None
     storage_map: dict[str, str | dict[str, str]] | None

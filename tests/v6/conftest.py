@@ -104,8 +104,7 @@ async def bundlerInstance(event_loop, gethDockerContainer):
         "--ethereum_node_url", "http://0.0.0.0:58545",
         "--verbose",
         "--debug",
-        "--bundle_interval", "0",
-        "--disable_p2p"
+        "--bundle_interval", "0"
     ]
 
     asyncio.create_task(main(args, event_loop))

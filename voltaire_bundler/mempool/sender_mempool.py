@@ -13,7 +13,6 @@ MIN_PRICE_BUMP = 10
 @dataclass
 class VerifiedUserOperation:
     user_operation: UserOperation
-    verified_at_block_hash: str
 
 
 @dataclass
@@ -25,7 +24,6 @@ class SenderMempool:
         self,
         new_user_operation: UserOperation,
         new_user_operation_hash: str,
-        verified_at_block_hash: str,
     ) -> tuple[str, Address | None] | None:
         existing_user_operation_hash_with_same_nonce = (
             self._get_user_operation_hash_with_same_nonce(
@@ -36,21 +34,18 @@ class SenderMempool:
             replaced_user_operation_hash, old_paymster = self.try_replace_user_operation(
                 new_user_operation,
                 new_user_operation_hash,
-                verified_at_block_hash,
                 existing_user_operation_hash_with_same_nonce,
             )
             return replaced_user_operation_hash, old_paymster
         else:
             self.user_operation_hashs_to_verified_user_operation[
                 new_user_operation_hash
-            ] = VerifiedUserOperation(
-                    new_user_operation, verified_at_block_hash)
+            ] = VerifiedUserOperation(new_user_operation)
 
     def try_replace_user_operation(
         self,
         new_user_operation: UserOperation,
         new_user_operation_hash: str,
-        verified_at_block_hash: str,
         existing_user_operation_hash_with_same_nonce: str,
     ) -> tuple[str, Address | None]:
         if self._check_if_new_operation_can_replace_existing_operation(
@@ -67,8 +62,7 @@ class SenderMempool:
             ]
             self.user_operation_hashs_to_verified_user_operation[
                 new_user_operation_hash
-            ] = VerifiedUserOperation(
-                    new_user_operation, verified_at_block_hash)
+            ] = VerifiedUserOperation(new_user_operation)
             logging.debug(
                 "useroperation with hash: " + new_user_operation_hash +
                 " replaced useroperation with same nonce with hash: " +
