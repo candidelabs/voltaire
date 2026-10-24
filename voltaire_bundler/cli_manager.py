@@ -504,6 +504,17 @@ def initialize_argument_parser() -> ArgumentParser:
         version="%(prog)s " + "version " + __version__,
     )
 
+    # Deprecated no-op: P2P support was removed, but existing deployments
+    # still pass this flag and must keep booting after an upgrade.
+    parser.add_argument(
+        "--disable_p2p",
+        type=str_to_bool,
+        help="DEPRECATED - has no effect, P2P support was removed",
+        nargs="?",
+        const=True,
+        default=None,
+    )
+
     parser.add_argument(
         "--disable_v6",
         type=str_to_bool,
@@ -990,6 +1001,11 @@ def print_eip7702_auth_gas(eip7702_auth_gas: Eip7702AuthGas) -> None:
 
 async def get_init_data(args: Namespace) -> InitData:
     init_logging(args)
+    if args.disable_p2p is not None or os.getenv("VOLTAIRE_DISABLE_P2P") is not None:
+        logging.warning(
+            "--disable_p2p / VOLTAIRE_DISABLE_P2P is deprecated and has no "
+            "effect: P2P support was removed. Remove it from your configuration."
+        )
 
     check_if_valid_rpc_url_and_port(args.rpc_url, args.rpc_port)
 
