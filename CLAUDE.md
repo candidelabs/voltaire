@@ -15,15 +15,7 @@ Voltaire is a modular and lightning-fast Python Bundler for Ethereum EIP-4337 Ac
 poetry install
 
 # Set correct Python version
-poetry env use python3.13
-```
-
-### Linting and Type Checking
-```bash
-# Run linting and type checking
-poetry run lint
-
-# This runs both flake8 and mypy on the voltaire_bundler package
+poetry env use python3.14
 ```
 
 ### Testing
@@ -119,7 +111,7 @@ poetry run python3 -m voltaire_bundler \
 
 ## Development Notes
 
-- The project uses Python 3.13+ with async/await patterns throughout
+- The project uses Python 3.14+ with async/await patterns throughout
 - Supports multiple Ethereum node URLs for redundancy
 - Implements comprehensive reputation management and validation
 

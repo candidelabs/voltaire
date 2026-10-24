@@ -4,7 +4,7 @@
 # Prerequisites:
 #   - anvil (Foundry): https://book.getfoundry.sh/getting-started/installation
 #   - poetry: pip install poetry
-#   - Python 3.13+
+#   - Python 3.14+
 #   - docker (only when --with-postgres is passed)
 #
 # This script starts a local anvil node, deploys the required contracts,
