@@ -71,7 +71,6 @@ class InitData:
     enforce_pre_verification_gas_tolerance: int
     ethereum_node_debug_trace_call_urls: list[str]
     ethereum_node_eth_get_logs_urls: list[str]
-    client_version: str
     max_verification_gas: int
     max_call_data_gas: int
     disable_v6: bool
@@ -1264,7 +1263,6 @@ async def get_init_data(args: Namespace) -> InitData:
         args.enforce_pre_verification_gas_tolerance,
         ethereum_node_debug_trace_call_urls,
         ethereum_node_eth_get_logs_urls,
-        __version__,
         args.max_verification_gas,
         args.max_call_data_gas,
         args.disable_v6,

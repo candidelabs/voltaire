@@ -5,7 +5,7 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from eth_abi import encode, decode
+from eth_abi import encode
 
 from voltaire_bundler.bundle.exceptions import \
         ValidationException, ValidationExceptionCode
@@ -37,7 +37,6 @@ class LocalMempoolManager():
     enforce_gas_price_tolerance: int
     enforce_pre_verification_gas_tolerance: int
     paymasters_and_factories_to_ops_hashes_in_mempool: dict[Address, set[str]]
-    seen_user_operation_hashs: set[str]
     paymaster_deposits_cache: dict[str, int]
     latest_paymaster_deposits_cache_block: int
     min_stake: int
@@ -50,7 +49,7 @@ class LocalMempoolManager():
     async def add_user_operation(
         self,
         user_operation: UserOperation,
-    ) -> tuple[str, str]:
+    ) -> str:
         user_operation.last_add_to_mempool_date = datetime.now()
         user_operation.number_of_add_to_mempool_attempts += 1
         self._verify_banned_and_throttled_entities(
@@ -82,7 +81,7 @@ class LocalMempoolManager():
             storage_map,
             paymaster_context,
             validated_at_block_number,
-            validated_at_block_hash
+            _
         ) = await self.validation_manager.validate_user_operation(
             user_operation,
             self.entrypoint,
@@ -138,7 +137,6 @@ class LocalMempoolManager():
         replaced_user_operation_hash_and_paymaster = new_sender.add_user_operation(
             user_operation,
             user_operation_hash,
-            validated_at_block_hash,
         )
         if replaced_user_operation_hash_and_paymaster is not None:
             _, old_paymaster = replaced_user_operation_hash_and_paymaster
@@ -172,13 +170,7 @@ class LocalMempoolManager():
             )
         user_operation.user_operation_hash = user_operation_hash
 
-        return (
-            user_operation_hash,
-            validated_at_block_hash,
-        )
-
-    def is_hash_seen(self, user_operation_hash: str) -> bool:
-        return user_operation_hash in self.seen_user_operation_hashs
+        return user_operation_hash
 
     async def get_user_operations_to_bundle(
         self, is_conditional_rpc: bool

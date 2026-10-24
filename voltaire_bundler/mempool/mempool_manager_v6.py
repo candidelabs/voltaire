@@ -53,7 +53,6 @@ class LocalMempoolManagerV6(LocalMempoolManager):
         self.enforce_pre_verification_gas_tolerance = enforce_pre_verification_gas_tolerance
         self.senders_to_senders_mempools = {}
         self.paymasters_and_factories_to_ops_hashes_in_mempool = {}
-        self.seen_user_operation_hashs = set()
 
         self.paymaster_deposits_cache = dict()
         self.latest_paymaster_deposits_cache_block = 0

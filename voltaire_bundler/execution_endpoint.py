@@ -494,8 +494,8 @@ class ExecutionEndpoint(Endpoint):
                 f"is larger than {MAX_GAS_PER_USER_OPERATION}",
             )
 
-        (user_operation_hash, _) = (
-            await local_mempool.add_user_operation(user_operation)
+        user_operation_hash = await local_mempool.add_user_operation(
+            user_operation
         )
         if user_operation.validated_at_block_hex is not None:
             user_operation_seen_cache.set(
