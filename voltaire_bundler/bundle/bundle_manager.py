@@ -30,7 +30,8 @@ from voltaire_bundler.user_operation.user_operation_v7v8v9 import UserOperationV
 
 from voltaire_bundler.utils.eip7702 import create_and_sign_eip7702_raw_transaction
 from voltaire_bundler.utils.eth_client_utils import \
-    encode_handleops_calldata_v6, encode_handleops_calldata_v7v8v9, send_rpc_request_to_eth_client
+    encode_handleops_calldata_v6, encode_handleops_calldata_v7v8v9, \
+    send_rpc_request_to_eth_client, send_rpc_request_to_eth_client_no_retry
 from voltaire_bundler.utils.load_bytecode import load_bytecode
 
 from ..mempool.reputation_manager import ReputationManager
@@ -42,6 +43,38 @@ from ..mempool.reputation_manager import ReputationManager
 # this tick. Short-circuits on the first match, so even a large monitor
 # set with a few stale entries returns immediately.
 MIN_INCLUSION_CHECK_AGE_S = 2.0
+
+# Tx-pool rejections that mean "this node already holds a tx at this
+# nonce and the one we just sent does not displace it". Seen from a
+# single node they are ambiguous: either the earlier bundle really is
+# stuck underpriced, or the node simply still has it queued. The fan-out
+# broadcast resolves that ambiguity (see broadcast_raw_transaction); the
+# fee-bump branch in send_bundle only fires when no node took the tx
+# fresh. Shared so both sites agree on what "stuck" means.
+TX_POOL_STUCK_MESSAGES = (
+    "already known",  # Geth
+    "transaction underpriced",  # Geth
+    "replacement transaction underpriced",  # Geth
+    "AlreadyKnown",  # nethermind
+    "ReplacementNotAllowed",  # nethermind
+    "could not replace existing tx",  # erigon
+)
+
+# Per-node wall-clock cap on one eth_sendRawTransaction in the fan-out.
+# The broadcast is a gather, so one hanging node would otherwise hold
+# the whole bundle round hostage; a node that doesn't answer in this
+# window is treated as unreachable for this round only.
+BROADCAST_NODE_TIMEOUT_S = 10.0
+
+
+def _is_tx_pool_stuck_error(error: object) -> bool:
+    """True when a JSON-RPC error object is one of TX_POOL_STUCK_MESSAGES."""
+    if not isinstance(error, dict):
+        return False
+    message = error.get("message")
+    if not isinstance(message, str):
+        return False
+    return any(needle in message for needle in TX_POOL_STUCK_MESSAGES)
 
 
 async def _warm_inclusion_caches(
@@ -601,13 +634,7 @@ class BundlerManager:
                 (bundler_address, bundler_private_key)
             )
         else:
-            result = await send_rpc_request_to_eth_client(
-                self.bundle_node_urls,
-                "eth_sendRawTransaction",
-                [
-                    raw_transaction
-                ],
-            )
+            result = await self.broadcast_raw_transaction(raw_transaction)
 
         if "error" in result:
             if "message" in result["error"]:
@@ -625,14 +652,12 @@ class BundlerManager:
                 # ErrReplaceUnderpriced is returned if a transaction is
                 # attempted to be replaced with a different one without
                 # the required price bump.
-                elif (
-                    "already known" in result["error"]["message"] or  # Geth
-                    "transaction underpriced" in result["error"]["message"] or  # Geth
-                    "replacement transaction underpriced" in result["error"]["message"] or
-                    "AlreadyKnown" in result["error"]["message"]  or # nethermind
-                    "ReplacementNotAllowed" in result["error"]["message"]  or # nethermind
-                    "could not replace existing tx" in result["error"]["message"]  # erigon
-                ):
+                elif _is_tx_pool_stuck_error(result["error"]):
+                    # With several bundle nodes, broadcast_raw_transaction
+                    # only surfaces a stuck error when NO node accepted
+                    # the tx fresh, so reaching here means the pending
+                    # bundle is genuinely underpriced rather than merely
+                    # unpropagated.
                     # retry sending useroperations with higher gas price
                     # if the gas_price_percentage_multiplier reached 600,
                     # drop all user_operations
@@ -719,6 +744,94 @@ class BundlerManager:
                     user_operation.factory_address_lowercase,
                     user_operation.paymaster_address_lowercase,
                 )
+
+    async def broadcast_raw_transaction(self, raw_transaction: str) -> dict:
+        """eth_sendRawTransaction fan-out across every bundle node.
+
+        Sends the same signed tx to all ``bundle_node_urls`` in parallel
+        and folds the answers into one JSON-RPC-shaped dict so the
+        caller's error handling stays unchanged. Precedence:
+
+        1. any node returned a hash → ``{"result": hash}``. The tx is in
+           at least one pool that didn't already have it, so even if the
+           primary said "already known" this round was a propagation
+           problem, not a pricing one — no fee bump.
+        2. no hash, at least one node answered with a tx-pool "stuck"
+           error → that error. Every reachable node already holds a tx at
+           this nonce; this is the signal send_bundle bumps on.
+        3. no hash, no stuck, at least one other RPC error → that error
+           (invalid sender, oversized data, ...), handled as before.
+        4. nothing usable from any node → fall back to the retrying
+           single-node path, which is exactly what a one-node config
+           does today when its node is down.
+
+        A single configured node skips the fan-out entirely and keeps the
+        retrying call, so that deployment's behaviour is byte-for-byte
+        unchanged.
+        """
+        nodes = self.bundle_node_urls
+        if len(nodes) <= 1:
+            return await send_rpc_request_to_eth_client(
+                nodes, "eth_sendRawTransaction", [raw_transaction],
+            )
+
+        async def send_one(url: str) -> object:
+            try:
+                return await asyncio.wait_for(
+                    send_rpc_request_to_eth_client_no_retry(
+                        url, "eth_sendRawTransaction", [raw_transaction],
+                    ),
+                    timeout=BROADCAST_NODE_TIMEOUT_S,
+                )
+            except Exception as exc:  # transport, timeout, malformed JSON
+                return exc
+
+        responses = await asyncio.gather(*(send_one(url) for url in nodes))
+
+        accepted: list[tuple[int, str]] = []
+        stuck: list[tuple[int, dict]] = []
+        other: list[tuple[int, dict]] = []
+        unreachable: list[int] = []
+        for idx, res in enumerate(responses, start=1):
+            if isinstance(res, dict) and isinstance(res.get("result"), str):
+                accepted.append((idx, res["result"]))
+            elif isinstance(res, dict) and isinstance(res.get("error"), dict):
+                if _is_tx_pool_stuck_error(res["error"]):
+                    stuck.append((idx, res["error"]))
+                else:
+                    other.append((idx, res["error"]))
+            else:
+                unreachable.append(idx)
+
+        def fmt(entries) -> str:
+            return ",".join(str(e[0] if isinstance(e, tuple) else e) for e in entries) or "-"
+
+        summary = (
+            f"accepted by node(s) {fmt(accepted)}; "
+            f"already known on {fmt(stuck)}; "
+            f"rejected by {fmt(other)}; "
+            f"unreachable {fmt(unreachable)} "
+            f"(of {len(nodes)})"
+        )
+
+        if accepted:
+            logging.info(f"bundle tx broadcast: {summary}")
+            return {"result": accepted[0][1]}
+        if stuck:
+            logging.warning(
+                f"bundle tx broadcast: no node accepted the tx fresh; {summary}"
+            )
+            return {"error": stuck[0][1]}
+        if other:
+            logging.warning(f"bundle tx broadcast: {summary}")
+            return {"error": other[0][1]}
+        logging.warning(
+            f"bundle tx broadcast: {summary}; "
+            "falling back to the retrying single-node send"
+        )
+        return await send_rpc_request_to_eth_client(
+            nodes, "eth_sendRawTransaction", [raw_transaction],
+        )
 
     async def remove_included_and_readd_to_mempool_userops_monitoring(
             self,
