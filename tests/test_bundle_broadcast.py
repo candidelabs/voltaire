@@ -5,9 +5,14 @@ and folds the answers into a single JSON-RPC-shaped result for
 send_bundle. These pin the precedence rules:
 
 - any node returning a hash wins, even if the primary said "already known"
+- the first accept returns immediately; slower nodes keep running under
+  supervision and are not cancelled
 - a stuck error is surfaced only when no node accepted the tx fresh
 - a non-stuck RPC error from one node does not mask a stuck signal from
   another (a permanently broken secondary must not starve the fee bump)
+- a permanent rejection beats a transient one from another node
+- transient errors (rate limits, upstream outages) route to the retrying
+  fallback instead of being handed to send_bundle as a hard failure
 - with no usable answer from any node, fall back to the retrying call
 - a single configured node never fans out
 """
@@ -20,21 +25,34 @@ import pytest
 import voltaire_bundler.bundle.bundle_manager as bm
 from voltaire_bundler.bundle.bundle_manager import (
     BundlerManager,
+    _classify_send_raw_tx_response,
     _is_tx_pool_stuck_error,
 )
+from voltaire_bundler.utils.eth_client_utils import is_retryable_rpc_error
 
 RAW_TX = "0xdeadbeef"
 TX_HASH = "0x" + "11" * 32
 ALREADY_KNOWN = {"code": -32000, "message": "already known"}
 UNDERPRICED = {"code": -32000, "message": "replacement transaction underpriced"}
 FREE_PLAN = {"code": 35, "message": "chain is not available on free plan"}
+RATE_LIMITED = {"code": -32005, "message": "rate limited"}
+INVALID_SENDER = {"code": -32000, "message": "invalid sender"}
 
 
 def make_manager(nodes: list[str]) -> BundlerManager:
     # Bypass __init__: the fan-out only reads bundle_node_urls.
     manager = BundlerManager.__new__(BundlerManager)
     manager.bundle_node_urls = nodes
+    manager._broadcast_tasks = set()
     return manager
+
+
+async def drain(manager: BundlerManager) -> None:
+    # Cancel any supervised straggler so the test loop closes cleanly.
+    tasks = list(manager._broadcast_tasks)
+    for t in tasks:
+        t.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
 
 
 class FakeRpc:
@@ -84,6 +102,34 @@ def retry(monkeypatch):
         monkeypatch.setattr(bm, "send_rpc_request_to_eth_client", fake)
         return fake
     return install
+
+
+def test_retryable_predicate_mirrors_retry_loop_rules():
+    # Non-retryable codes: the node evaluated the tx and rejected it.
+    for code in (3, -32000, -32015, -32010, -32603):
+        assert not is_retryable_rpc_error({"code": code, "message": "x"}, 0)
+    # Anything else is transient.
+    assert is_retryable_rpc_error(RATE_LIMITED, 0)
+    assert is_retryable_rpc_error(FREE_PLAN, 1)
+    # erpc "upstream" wording only counts on the first node.
+    assert is_retryable_rpc_error({"code": -32000, "message": "upstream circuit breaker open"}, 0)
+    assert not is_retryable_rpc_error({"code": -32000, "message": "upstream circuit breaker open"}, 1)
+    # No code, no upstream wording: nothing to retry on.
+    assert not is_retryable_rpc_error({"message": "already known"}, 0)
+    assert not is_retryable_rpc_error("boom", 0)
+    assert not is_retryable_rpc_error(None, 0)
+
+
+def test_classifier_buckets():
+    assert _classify_send_raw_tx_response({"result": TX_HASH}, 0) == ("accepted", TX_HASH)
+    assert _classify_send_raw_tx_response({"error": ALREADY_KNOWN}, 0) == ("stuck", ALREADY_KNOWN)
+    assert _classify_send_raw_tx_response({"error": INVALID_SENDER}, 0) == ("permanent", INVALID_SENDER)
+    assert _classify_send_raw_tx_response({"error": RATE_LIMITED}, 0) == ("retryable", RATE_LIMITED)
+    exc = ConnectionError("refused")
+    assert _classify_send_raw_tx_response(exc, 0) == ("unreachable", exc)
+    bare = {"jsonrpc": "2.0", "id": 1}
+    assert _classify_send_raw_tx_response(bare, 0) == ("unreachable", bare)
+    assert _classify_send_raw_tx_response({"result": None}, 0)[0] == "unreachable"
 
 
 def test_stuck_classifier_matches_known_pool_messages():
@@ -189,18 +235,69 @@ async def test_unreachable_secondary_does_not_mask_stuck_primary(no_retry, retry
 
 
 @pytest.mark.asyncio
-async def test_non_stuck_error_surfaces_when_nothing_else(no_retry, retry):
-    invalid = {"code": -32000, "message": "invalid sender"}
+async def test_permanent_error_surfaces_when_nothing_else(no_retry, retry):
     no_retry({
-        "http://a": {"error": invalid},
+        "http://a": {"error": INVALID_SENDER},
         "http://b": ConnectionError("refused"),
     })
-    retry({"result": "unused"})
+    single = retry({"result": "unused"})
     manager = make_manager(["http://a", "http://b"])
 
     res = await manager.broadcast_raw_transaction(RAW_TX)
 
-    assert res == {"error": invalid}
+    assert res == {"error": INVALID_SENDER}
+    assert single.calls == []
+
+
+@pytest.mark.asyncio
+async def test_permanent_error_beats_transient_error(no_retry, retry):
+    # The tx itself is bad; a rate limit elsewhere must not trigger a
+    # 60-attempt retry loop over an invalid signature.
+    no_retry({
+        "http://a": {"error": RATE_LIMITED},
+        "http://b": {"error": INVALID_SENDER},
+    })
+    single = retry({"result": "unused"})
+    manager = make_manager(["http://a", "http://b"])
+
+    res = await manager.broadcast_raw_transaction(RAW_TX)
+
+    assert res == {"error": INVALID_SENDER}
+    assert single.calls == []
+
+
+@pytest.mark.asyncio
+async def test_only_transient_errors_fall_back_to_retrying_send(no_retry, retry):
+    # Same outcome a single-node config gets for a rate-limited node:
+    # the retrying path, not a hard "Dropping all user operations".
+    no_retry({
+        "http://a": {"error": RATE_LIMITED},
+        "http://b": ConnectionError("refused"),
+    })
+    single = retry({"result": TX_HASH})
+    manager = make_manager(["http://a", "http://b"])
+
+    res = await manager.broadcast_raw_transaction(RAW_TX)
+
+    assert res == {"result": TX_HASH}
+    assert single.calls == [
+        (["http://a", "http://b"], "eth_sendRawTransaction", [RAW_TX])
+    ]
+
+
+@pytest.mark.asyncio
+async def test_transient_error_does_not_mask_stuck(no_retry, retry):
+    no_retry({
+        "http://a": {"error": ALREADY_KNOWN},
+        "http://b": {"error": RATE_LIMITED},
+    })
+    single = retry({"result": "unused"})
+    manager = make_manager(["http://a", "http://b"])
+
+    res = await manager.broadcast_raw_transaction(RAW_TX)
+
+    assert res == {"error": ALREADY_KNOWN}
+    assert single.calls == []
 
 
 @pytest.mark.asyncio
@@ -223,7 +320,30 @@ async def test_all_unreachable_falls_back_to_retrying_send(no_retry, retry, monk
 
 
 @pytest.mark.asyncio
-async def test_hanging_node_does_not_block_accept_from_other(no_retry, retry, monkeypatch):
+async def test_first_accept_returns_without_waiting_for_hanging_node(no_retry, retry):
+    # Default 10 s per-node timeout left in place on purpose: the accept
+    # from node b must come back long before node a would time out.
+    fan = no_retry({
+        "http://a": "hang",
+        "http://b": {"result": TX_HASH},
+    })
+    retry({"result": "unused"})
+    manager = make_manager(["http://a", "http://b"])
+
+    res = await asyncio.wait_for(manager.broadcast_raw_transaction(RAW_TX), timeout=1)
+
+    assert res == {"result": TX_HASH}
+    # The slow send was not cancelled: it is still in flight, supervised.
+    assert len(manager._broadcast_tasks) == 1
+    straggler = next(iter(manager._broadcast_tasks))
+    assert not straggler.done()
+    assert sorted(c[0] for c in fan.calls) == ["http://a", "http://b"]
+    await drain(manager)
+    assert manager._broadcast_tasks == set()
+
+
+@pytest.mark.asyncio
+async def test_straggler_is_dropped_from_supervision_when_it_finishes(no_retry, retry, monkeypatch):
     monkeypatch.setattr(bm, "BROADCAST_NODE_TIMEOUT_S", 0.05)
     no_retry({
         "http://a": "hang",
@@ -232,6 +352,11 @@ async def test_hanging_node_does_not_block_accept_from_other(no_retry, retry, mo
     retry({"result": "unused"})
     manager = make_manager(["http://a", "http://b"])
 
-    res = await asyncio.wait_for(manager.broadcast_raw_transaction(RAW_TX), timeout=2)
-
+    res = await manager.broadcast_raw_transaction(RAW_TX)
     assert res == {"result": TX_HASH}
+    assert len(manager._broadcast_tasks) == 1
+
+    # Let the straggler hit its timeout and run its done-callbacks.
+    await asyncio.gather(*manager._broadcast_tasks)
+    await asyncio.sleep(0)
+    assert manager._broadcast_tasks == set()

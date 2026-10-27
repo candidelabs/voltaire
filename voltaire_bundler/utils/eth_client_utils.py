@@ -104,6 +104,38 @@ def create_flashbots_signature(
     return f"{signer}:0x{signed_message.signature.hex()}"
 
 
+# JSON-RPC error codes that mean the node evaluated the request and
+# rejected it for a reason retrying will not change: 3 (execution
+# revert), -32000 (generic server error: already known, underpriced,
+# invalid sender, ...), -32015/-32010 (nethermind tx rejections) and
+# -32603 (internal error, used by several providers for reverts).
+# Anything else (rate limits, upstream outages, method-not-found from a
+# load balancer, ...) is retried on the next node.
+_NON_RETRYABLE_RPC_ERROR_CODES = (3, -32000, -32015, -32010, -32603)
+
+
+def is_retryable_rpc_error(error: object, node_index: int) -> bool:
+    """True when a JSON-RPC error object is worth retrying on another node.
+
+    Shared by the retrying ``send_rpc_request_to_eth_client`` loop and the
+    bundle-tx fan-out in bundle_manager, so both agree on which rejections
+    are transient. ``node_index`` is the position of the node that answered
+    in the caller's node list; the erpc special case below only applies to
+    the first node, which is where an erpc proxy is expected to sit.
+    """
+    if not isinstance(error, dict):
+        return False
+    err_message = error.get("message")
+    if not isinstance(err_message, str):
+        err_message = ""
+    if "code" in error and error["code"] not in _NON_RETRYABLE_RPC_ERROR_CODES:
+        return True
+    # special case for erpc errors like:
+    # "upstream circuit breaker open" or "upstream server errors"
+    # assuming erpc is the first url in the node list
+    return "upstream" in err_message and node_index == 0
+
+
 async def send_rpc_request_to_eth_client(
     nodes_urls: list[str],
     method: str,
@@ -177,24 +209,9 @@ async def send_rpc_request_to_eth_client(
         # misleading errors when nothing on the node was actually wrong.
         else:
             if "error" in json_result:
-                if "message" in json_result["error"]:
-                    err_message = json_result["error"]["message"]
-                else:
-                    err_message = ""
-                if (
-                    "code" in json_result["error"] and
-                    json_result["error"]["code"] != 3 and
-                    json_result["error"]["code"] != -32000 and
-                    json_result["error"]["code"] != -32015 and  # nethermind https://github.com/NethermindEth/nethermind/pull/8951
-                    json_result["error"]["code"] != -32010 and  # nethermind TransactionRejected
-                    json_result["error"]["code"] != -32603
-                ) or (
-                    # special case for erpc errors like:
-                    # "upstream circuit breaker open" or "upstream server errors"
-                    # assuming erpc is the first url in the node list
-                    "upstream" in err_message and node_index == 0
-                ):
-                    err_code = json_result["error"]["code"]
+                if is_retryable_rpc_error(json_result["error"], node_index):
+                    err_code = json_result["error"].get("code")
+                    err_message = json_result["error"].get("message", "")
                     logging.error(
                         f"Attempt No. {i+1} to call node rpc failed."
                         f"the request: {str(json_request)}"

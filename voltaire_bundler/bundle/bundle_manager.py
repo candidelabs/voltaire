@@ -31,7 +31,8 @@ from voltaire_bundler.user_operation.user_operation_v7v8v9 import UserOperationV
 from voltaire_bundler.utils.eip7702 import create_and_sign_eip7702_raw_transaction
 from voltaire_bundler.utils.eth_client_utils import \
     encode_handleops_calldata_v6, encode_handleops_calldata_v7v8v9, \
-    send_rpc_request_to_eth_client, send_rpc_request_to_eth_client_no_retry
+    is_retryable_rpc_error, send_rpc_request_to_eth_client, \
+    send_rpc_request_to_eth_client_no_retry
 from voltaire_bundler.utils.load_bytecode import load_bytecode
 
 from ..mempool.reputation_manager import ReputationManager
@@ -61,9 +62,10 @@ TX_POOL_STUCK_MESSAGES = (
 )
 
 # Per-node wall-clock cap on one eth_sendRawTransaction in the fan-out.
-# The broadcast is a gather, so one hanging node would otherwise hold
-# the whole bundle round hostage; a node that doesn't answer in this
-# window is treated as unreachable for this round only.
+# The broadcast returns as soon as any node accepts the tx, so this only
+# bounds the wait when NO node has accepted yet and one is hanging; a
+# node that doesn't answer in this window is treated as unreachable for
+# this round only.
 BROADCAST_NODE_TIMEOUT_S = 10.0
 
 
@@ -75,6 +77,35 @@ def _is_tx_pool_stuck_error(error: object) -> bool:
     if not isinstance(message, str):
         return False
     return any(needle in message for needle in TX_POOL_STUCK_MESSAGES)
+
+
+def _classify_send_raw_tx_response(
+    response: object, node_index: int
+) -> tuple[str, object]:
+    """Bucket one node's eth_sendRawTransaction answer for the fan-out.
+
+    Returns ``(kind, payload)`` where kind is one of:
+    - "accepted": payload is the tx hash
+    - "stuck": a TX_POOL_STUCK_MESSAGES error (node already holds a tx at
+      this nonce); payload is the error object
+    - "permanent": any other non-retryable rejection (invalid sender,
+      oversized data, ...); payload is the error object
+    - "retryable": a transient RPC error per is_retryable_rpc_error (rate
+      limit, upstream outage, ...); payload is the error object
+    - "unreachable": transport failure, timeout or malformed body; payload
+      is whatever came back (an exception or a bare dict)
+    ``node_index`` is 0-based, as is_retryable_rpc_error expects.
+    """
+    if isinstance(response, dict) and isinstance(response.get("result"), str):
+        return "accepted", response["result"]
+    if isinstance(response, dict) and isinstance(response.get("error"), dict):
+        error = response["error"]
+        if _is_tx_pool_stuck_error(error):
+            return "stuck", error
+        if is_retryable_rpc_error(error, node_index):
+            return "retryable", error
+        return "permanent", error
+    return "unreachable", response
 
 
 async def _warm_inclusion_caches(
@@ -185,6 +216,10 @@ class BundlerManager:
         # warmup could be garbage-collected mid-flight (and, being
         # deduped via seen_warmup_tx_hashes, never retried).
         self._warmup_tasks: set[asyncio.Task] = set()
+        # Same for bundle-tx fan-out sends still in flight after another
+        # node already accepted the tx: they keep running so every node
+        # gets its attempt, and their late answers are logged on completion.
+        self._broadcast_tasks: set[asyncio.Task] = set()
         if self.local_mempool_manager_v6 is None:
             self.bundles_to_send_v6 = None
         else:
@@ -750,7 +785,11 @@ class BundlerManager:
 
         Sends the same signed tx to all ``bundle_node_urls`` in parallel
         and folds the answers into one JSON-RPC-shaped dict so the
-        caller's error handling stays unchanged. Precedence:
+        caller's error handling stays unchanged. Returns as soon as any
+        node accepts the tx; sends still in flight at that point are left
+        running (supervised via ``_broadcast_tasks``) so a slow node still
+        gets its attempt and its answer is logged when it lands.
+        Precedence once every node has answered:
 
         1. any node returned a hash → ``{"result": hash}``. The tx is in
            at least one pool that didn't already have it, so even if the
@@ -759,11 +798,13 @@ class BundlerManager:
         2. no hash, at least one node answered with a tx-pool "stuck"
            error → that error. Every reachable node already holds a tx at
            this nonce; this is the signal send_bundle bumps on.
-        3. no hash, no stuck, at least one other RPC error → that error
-           (invalid sender, oversized data, ...), handled as before.
-        4. nothing usable from any node → fall back to the retrying
-           single-node path, which is exactly what a one-node config
-           does today when its node is down.
+        3. no hash, no stuck, at least one permanent RPC error → that
+           error (invalid sender, oversized data, ...), handled as before.
+           A permanent rejection is not outranked by a transient one from
+           another node: the tx itself is bad and retrying can't fix it.
+        4. only transient errors and/or unreachable nodes → fall back to
+           the retrying single-node path, which is exactly what a one-node
+           config does today when its node is down or rate limited.
 
         A single configured node skips the fan-out entirely and keeps the
         retrying call, so that deployment's behaviour is byte-for-byte
@@ -786,51 +827,96 @@ class BundlerManager:
             except Exception as exc:  # transport, timeout, malformed JSON
                 return exc
 
-        responses = await asyncio.gather(*(send_one(url) for url in nodes))
+        # 0-based index per task: is_retryable_rpc_error's erpc special
+        # case keys on index 0, and the log lines below print index + 1.
+        node_index_by_task = {
+            asyncio.create_task(send_one(url)): idx
+            for idx, url in enumerate(nodes)
+        }
+        buckets: dict[str, list[tuple[int, object]]] = {
+            "accepted": [], "stuck": [], "permanent": [],
+            "retryable": [], "unreachable": [],
+        }
 
-        accepted: list[tuple[int, str]] = []
-        stuck: list[tuple[int, dict]] = []
-        other: list[tuple[int, dict]] = []
-        unreachable: list[int] = []
-        for idx, res in enumerate(responses, start=1):
-            if isinstance(res, dict) and isinstance(res.get("result"), str):
-                accepted.append((idx, res["result"]))
-            elif isinstance(res, dict) and isinstance(res.get("error"), dict):
-                if _is_tx_pool_stuck_error(res["error"]):
-                    stuck.append((idx, res["error"]))
-                else:
-                    other.append((idx, res["error"]))
-            else:
-                unreachable.append(idx)
+        def fmt(kind: str) -> str:
+            return ",".join(str(idx + 1) for idx, _ in buckets[kind]) or "-"
 
-        def fmt(entries) -> str:
-            return ",".join(str(e[0] if isinstance(e, tuple) else e) for e in entries) or "-"
-
-        summary = (
-            f"accepted by node(s) {fmt(accepted)}; "
-            f"already known on {fmt(stuck)}; "
-            f"rejected by {fmt(other)}; "
-            f"unreachable {fmt(unreachable)} "
-            f"(of {len(nodes)})"
-        )
-
-        if accepted:
-            logging.info(f"bundle tx broadcast: {summary}")
-            return {"result": accepted[0][1]}
-        if stuck:
-            logging.warning(
-                f"bundle tx broadcast: no node accepted the tx fresh; {summary}"
+        def summary() -> str:
+            return (
+                f"accepted by node(s) {fmt('accepted')}; "
+                f"already known on {fmt('stuck')}; "
+                f"rejected by {fmt('permanent')}; "
+                f"transient errors on {fmt('retryable')}; "
+                f"unreachable {fmt('unreachable')} "
+                f"(of {len(nodes)})"
             )
-            return {"error": stuck[0][1]}
-        if other:
-            logging.warning(f"bundle tx broadcast: {summary}")
-            return {"error": other[0][1]}
+
+        pending = set(node_index_by_task)
+        while pending:
+            done, pending = await asyncio.wait(
+                pending, return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in done:
+                idx = node_index_by_task[task]
+                kind, payload = _classify_send_raw_tx_response(
+                    task.result(), idx
+                )
+                buckets[kind].append((idx, payload))
+            if buckets["accepted"] and pending:
+                # Don't make the bundle round wait on the stragglers: the
+                # tx is already in a pool. Keep them running so every node
+                # gets its attempt, and log what they say when they answer.
+                for task in pending:
+                    self._broadcast_tasks.add(task)
+                    task.add_done_callback(self._broadcast_tasks.discard)
+                    task.add_done_callback(
+                        lambda t, idx=node_index_by_task[task]:
+                            self._log_late_broadcast_response(t, idx)
+                    )
+                logging.info(
+                    f"bundle tx broadcast: {summary()}; "
+                    f"still awaiting node(s) "
+                    f"{','.join(str(node_index_by_task[t] + 1) for t in pending)}"
+                )
+                return {"result": buckets["accepted"][0][1]}
+
+        if buckets["accepted"]:
+            logging.info(f"bundle tx broadcast: {summary()}")
+            return {"result": buckets["accepted"][0][1]}
+        if buckets["stuck"]:
+            logging.warning(
+                f"bundle tx broadcast: no node accepted the tx fresh; {summary()}"
+            )
+            return {"error": buckets["stuck"][0][1]}
+        if buckets["permanent"]:
+            logging.warning(f"bundle tx broadcast: {summary()}")
+            return {"error": buckets["permanent"][0][1]}
         logging.warning(
-            f"bundle tx broadcast: {summary}; "
+            f"bundle tx broadcast: {summary()}; "
             "falling back to the retrying single-node send"
         )
         return await send_rpc_request_to_eth_client(
             nodes, "eth_sendRawTransaction", [raw_transaction],
+        )
+
+    @staticmethod
+    def _log_late_broadcast_response(task: asyncio.Task, node_index: int) -> None:
+        """Done-callback for a fan-out send that finished after the
+        broadcast had already returned on another node's accept. Purely
+        informational: the bundle round moved on, nothing here feeds back
+        into send_bundle."""
+        if task.cancelled():
+            logging.info(
+                f"bundle tx broadcast: late send to node {node_index + 1} "
+                "was cancelled"
+            )
+            return
+        kind, payload = _classify_send_raw_tx_response(
+            task.result(), node_index
+        )
+        logging.info(
+            f"bundle tx broadcast: late answer from node {node_index + 1}: "
+            f"{kind} ({payload!r})"
         )
 
     async def remove_included_and_readd_to_mempool_userops_monitoring(
