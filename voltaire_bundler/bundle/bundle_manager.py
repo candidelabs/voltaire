@@ -853,9 +853,20 @@ class BundlerManager:
 
         pending = set(node_index_by_task)
         while pending:
-            done, pending = await asyncio.wait(
-                pending, return_when=asyncio.FIRST_COMPLETED
-            )
+            try:
+                done, pending = await asyncio.wait(
+                    pending, return_when=asyncio.FIRST_COMPLETED
+                )
+            except asyncio.CancelledError:
+                # asyncio.wait never cancels what it waits on, so if the
+                # bundle round is cancelled mid-broadcast the per-node
+                # sends would outlive it unsupervised. Cancel them, let
+                # them unwind, then propagate. `pending` still holds the
+                # set handed to wait(), i.e. every task not yet classified.
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                raise
             for task in done:
                 idx = node_index_by_task[task]
                 kind, payload = _classify_send_raw_tx_response(

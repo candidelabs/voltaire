@@ -343,6 +343,36 @@ async def test_first_accept_returns_without_waiting_for_hanging_node(no_retry, r
 
 
 @pytest.mark.asyncio
+async def test_cancelling_broadcast_cancels_in_flight_sends(no_retry, retry):
+    # Nothing has answered yet when the caller is cancelled: every
+    # per-node send must be cancelled too, not left running unsupervised.
+    fan = no_retry({
+        "http://a": "hang",
+        "http://b": "hang",
+    })
+    retry({"result": "unused"})
+    manager = make_manager(["http://a", "http://b"])
+
+    broadcast = asyncio.create_task(manager.broadcast_raw_transaction(RAW_TX))
+    # Let the fan-out start and park on asyncio.wait.
+    while len(fan.calls) < 2:
+        await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    broadcast.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await broadcast
+
+    # No orphaned sends: every task spawned by the fan-out is finished.
+    leftovers = [
+        t for t in asyncio.all_tasks()
+        if t is not asyncio.current_task() and not t.done()
+    ]
+    assert leftovers == []
+    assert manager._broadcast_tasks == set()
+
+
+@pytest.mark.asyncio
 async def test_straggler_is_dropped_from_supervision_when_it_finishes(no_retry, retry, monkeypatch):
     monkeypatch.setattr(bm, "BROADCAST_NODE_TIMEOUT_S", 0.05)
     no_retry({
