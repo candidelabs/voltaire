@@ -11,13 +11,28 @@ the second-biggest contributor to upstream RPC pressure (after
 change at block cadence at most, so polling on a fixed interval is
 sufficient and lets every userop submit skip two RPCs.
 
-Reads never touch the network. ``get_snapshot`` returns whatever the
-background loop last stored, so a slow or unreachable eth node adds zero
-latency to userop submission or bundle building: the loop logs the failure,
-keeps the previous value, and retries on the next tick. The only time a
-read can fail is before the cache has ever been populated (startup ``warm``
-failed and no background tick has succeeded yet), which raises
-``GasPriceUnavailableError``.
+Two refresh modes, chosen at construction (``lazy``):
+
+Background mode (``lazy=False``): a loop refreshes every ``interval``
+seconds regardless of traffic. Reads never touch the network:
+``get_snapshot`` returns whatever the loop last stored, so a slow or
+unreachable eth node adds zero latency to userop submission or bundle
+building; the loop logs the failure, keeps the previous value, and retries
+on the next tick. The only time a read can fail is before the cache has
+ever been populated (startup ``warm`` failed and no background tick has
+succeeded yet), which raises ``GasPriceUnavailableError``.
+
+Lazy mode (``lazy=True``): no loop. A read returns the cached snapshot if
+it is younger than ``interval``, otherwise it fetches first (one fetch
+shared by every reader waiting on it) and returns the fresh value. An idle
+bundler makes no fee RPCs at all; a busy one makes at most one fetch per
+interval, the same volume as the loop. The trade-off is that the first
+read after an idle stretch pays one round trip, bounded by the per-node
+deadline. A failed fetch raises ``GasPriceUnavailableError`` even when an
+older snapshot exists: in lazy mode that snapshot may be hours old, which
+is not the "at most one interval stale" value background mode serves.
+cli_manager picks lazy mode when neither ``--gas_price_node_url`` nor
+``--gas_price_refresh_interval`` is set.
 
 Node failover: every refresh tries the configured node URLs one at a time,
 each under its own short deadline, so a primary that hangs (rather than
@@ -159,6 +174,10 @@ class GasPriceCache:
         await cache.warm()                # one-shot fetch; raises on failure
         # ... start ``cache.run()`` as a TaskGroup child ...
         snap = await cache.get_snapshot() # never hits the network
+
+    In lazy mode (``lazy=True``) ``run()`` returns at once and
+    ``get_snapshot`` fetches on demand whenever the cached value is older
+    than ``interval``. See the module docstring.
     """
 
     def __init__(
@@ -169,16 +188,20 @@ class GasPriceCache:
         refresh_interval_seconds: float,
         public_nodes: bool = False,
         fallback_node_urls: list[str] | None = None,
+        lazy: bool = False,
     ):
         """``public_nodes`` switches the node-selection policy from
         primary-first (walk the list from index 0 every refresh, so a
         trusted primary always answers when healthy) to round-robin with
         outlier rejection, for lists of untrusted public endpoints.
         ``fallback_node_urls`` are trusted nodes tried primary-first only
-        when every node in ``ethereum_node_urls`` failed. See the module
-        docstring."""
+        when every node in ``ethereum_node_urls`` failed. ``lazy`` turns
+        the background loop off and makes reads fetch on demand once the
+        cached value is older than ``refresh_interval_seconds``. See the
+        module docstring."""
         # Reject non-positive intervals at construction: a zero or
-        # negative interval would turn run()'s sleep into a hot loop.
+        # negative interval would turn run()'s sleep into a hot loop (or,
+        # in lazy mode, make every read a fetch).
         if refresh_interval_seconds <= 0:
             raise ValueError(
                 "refresh_interval_seconds must be > 0, got "
@@ -186,6 +209,16 @@ class GasPriceCache:
             )
         if not ethereum_node_urls:
             raise ValueError("GasPriceCache needs at least one node URL")
+        if lazy and public_nodes:
+            # The outlier clamp needs a steady sample stream to confirm a
+            # genuine price jump (several consecutive agreeing samples);
+            # on-demand sampling would leave it confirming at traffic
+            # cadence. Public nodes are free to poll, so they keep the loop.
+            raise ValueError("GasPriceCache: lazy mode needs trusted nodes")
+        self._lazy = lazy
+        # Lazy mode only: the fetch currently in flight, shared by every
+        # reader that finds the snapshot stale while it runs.
+        self._inflight: asyncio.Task[None] | None = None
         self._ethereum_node_urls = ethereum_node_urls
         self._public_nodes = public_nodes
         self._fallback_node_urls = list(fallback_node_urls or [])
@@ -222,11 +255,19 @@ class GasPriceCache:
 
     # ------------------------------------------------------------------ read
     async def get_snapshot(self) -> GasPriceSnapshot:
-        """Return the most recent fee snapshot without touching the network.
+        """Return the most recent fee snapshot.
 
-        Kept ``async`` so callers can ``gather`` it alongside real RPCs;
-        it never awaits anything. Raises ``GasPriceUnavailableError`` only
-        if no fetch has ever succeeded (see module docstring)."""
+        Background mode: never touches the network. Kept ``async`` so
+        callers can ``gather`` it alongside real RPCs; it never awaits
+        anything. Raises ``GasPriceUnavailableError`` only if no fetch has
+        ever succeeded (see module docstring).
+
+        Lazy mode: returns the cached snapshot while it is younger than
+        the interval, otherwise fetches (sharing one in-flight fetch with
+        concurrent readers) and returns the fresh value. Raises
+        ``GasPriceUnavailableError`` when that fetch fails."""
+        if self._lazy:
+            return await self._get_snapshot_lazy()
         snap = self._snapshot
         if snap is None:
             raise GasPriceUnavailableError(
@@ -234,6 +275,38 @@ class GasPriceCache:
                 "populated yet (eth node unreachable at startup); retry "
                 "shortly"
             )
+        return snap
+
+    async def _get_snapshot_lazy(self) -> GasPriceSnapshot:
+        snap = self._snapshot
+        if (
+            snap is not None
+            and time.monotonic() - snap.fetched_at_monotonic <= self._interval
+        ):
+            return snap
+        inflight = self._inflight
+        if inflight is None or inflight.done():
+            inflight = asyncio.create_task(self._refresh())
+            self._inflight = inflight
+            # If every awaiting reader is cancelled before the fetch
+            # settles, nobody retrieves its exception; mark it retrieved
+            # so asyncio doesn't log "exception was never retrieved".
+            inflight.add_done_callback(
+                lambda t: None if t.cancelled() else t.exception()
+            )
+        try:
+            # shield: a reader cancelled mid-fetch (client disconnect,
+            # bundle round cancelled) must not cancel the fetch the other
+            # readers are waiting on.
+            await asyncio.shield(inflight)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise GasPriceUnavailableError(
+                f"gas price unavailable: fetching eth_gasPrice failed ({exc!r})"
+            ) from exc
+        snap = self._snapshot
+        assert snap is not None  # _refresh stores before returning
         return snap
 
     async def get_max_fee_per_gas(self) -> int:
@@ -255,7 +328,17 @@ class GasPriceCache:
 
         Refreshes every ``interval`` seconds unconditionally. A failed
         refresh keeps the previous snapshot in place and is retried on the
-        next tick; readers are never blocked or failed by it."""
+        next tick; readers are never blocked or failed by it.
+
+        In lazy mode there is nothing to loop over: reads refresh on
+        demand, so this returns immediately."""
+        if self._lazy:
+            logging.info(
+                "GasPriceCache: lazy mode, no background refresh loop; "
+                "fees are fetched on demand and cached for %.1fs",
+                self._interval,
+            )
+            return
         while not self._stop.is_set():
             try:
                 # Sleep ``interval`` seconds, or wake early on stop.

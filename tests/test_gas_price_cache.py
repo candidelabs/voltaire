@@ -800,3 +800,190 @@ async def test_fallback_reminder_after_heartbeat_interval(
 def test_no_fallback_without_a_list():
     cache = _cache(["http://a"])
     assert cache._fallback_node_urls == []
+
+
+# ---------------------------------------------------------------- lazy mode
+# No background loop: reads serve the cached value while it is younger than
+# the interval and fetch on demand otherwise, sharing one in-flight fetch.
+
+
+def _lazy_cache(urls: list[str], interval: float = 1.0) -> GasPriceCache:
+    return GasPriceCache(urls, chain_id=1, is_legacy_mode=True,
+                         refresh_interval_seconds=interval, lazy=True)
+
+
+def _aged_snapshot(max_fee: int, age_s: float) -> GasPriceSnapshot:
+    return GasPriceSnapshot(
+        max_fee_per_gas=max_fee, max_priority_fee_per_gas=None,
+        fetched_at_monotonic=time.monotonic() - age_s,
+    )
+
+
+def test_lazy_mode_rejects_public_nodes():
+    with pytest.raises(ValueError):
+        GasPriceCache(["http://a"], chain_id=1, is_legacy_mode=True,
+                      refresh_interval_seconds=1.0, public_nodes=True,
+                      lazy=True)
+
+
+@pytest.mark.asyncio
+async def test_lazy_fresh_snapshot_is_served_without_fetching(
+    monkeypatch, fast_timeouts
+):
+    rpc = FakeRpc({"http://a": "0x10"})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _lazy_cache(["http://a"], interval=10.0)
+    cache._snapshot = _aged_snapshot(0x30, age_s=1.0)
+
+    snap = await cache.get_snapshot()
+
+    assert snap.max_fee_per_gas == 0x30
+    assert rpc.calls == []
+
+
+@pytest.mark.asyncio
+async def test_lazy_stale_snapshot_triggers_fetch(monkeypatch, fast_timeouts):
+    rpc = FakeRpc({"http://a": "0x11"})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _lazy_cache(["http://a"], interval=1.0)
+    cache._snapshot = _aged_snapshot(0x30, age_s=5.0)
+
+    snap = await cache.get_snapshot()
+
+    assert snap.max_fee_per_gas == 0x11
+    assert len(rpc.calls) == 1
+    # Now fresh: the next read is free.
+    assert (await cache.get_snapshot()) is snap
+    assert len(rpc.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_lazy_first_read_fetches_without_warm(monkeypatch, fast_timeouts):
+    rpc = FakeRpc({"http://a": "0x12"})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _lazy_cache(["http://a"])
+
+    snap = await cache.get_snapshot()
+
+    assert snap.max_fee_per_gas == 0x12
+    assert len(rpc.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_lazy_fetch_failure_raises_even_with_stale_snapshot(
+    monkeypatch, fast_timeouts
+):
+    # Unlike background mode, a stale value is not served on failure: in
+    # lazy mode it could be hours old.
+    rpc = FakeRpc({"http://a": ValueError("down")})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _lazy_cache(["http://a"], interval=1.0)
+    cache._snapshot = _aged_snapshot(0x30, age_s=5.0)
+
+    with pytest.raises(GasPriceUnavailableError):
+        await cache.get_snapshot()
+    assert len(rpc.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_lazy_fetch_failure_without_snapshot_raises(
+    monkeypatch, fast_timeouts
+):
+    rpc = FakeRpc({"http://a": "hang"})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _lazy_cache(["http://a"])
+
+    with pytest.raises(GasPriceUnavailableError):
+        await cache.get_snapshot()
+
+
+@pytest.mark.asyncio
+async def test_lazy_recovers_on_next_read_after_failure(
+    monkeypatch, fast_timeouts
+):
+    rpc = FakeRpc({"http://a": ValueError("down")})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _lazy_cache(["http://a"])
+    with pytest.raises(GasPriceUnavailableError):
+        await cache.get_snapshot()
+    rpc.behaviour["http://a"] = "0x13"
+
+    snap = await cache.get_snapshot()
+
+    assert snap.max_fee_per_gas == 0x13
+
+
+@pytest.mark.asyncio
+async def test_lazy_concurrent_stale_reads_share_one_fetch(
+    monkeypatch, fast_timeouts
+):
+    class SlowRpc(FakeRpc):
+        async def __call__(self, node_url, method, params=None):
+            await asyncio.sleep(0.01)
+            return await super().__call__(node_url, method, params)
+
+    rpc = SlowRpc({"http://a": "0x14"})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _lazy_cache(["http://a"], interval=1.0)
+    cache._snapshot = _aged_snapshot(0x30, age_s=5.0)
+
+    snaps = await asyncio.gather(*(cache.get_snapshot() for _ in range(10)))
+
+    assert all(s.max_fee_per_gas == 0x14 for s in snaps)
+    assert len(rpc.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_lazy_cancelled_reader_does_not_cancel_shared_fetch(
+    monkeypatch, fast_timeouts
+):
+    class SlowRpc(FakeRpc):
+        async def __call__(self, node_url, method, params=None):
+            await asyncio.sleep(0.02)
+            return await super().__call__(node_url, method, params)
+
+    rpc = SlowRpc({"http://a": "0x15"})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _lazy_cache(["http://a"])
+
+    first = asyncio.create_task(cache.get_snapshot())
+    second = asyncio.create_task(cache.get_snapshot())
+    await asyncio.sleep(0)  # let both park on the shared fetch
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+
+    snap = await second
+    assert snap.max_fee_per_gas == 0x15
+    assert len(rpc.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_lazy_run_returns_immediately_and_fetches_nothing(
+    monkeypatch, fast_timeouts
+):
+    rpc = FakeRpc({"http://a": "0x10"})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _lazy_cache(["http://a"], interval=0.02)
+
+    await asyncio.wait_for(cache.run(), timeout=1)
+    await asyncio.sleep(0.1)
+
+    assert rpc.calls == []
+
+
+@pytest.mark.asyncio
+async def test_lazy_warm_then_idle_makes_no_further_calls(
+    monkeypatch, fast_timeouts
+):
+    rpc = FakeRpc({"http://a": "0x10"})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _lazy_cache(["http://a"], interval=0.02)
+
+    await cache.warm()
+    await asyncio.sleep(0.1)
+
+    assert len(rpc.calls) == 1
+    # A read after the interval elapsed is the first thing to fetch again.
+    await cache.get_snapshot()
+    assert len(rpc.calls) == 2
