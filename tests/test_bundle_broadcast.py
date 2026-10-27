@@ -354,9 +354,14 @@ async def test_cancelling_broadcast_cancels_in_flight_sends(no_retry, retry):
     manager = make_manager(["http://a", "http://b"])
 
     broadcast = asyncio.create_task(manager.broadcast_raw_transaction(RAW_TX))
-    # Let the fan-out start and park on asyncio.wait.
-    while len(fan.calls) < 2:
-        await asyncio.sleep(0)
+
+    # Let the fan-out start and park on asyncio.wait. Bounded so a
+    # missing send fails the test promptly instead of spinning forever.
+    async def both_sends_started() -> None:
+        while len(fan.calls) < 2:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(both_sends_started(), timeout=1)
     await asyncio.sleep(0)
 
     broadcast.cancel()
