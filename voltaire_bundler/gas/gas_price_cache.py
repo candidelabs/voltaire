@@ -32,7 +32,9 @@ deadline. When that fetch fails there is a grace window: a cached
 snapshot younger than ``_STALE_ERROR_AFTER_SECONDS`` is served anyway
 (with a warning saying so), so a node that blips for a few seconds costs
 nothing; past the window the read raises ``GasPriceUnavailableError``,
-since a snapshot that old may no longer reflect the network. cli_manager
+since a snapshot that old may no longer reflect the network. After a
+failure the node is retried at most once per ``interval``, the same
+cadence as the loop; reads in between get the previous outcome. cli_manager
 picks lazy mode whenever ``--gas_price_node_url`` is not set, and in that
 mode ``--gas_price_refresh_interval`` is the cache validity period rather
 than a loop cadence.
@@ -222,8 +224,13 @@ class GasPriceCache:
             raise ValueError("GasPriceCache: lazy mode needs trusted nodes")
         self._lazy = lazy
         # Lazy mode only: the fetch currently in flight, shared by every
-        # reader that finds the snapshot stale while it runs.
+        # reader that finds the snapshot stale while it runs, and when it
+        # was started. After a failed fetch no new one starts until
+        # ``interval`` has passed since that start, so a node that fails
+        # fast (connection refused) is retried at the loop's cadence, not
+        # at request rate.
         self._inflight: asyncio.Task[None] | None = None
+        self._inflight_started_at = 0.0
         self._ethereum_node_urls = ethereum_node_urls
         self._public_nodes = public_nodes
         self._fallback_node_urls = list(fallback_node_urls or [])
@@ -292,9 +299,26 @@ class GasPriceCache:
         ):
             return snap
         inflight = self._inflight
+        now = time.monotonic()
+        if inflight is not None and inflight.done():
+            # Retry gate. A failed fetch that returned fast would
+            # otherwise be repeated by every stale read until the node
+            # answers; hold new attempts to one per interval and serve
+            # the previous outcome meanwhile. (A finished successful
+            # fetch stored a snapshot younger than the interval, so the
+            # fast path above already handled that case.)
+            previous_exc = (
+                None if inflight.cancelled() else inflight.exception()
+            )
+            if (
+                previous_exc is not None
+                and now - self._inflight_started_at < self._interval
+            ):
+                return self._lazy_failure_outcome(snap, previous_exc)
         if inflight is None or inflight.done():
             inflight = asyncio.create_task(self._lazy_fetch())
             self._inflight = inflight
+            self._inflight_started_at = now
             # If every awaiting reader is cancelled before the fetch
             # settles, nobody retrieves its exception; mark it retrieved
             # so asyncio doesn't log "exception was never retrieved".
@@ -309,28 +333,35 @@ class GasPriceCache:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            # Grace window: a short node blip should not fail fee reads
-            # while the cached price is still recent enough to trust.
-            # The decision is logged once per failed fetch, in
-            # _lazy_fetch, not once per waiting reader.
-            if snap is not None:
-                age = time.monotonic() - snap.fetched_at_monotonic
-                if age <= _STALE_ERROR_AFTER_SECONDS:
-                    return snap
-                raise GasPriceUnavailableError(
-                    "gas price unavailable: fetching eth_gasPrice failed "
-                    f"({exc!r}) and the cached price is {age:.0f}s old, "
-                    f"past the {_STALE_ERROR_AFTER_SECONDS:.0f}s grace "
-                    "window; retry once the eth node answers"
-                ) from exc
-            raise GasPriceUnavailableError(
-                "gas price unavailable: fetching eth_gasPrice failed "
-                f"({exc!r}) and nothing is cached yet; retry once the eth "
-                "node answers"
-            ) from exc
+            return self._lazy_failure_outcome(snap, exc)
         snap = self._snapshot
         assert snap is not None  # _refresh stores before returning
         return snap
+
+    def _lazy_failure_outcome(
+        self, snap: GasPriceSnapshot | None, exc: BaseException
+    ) -> GasPriceSnapshot:
+        """What a lazy read gets when the fetch it relied on failed:
+        the cached snapshot while it is inside the grace window, else
+        ``GasPriceUnavailableError``. A short node blip should not fail
+        fee reads while the cached price is still recent enough to
+        trust. The decision is logged once per failed fetch, in
+        _lazy_fetch, not once per reader that lands here."""
+        if snap is not None:
+            age = time.monotonic() - snap.fetched_at_monotonic
+            if age <= _STALE_ERROR_AFTER_SECONDS:
+                return snap
+            raise GasPriceUnavailableError(
+                "gas price unavailable: fetching eth_gasPrice failed "
+                f"({exc!r}) and the cached price is {age:.0f}s old, "
+                f"past the {_STALE_ERROR_AFTER_SECONDS:.0f}s grace "
+                "window; retry once the eth node answers"
+            ) from exc
+        raise GasPriceUnavailableError(
+            "gas price unavailable: fetching eth_gasPrice failed "
+            f"({exc!r}) and nothing is cached yet; retry once the eth "
+            "node answers"
+        ) from exc
 
     async def _lazy_fetch(self) -> None:
         """The shared on-demand fetch. Wraps ``_refresh`` so the outcome
@@ -723,11 +754,10 @@ class GasPriceCache:
                 logging.warning(
                     "GasPriceCache: on-demand gas-price fetch failed on every "
                     "node (%r). Serving the cached price aged %.1fs because it "
-                    "is within the %.0fs grace window; every read older than "
-                    "the %.1fs validity period keeps retrying the node, and "
-                    "fee reads start failing with 'gas price unavailable' if "
-                    "the cached price ages past the window before a fetch "
-                    "succeeds.",
+                    "is within the %.0fs grace window; the node is retried at "
+                    "most once per %.1fs validity period, and fee reads start "
+                    "failing with 'gas price unavailable' if the cached price "
+                    "ages past the window before a fetch succeeds.",
                     exc, age, _STALE_ERROR_AFTER_SECONDS, self._interval,
                 )
             else:
