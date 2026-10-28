@@ -870,31 +870,138 @@ async def test_lazy_first_read_fetches_without_warm(monkeypatch, fast_timeouts):
 
 
 @pytest.mark.asyncio
-async def test_lazy_fetch_failure_raises_even_with_stale_snapshot(
-    monkeypatch, fast_timeouts
+async def test_lazy_fetch_failure_within_grace_serves_stale_and_warns(
+    monkeypatch, fast_timeouts, caplog
 ):
-    # Unlike background mode, a stale value is not served on failure: in
-    # lazy mode it could be hours old.
+    # A short blip: the cached price is stale (past the interval) but
+    # still inside the grace window, so it is served with a warning that
+    # says so.
+    rpc = FakeRpc({"http://a": ValueError("down")})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _lazy_cache(["http://a"], interval=1.0)
+    stale = _aged_snapshot(0x30, age_s=5.0)
+    cache._snapshot = stale
+
+    with caplog.at_level("WARNING", logger=""):
+        snap = await cache.get_snapshot()
+
+    assert snap is stale
+    assert len(rpc.calls) == 1
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"
+                and "on-demand gas-price fetch failed" in r.getMessage()]
+    assert len(warnings) == 1
+    assert "grace window" in warnings[0].getMessage()
+    assert "Serving the cached price" in warnings[0].getMessage()
+
+
+@pytest.mark.asyncio
+async def test_lazy_fetch_failure_past_grace_raises_and_logs_error(
+    monkeypatch, fast_timeouts, caplog
+):
+    # Past the grace window a cached value may no longer reflect the
+    # network, so the read fails rather than serving it.
+    rpc = FakeRpc({"http://a": ValueError("down")})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _lazy_cache(["http://a"], interval=1.0)
+    cache._snapshot = _aged_snapshot(
+        0x30, age_s=gpc._STALE_ERROR_AFTER_SECONDS + 30.0)
+
+    with caplog.at_level("WARNING", logger=""):
+        with pytest.raises(GasPriceUnavailableError) as excinfo:
+            await cache.get_snapshot()
+
+    assert "past the" in str(excinfo.value) and "grace window" in str(excinfo.value)
+    assert len(rpc.calls) == 1
+    errors = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert len(errors) == 1
+    assert "fee reads fail" in errors[0].getMessage()
+
+
+@pytest.mark.asyncio
+async def test_lazy_grace_expiry_mid_outage_escalates_once(
+    monkeypatch, fast_timeouts, caplog
+):
+    # Node stays down: first failure inside the window is a warning, the
+    # failure that finds the cached price past the window is one error,
+    # the next failure is silent (heartbeat-limited).
     rpc = FakeRpc({"http://a": ValueError("down")})
     monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = _lazy_cache(["http://a"], interval=1.0)
     cache._snapshot = _aged_snapshot(0x30, age_s=5.0)
 
-    with pytest.raises(GasPriceUnavailableError):
+    with caplog.at_level("WARNING", logger=""):
+        assert (await cache.get_snapshot()).max_fee_per_gas == 0x30
+        cache._snapshot = _aged_snapshot(
+            0x30, age_s=gpc._STALE_ERROR_AFTER_SECONDS + 1.0)
+        with pytest.raises(GasPriceUnavailableError):
+            await cache.get_snapshot()
+        with pytest.raises(GasPriceUnavailableError):
+            await cache.get_snapshot()
+
+    levels = [r.levelname for r in caplog.records
+              if "on-demand gas-price fetch" in r.getMessage()]
+    assert levels == ["WARNING", "ERROR"]
+
+
+@pytest.mark.asyncio
+async def test_lazy_recovery_after_grace_failure_is_logged_once(
+    monkeypatch, fast_timeouts, caplog
+):
+    rpc = FakeRpc({"http://a": ValueError("down")})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _lazy_cache(["http://a"], interval=1.0)
+    cache._snapshot = _aged_snapshot(0x30, age_s=5.0)
+
+    with caplog.at_level("INFO", logger=""):
+        await cache.get_snapshot()  # served stale, warned
+        rpc.behaviour["http://a"] = "0x16"
+        cache._snapshot = _aged_snapshot(0x30, age_s=5.0)  # still stale
+        snap = await cache.get_snapshot()
+        cache._snapshot = _aged_snapshot(0x16, age_s=5.0)
         await cache.get_snapshot()
+
+    assert snap.max_fee_per_gas == 0x16
+    recovered = [r for r in caplog.records
+                 if "fetch recovered" in r.getMessage()]
+    assert len(recovered) == 1
+
+
+@pytest.mark.asyncio
+async def test_lazy_concurrent_readers_on_failure_log_once(
+    monkeypatch, fast_timeouts, caplog
+):
+    class SlowFail(FakeRpc):
+        async def __call__(self, node_url, method, params=None):
+            await asyncio.sleep(0.01)
+            return await super().__call__(node_url, method, params)
+
+    rpc = SlowFail({"http://a": ValueError("down")})
+    monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
+    cache = _lazy_cache(["http://a"], interval=1.0)
+    stale = _aged_snapshot(0x30, age_s=5.0)
+    cache._snapshot = stale
+
+    with caplog.at_level("WARNING", logger=""):
+        snaps = await asyncio.gather(*(cache.get_snapshot() for _ in range(10)))
+
+    assert all(s is stale for s in snaps)
     assert len(rpc.calls) == 1
+    assert sum(1 for r in caplog.records
+               if "on-demand gas-price fetch failed" in r.getMessage()) == 1
 
 
 @pytest.mark.asyncio
 async def test_lazy_fetch_failure_without_snapshot_raises(
     monkeypatch, fast_timeouts
 ):
+    # No grace window without a cached value to fall back on.
     rpc = FakeRpc({"http://a": "hang"})
     monkeypatch.setattr(gpc, "send_rpc_request_once", rpc)
     cache = _lazy_cache(["http://a"])
 
-    with pytest.raises(GasPriceUnavailableError):
+    with pytest.raises(GasPriceUnavailableError) as excinfo:
         await cache.get_snapshot()
+    assert "nothing is cached yet" in str(excinfo.value)
 
 
 @pytest.mark.asyncio

@@ -28,11 +28,14 @@ shared by every reader waiting on it) and returns the fresh value. An idle
 bundler makes no fee RPCs at all; a busy one makes at most one fetch per
 interval, the same volume as the loop. The trade-off is that the first
 read after an idle stretch pays one round trip, bounded by the per-node
-deadline. A failed fetch raises ``GasPriceUnavailableError`` even when an
-older snapshot exists: in lazy mode that snapshot may be hours old, which
-is not the "at most one interval stale" value background mode serves.
-cli_manager picks lazy mode when neither ``--gas_price_node_url`` nor
-``--gas_price_refresh_interval`` is set.
+deadline. When that fetch fails there is a grace window: a cached
+snapshot younger than ``_STALE_ERROR_AFTER_SECONDS`` is served anyway
+(with a warning saying so), so a node that blips for a few seconds costs
+nothing; past the window the read raises ``GasPriceUnavailableError``,
+since a snapshot that old may no longer reflect the network. cli_manager
+picks lazy mode whenever ``--gas_price_node_url`` is not set, and in that
+mode ``--gas_price_refresh_interval`` is the cache validity period rather
+than a loop cadence.
 
 Node failover: every refresh tries the configured node URLs one at a time,
 each under its own short deadline, so a primary that hangs (rather than
@@ -117,7 +120,9 @@ _PER_NODE_TIMEOUT_SECONDS = 5.0
 # Once the cached value is this old a continuing refresh failure is
 # escalated from warning to error (once, when the threshold is crossed,
 # and in the periodic reminders after that), so a long outage is visible
-# in operator logs as more than the initial warning.
+# in operator logs as more than the initial warning. In lazy mode it is
+# also the grace window: a failed on-demand fetch still serves the cached
+# value while it is younger than this, and raises once it is older.
 _STALE_ERROR_AFTER_SECONDS = 60.0
 
 # While a node, or the refresh as a whole, keeps failing tick after tick,
@@ -264,8 +269,10 @@ class GasPriceCache:
 
         Lazy mode: returns the cached snapshot while it is younger than
         the interval, otherwise fetches (sharing one in-flight fetch with
-        concurrent readers) and returns the fresh value. Raises
-        ``GasPriceUnavailableError`` when that fetch fails."""
+        concurrent readers) and returns the fresh value. When that fetch
+        fails, a cached snapshot younger than the grace window
+        (``_STALE_ERROR_AFTER_SECONDS``) is served anyway; otherwise
+        raises ``GasPriceUnavailableError``."""
         if self._lazy:
             return await self._get_snapshot_lazy()
         snap = self._snapshot
@@ -286,7 +293,7 @@ class GasPriceCache:
             return snap
         inflight = self._inflight
         if inflight is None or inflight.done():
-            inflight = asyncio.create_task(self._refresh())
+            inflight = asyncio.create_task(self._lazy_fetch())
             self._inflight = inflight
             # If every awaiting reader is cancelled before the fetch
             # settles, nobody retrieves its exception; mark it retrieved
@@ -302,12 +309,38 @@ class GasPriceCache:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            # Grace window: a short node blip should not fail fee reads
+            # while the cached price is still recent enough to trust.
+            # The decision is logged once per failed fetch, in
+            # _lazy_fetch, not once per waiting reader.
+            if snap is not None:
+                age = time.monotonic() - snap.fetched_at_monotonic
+                if age <= _STALE_ERROR_AFTER_SECONDS:
+                    return snap
+                raise GasPriceUnavailableError(
+                    "gas price unavailable: fetching eth_gasPrice failed "
+                    f"({exc!r}) and the cached price is {age:.0f}s old, "
+                    f"past the {_STALE_ERROR_AFTER_SECONDS:.0f}s grace "
+                    "window; retry once the eth node answers"
+                ) from exc
             raise GasPriceUnavailableError(
-                f"gas price unavailable: fetching eth_gasPrice failed ({exc!r})"
+                "gas price unavailable: fetching eth_gasPrice failed "
+                f"({exc!r}) and nothing is cached yet; retry once the eth "
+                "node answers"
             ) from exc
         snap = self._snapshot
         assert snap is not None  # _refresh stores before returning
         return snap
+
+    async def _lazy_fetch(self) -> None:
+        """The shared on-demand fetch. Wraps ``_refresh`` so the outcome
+        is logged exactly once per fetch, however many readers await it."""
+        try:
+            await self._refresh()
+        except Exception as exc:
+            self._on_lazy_fetch_failure(exc)
+            raise
+        self._on_lazy_fetch_success()
 
     async def get_max_fee_per_gas(self) -> int:
         return (await self.get_snapshot()).max_fee_per_gas
@@ -662,6 +695,90 @@ class GasPriceCache:
         logging.info(
             "GasPriceCache: refresh recovered after %d consecutive failures "
             "over %.0fs",
+            count, time.monotonic() - self._refresh_failed_since,
+        )
+        self._refresh_failures = 0
+        self._stale_escalated = False
+
+    def _on_lazy_fetch_failure(self, exc: Exception) -> None:
+        """Lazy mode: an on-demand fetch failed on every node. Says what
+        readers will get meanwhile. Inside the grace window: a warning
+        on the first failure, then a reminder every
+        ``_PROBLEM_HEARTBEAT_SECONDS``. The moment the cached price ages
+        past the window (or when nothing was ever cached): one error
+        saying fee reads now fail, then reminders at error level. Shares
+        the counters with the background-mode helper; the two modes never
+        run at the same time."""
+        now = time.monotonic()
+        snap = self._snapshot
+        age = now - snap.fetched_at_monotonic if snap is not None else None
+        within_grace = age is not None and age <= _STALE_ERROR_AFTER_SECONDS
+        self._refresh_failures += 1
+        count = self._refresh_failures
+        if count == 1:
+            self._refresh_failed_since = now
+            self._refresh_failure_logged_at = now
+            self._stale_escalated = not within_grace
+            if within_grace:
+                logging.warning(
+                    "GasPriceCache: on-demand gas-price fetch failed on every "
+                    "node (%r). Serving the cached price aged %.1fs because it "
+                    "is within the %.0fs grace window; every read older than "
+                    "the %.1fs validity period keeps retrying the node, and "
+                    "fee reads start failing with 'gas price unavailable' if "
+                    "the cached price ages past the window before a fetch "
+                    "succeeds.",
+                    exc, age, _STALE_ERROR_AFTER_SECONDS, self._interval,
+                )
+            else:
+                logging.error(
+                    "GasPriceCache: on-demand gas-price fetch failed on every "
+                    "node (%r) and %s; fee reads fail with 'gas price "
+                    "unavailable' until a fetch succeeds.",
+                    exc,
+                    "nothing is cached yet" if age is None
+                    else f"the cached price is {age:.0f}s old, past the "
+                         f"{_STALE_ERROR_AFTER_SECONDS:.0f}s grace window",
+                )
+            return
+        since = now - self._refresh_failed_since
+        if not within_grace and not self._stale_escalated:
+            self._stale_escalated = True
+            self._refresh_failure_logged_at = now
+            logging.error(
+                "GasPriceCache: on-demand gas-price fetch has failed %d times "
+                "in a row over %.0fs and the cached price is now %s old, past "
+                "the %.0fs grace window; fee reads fail with 'gas price "
+                "unavailable' until a fetch succeeds (latest: %r)",
+                count, since,
+                f"{age:.0f}s" if age is not None else "<none>",
+                _STALE_ERROR_AFTER_SECONDS, exc,
+            )
+            return
+        if now - self._refresh_failure_logged_at >= _PROBLEM_HEARTBEAT_SECONDS:
+            self._refresh_failure_logged_at = now
+            if within_grace:
+                logging.warning(
+                    "GasPriceCache: on-demand gas-price fetch still failing: "
+                    "%d consecutive failures over %.0fs; still serving the "
+                    "cached price aged %.1fs (grace window %.0fs) (latest: %r)",
+                    count, since, age, _STALE_ERROR_AFTER_SECONDS, exc,
+                )
+            else:
+                logging.error(
+                    "GasPriceCache: on-demand gas-price fetch still failing: "
+                    "%d consecutive failures over %.0fs; fee reads are being "
+                    "rejected (latest: %r)",
+                    count, since, exc,
+                )
+
+    def _on_lazy_fetch_success(self) -> None:
+        count = self._refresh_failures
+        if count == 0:
+            return
+        logging.info(
+            "GasPriceCache: on-demand gas-price fetch recovered after %d "
+            "consecutive failures over %.0fs; serving fresh prices again",
             count, time.monotonic() - self._refresh_failed_since,
         )
         self._refresh_failures = 0

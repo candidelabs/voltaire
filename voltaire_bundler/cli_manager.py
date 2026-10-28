@@ -401,15 +401,15 @@ def initialize_argument_parser() -> ArgumentParser:
         "--gas_price_refresh_interval",
         type=positive_float,
         help=(
-            "seconds between background refreshes of the cached "
-            "eth_gasPrice / eth_maxPriorityFeePerGas values. Setting it "
-            "turns the background refresh loop on; the loop refreshes on "
-            "this cadence regardless of traffic, so raise it to cut RPC "
-            "volume on a metered provider or lower it for tighter fee "
-            "tracking on fast-block L2s. When neither this nor "
-            "gas_price_node_url is set, fees are instead fetched on "
-            "demand and cached for 5s, so an idle bundler makes no fee "
-            "RPCs at all."
+            "seconds the cached eth_gasPrice / eth_maxPriorityFeePerGas "
+            "values stay valid, defaults to 5s. With gas_price_node_url "
+            "set it is the cadence of the background refresh loop, which "
+            "polls regardless of traffic. Without gas_price_node_url "
+            "fees are fetched on demand from ethereum_node_url and this "
+            "is how long a fetched value is reused before the next read "
+            "fetches again, so an idle bundler makes no fee RPCs at all. "
+            "Raise it to cut RPC volume on a metered provider or lower it "
+            "for tighter fee tracking on fast-block L2s."
         ),
         nargs="?",
         default=_get_env_or_default(
@@ -422,8 +422,9 @@ def initialize_argument_parser() -> ArgumentParser:
         help=(
             "List of Eth client JSON-RPC urls used only for the periodic "
             "eth_gasPrice / eth_maxPriorityFeePerGas refresh. Setting it "
-            "turns the background refresh loop on (see "
-            "gas_price_refresh_interval). Intended for free public "
+            "turns the background refresh loop on; unset, fees are fetched "
+            "on demand from ethereum_node_url and cached for "
+            "gas_price_refresh_interval. Intended for free public "
             "endpoints: requests round-robin across the list so each "
             "node sees 1/N of the refresh rate, and a value that "
             "deviates >5x from the cached price is rejected unless "
@@ -1152,14 +1153,12 @@ async def get_init_data(args: Namespace) -> InitData:
         if args.gas_price_refresh_interval is not None
         else DEFAULT_REFRESH_INTERVAL_SECONDS
     )
-    # Background loop only when the operator asked for it, by naming a
-    # refresh interval or a (free, pollable) public node list. Otherwise
-    # fees are fetched on demand against the trusted nodes and cached for
-    # the default interval, so an idle bundler sends no fee RPCs.
-    gas_price_lazy = (
-        args.gas_price_refresh_interval is None
-        and not gas_price_public_nodes
-    )
+    # Background loop only with a (free, pollable) public node list.
+    # Otherwise fees are fetched on demand against the trusted nodes and
+    # reused for gas_price_refresh_interval, so an idle bundler sends no
+    # fee RPCs. The interval therefore means "loop cadence" in one mode
+    # and "cache validity" in the other.
+    gas_price_lazy = not gas_price_public_nodes
     gas_price_cache = GasPriceCache(
         gas_price_node_urls,
         args.chain_id,
