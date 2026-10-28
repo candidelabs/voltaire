@@ -488,15 +488,16 @@ class BundlerManager:
             f"Attempting to send bundle with {num_of_user_operations} user operations."
         )
 
-        # Gas-price values come from the background-refreshed cache so each
-        # bundle round drops two RPCs (eth_gasPrice + eth_maxPriorityFeePerGas)
+        # Gas-price values come from the gas-price cache so each bundle
+        # round drops two RPCs (eth_gasPrice + eth_maxPriorityFeePerGas)
         # off the upstream node. Read it BEFORE building the RPC coroutines
-        # below: the read never touches the network and raises
-        # GasPriceUnavailableError only while the cache has never been
-        # populated (eth node unreachable since startup). Raising here
-        # skips the round without having already fired the bundle
-        # estimate + nonce RPCs — asyncio.gather does not cancel its
-        # siblings when one of them fails.
+        # below: in background mode the read never touches the network and
+        # raises GasPriceUnavailableError only while the cache has never
+        # been populated (eth node unreachable since startup); in lazy mode
+        # it may fetch first and raises when that fetch fails. Either way,
+        # raising here skips the round without having already fired the
+        # bundle estimate + nonce RPCs — asyncio.gather does not cancel
+        # its siblings when one of them fails.
         try:
             gas_price_snapshot = await self.gas_price_cache.get_snapshot()
         except GasPriceUnavailableError as err:

@@ -401,12 +401,15 @@ def initialize_argument_parser() -> ArgumentParser:
         "--gas_price_refresh_interval",
         type=positive_float,
         help=(
-            "seconds between background refreshes of the cached "
-            "eth_gasPrice / eth_maxPriorityFeePerGas values. Defaults to "
-            "5s across every chain. The loop refreshes on this cadence "
-            "regardless of traffic, so raise it to cut RPC volume on a "
-            "metered provider or lower it for tighter fee tracking on "
-            "fast-block L2s."
+            "seconds the cached eth_gasPrice / eth_maxPriorityFeePerGas "
+            "values stay valid, defaults to 5s. With gas_price_node_url "
+            "set it is the cadence of the background refresh loop, which "
+            "polls regardless of traffic. Without gas_price_node_url "
+            "fees are fetched on demand from ethereum_node_url and this "
+            "is how long a fetched value is reused before the next read "
+            "fetches again, so an idle bundler makes no fee RPCs at all. "
+            "Raise it to cut RPC volume on a metered provider or lower it "
+            "for tighter fee tracking on fast-block L2s."
         ),
         nargs="?",
         default=_get_env_or_default(
@@ -418,8 +421,10 @@ def initialize_argument_parser() -> ArgumentParser:
         "--gas_price_node_url",
         help=(
             "List of Eth client JSON-RPC urls used only for the periodic "
-            "eth_gasPrice / eth_maxPriorityFeePerGas refresh - defaults "
-            "to ethereum_node_url value. Intended for free public "
+            "eth_gasPrice / eth_maxPriorityFeePerGas refresh. Setting it "
+            "turns the background refresh loop on; unset, fees are fetched "
+            "on demand from ethereum_node_url and cached for "
+            "gas_price_refresh_interval. Intended for free public "
             "endpoints: requests round-robin across the list so each "
             "node sees 1/N of the refresh rate, and a value that "
             "deviates >5x from the cached price is rejected unless "
@@ -1148,6 +1153,12 @@ async def get_init_data(args: Namespace) -> InitData:
         if args.gas_price_refresh_interval is not None
         else DEFAULT_REFRESH_INTERVAL_SECONDS
     )
+    # Background loop only with a (free, pollable) public node list.
+    # Otherwise fees are fetched on demand against the trusted nodes and
+    # reused for gas_price_refresh_interval, so an idle bundler sends no
+    # fee RPCs. The interval therefore means "loop cadence" in one mode
+    # and "cache validity" in the other.
+    gas_price_lazy = not gas_price_public_nodes
     gas_price_cache = GasPriceCache(
         gas_price_node_urls,
         args.chain_id,
@@ -1155,12 +1166,17 @@ async def get_init_data(args: Namespace) -> InitData:
         gas_price_refresh_interval,
         public_nodes=gas_price_public_nodes,
         fallback_node_urls=gas_price_fallback_node_urls,
+        lazy=gas_price_lazy,
+    )
+    gas_price_mode = (
+        f"on-demand, cached for {gas_price_refresh_interval}s"
+        if gas_price_lazy
+        else f"background refresh every {gas_price_refresh_interval}s"
     )
     try:
         await gas_price_cache.warm()
         logging.info(
-            "Gas-price cache warmed (refresh interval: "
-            f"{gas_price_refresh_interval}s, "
+            f"Gas-price cache warmed ({gas_price_mode}, "
             f"{len(gas_price_node_urls)} node(s), "
             f"{'round-robin' if gas_price_public_nodes else 'primary-first'}"
             + (
@@ -1183,13 +1199,17 @@ async def get_init_data(args: Namespace) -> InitData:
             "gas_price_node_url" if gas_price_public_nodes
             else "ethereum_node_url"
         )
+        retry_text = (
+            "the next fee read will fetch again"
+            if gas_price_lazy else
+            "the background loop will keep retrying (refresh interval: "
+            f"{gas_price_refresh_interval}s)"
+        )
         logging.warning(
             f"Failed to warm gas-price cache from configured "
             f"{flag}(s) ({len(gas_price_node_urls)} "
-            f"endpoint(s)): {exc}. Continuing — the background loop "
-            f"will keep retrying (refresh interval: "
-            f"{gas_price_refresh_interval}s); userops are rejected until "
-            f"the first refresh succeeds."
+            f"endpoint(s)): {exc}. Continuing — {retry_text}; userops "
+            f"are rejected until a fetch succeeds."
         )
 
     # Measure the per-class EIP-7702 authorization gas once (six

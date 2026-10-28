@@ -63,9 +63,11 @@ class GasManager(ABC, Generic[UserOperationType]):
         max_priority_fee_per_gas = user_operation.max_priority_fee_per_gas
 
         # Read the cached gas-price snapshot instead of issuing fresh
-        # eth_gasPrice / eth_maxPriorityFeePerGas calls per userop. The
-        # snapshot is refreshed by GasPriceCache.run() on a fixed
-        # interval; this read never touches the network.
+        # eth_gasPrice / eth_maxPriorityFeePerGas calls per userop. In
+        # background mode the snapshot is refreshed by GasPriceCache.run()
+        # on a fixed interval and this read never touches the network; in
+        # lazy mode it fetches only when the cached value is older than
+        # that interval (one shared fetch per burst of userops).
         snapshot = await self.gas_price_cache.get_snapshot()
         block_max_fee_per_gas = snapshot.max_fee_per_gas
         block_max_fee_per_gas_with_tolerance = math.ceil(
@@ -318,8 +320,9 @@ class GasManager(ABC, Generic[UserOperationType]):
         ]
 
         # Run the OP gas-oracle eth_call in parallel with a cached gas-price
-        # read. The cache read never touches the network and returns
-        # immediately (see GasPriceCache.get_snapshot).
+        # read. In background mode the cache read returns immediately; in
+        # lazy mode it may fetch once if the cached value is stale, which
+        # overlaps with the eth_call here (see GasPriceCache.get_snapshot).
         result, snapshot = await asyncio.gather(
             send_rpc_request_to_eth_client(
                 self.ethereum_node_urls, "eth_call", params, None, "result"

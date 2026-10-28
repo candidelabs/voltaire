@@ -199,7 +199,9 @@ async def test_all_nodes_stuck_surfaces_stuck_error(no_retry, retry):
 
     res = await manager.broadcast_raw_transaction(RAW_TX)
 
-    assert res == {"error": ALREADY_KNOWN}
+    # Both nodes are stuck; whichever answered first is surfaced, and the
+    # fan-out completes in arrival order, so accept either.
+    assert res["error"] in (ALREADY_KNOWN, UNDERPRICED)
     assert _is_tx_pool_stuck_error(res["error"])
 
 
