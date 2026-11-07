@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, patch
 from eth_abi import decode, encode
 
 from voltaire_bundler.bundle.exceptions import ValidationException
+from voltaire_bundler.gas import eip8037
 from voltaire_bundler.gas.gas_manager_v6 import GasManagerV6
 from voltaire_bundler.gas.gas_manager_v7v8v9 import GasManagerV7V8V9
 from voltaire_bundler.gas.gas_price_cache import GasPriceCache
@@ -31,7 +32,7 @@ ENTRYPOINT_V6 = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"
 ENTRYPOINT_V7 = "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
 BUNDLER_ADDRESS = "0x0000000000000000000000000000000000000001"
 SENDER = "0x7e25461EEE6853f89e5bA2bDf87F47a8965EbE04"
-CHAIN_ID = 11155111  # Sepolia: EIP-8037 chain, no VGL multiplier, no L1 fee lookups
+CHAIN_ID = 11155111  # Sepolia: no VGL multiplier, no L1 fee lookups
 
 MAX_VERIFICATION_GAS = 1_000_000
 MAX_CALL_DATA_GAS = 5_000_000
@@ -82,6 +83,18 @@ def _make_user_operation(version: str, verification_gas_limit: str = "0x0",
         "paymasterData": None,
         "eip7702Auth": None,
     })
+
+
+@pytest.fixture(autouse=True)
+def eip8037_chain(monkeypatch):
+    """The verify pass runs with --eip8037; its zero-deposit
+    preVerificationGas read (GasManager module) answers a funded deposit
+    so the pass's simulateHandleOpMod calls are the only ones the
+    responders below see."""
+    monkeypatch.setattr(eip8037, "enabled", True)
+    with patch("voltaire_bundler.gas.gas_manager.send_rpc_request_to_eth_client",
+               new_callable=AsyncMock, return_value={"result": hex(10**18)}):
+        yield
 
 
 def _make_gas_manager(version: str):
@@ -287,9 +300,10 @@ async def test_user_supplied_verification_gas_limit_is_not_verified(version):
 
 @pytest.mark.parametrize("version", ["v6", "v7"])
 @pytest.mark.asyncio
-async def test_verify_pass_only_runs_on_eip8037_chains(version):
-    """Off the listed chains a gasleft() measurement is a faithful upper
+async def test_verify_pass_only_runs_with_the_eip8037_flag(version, monkeypatch):
+    """Without --eip8037 a gasleft() measurement is a faithful upper
     bound, so the estimate is quoted as-is with no extra eth_call."""
+    monkeypatch.setattr(eip8037, "enabled", False)
     gas_manager = _make_gas_manager(version)
     gas_manager.chain_id = 1337
     responder, calls = _responder(version, estimated_vgl=60_000, required_vgl=10**9)

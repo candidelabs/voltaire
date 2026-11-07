@@ -10,6 +10,7 @@ from voltaire_bundler.gas.gas_manager import \
     GasManager, calculate_deposit_slot_index, deep_union
 from voltaire_bundler.gas.somnia_gas_estimation import \
     SOMNIA_CHAIN_IDS, estimate_call_gas_somnia
+from voltaire_bundler.gas import eip8037
 from voltaire_bundler.gas.gas_price_cache import GasPriceCache
 from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.models import FailedOp
@@ -151,7 +152,13 @@ class GasManagerV6(GasManager):
             max_gas = user_operation.call_gas_limit
         else:
             max_gas = self.max_call_data_gas
+            if eip8037.enabled:
+                # the simulation runs at the cap, so a guess above it can
+                # never run (and such a limit could never be bundled)
+                max_gas = min(max_gas, eip8037.TX_GAS_LIMIT_CAP)
         is_continious = False
+        previous_bounds: tuple[int, int] | None = None
+        continuations = 0
         while True:
             (
                 solidity_error,
@@ -175,6 +182,24 @@ class GasManagerV6(GasManager):
                     break
                 min_gas = int(failed_op_params_res[0])
                 max_gas = int(failed_op_params_res[1])
+                continuations += 1
+                if (
+                    (min_gas, max_gas) == previous_bounds
+                    or continuations > self.MAX_CALL_GAS_SEARCH_CONTINUATIONS
+                ):
+                    # numRounds is per call: a continuation that made no
+                    # progress (its first guess didn't fit the call's gas)
+                    # would be re-issued unchanged forever. The count bounds
+                    # the search against bounds that don't narrow as the
+                    # simulation contract's do.
+                    logging.error(
+                        "callGasLimit search stalled at bounds (%s, %s) "
+                        "after %s continuations for sender %s",
+                        min_gas, max_gas, continuations,
+                        user_operation.sender_address,
+                    )
+                    break
+                previous_bounds = (min_gas, max_gas)
                 is_continious = True
             elif solidity_error[:10] == "0x59f233d2":  # EstimateCallGasRevertAtMax
                 error_message = failed_op_params_res[0]
@@ -255,6 +280,10 @@ class GasManagerV6(GasManager):
             "latest",
             deep_union(default_state_overrides, state_override_set_dict)
         ]
+
+        if eip8037.enabled:
+            # empty EIP-8037 state-gas reservoir, as in a real bundle
+            params[0]["gas"] = eip8037.TX_GAS_LIMIT_CAP_HEX
 
         result: Any = await send_rpc_request_to_eth_client(
             self.ethereum_node_urls, "eth_call", params, None, "error"

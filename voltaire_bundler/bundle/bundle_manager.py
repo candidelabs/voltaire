@@ -10,6 +10,7 @@ from eth_account import Account
 from eth_abi import encode
 
 from voltaire_bundler.cli_manager import ConditionalRpc
+from voltaire_bundler.gas import eip8037
 from voltaire_bundler.gas.gas_price_cache import \
     GasPriceCache, GasPriceUnavailableError
 from voltaire_bundler.user_operation.models import \
@@ -539,21 +540,14 @@ class BundlerManager:
             )
             return
 
-        call_data, gas_estimation_hex, merged_storage_map, auth_list = call_data_tuple
+        call_data, bundle_gas_limit, merged_storage_map, auth_list = call_data_tuple
 
-        if call_data is None or gas_estimation_hex is None:
+        if call_data is None or bundle_gas_limit is None:
             logging.debug(
                 "Sending bundle failed. failed call data or gas estimation.")
             return
 
-        multiplier = self.bundle_gas_estimation_multiplier
-        if self.chain_id in (5031, 50312):
-            multiplier = max(multiplier, 1.5)
-
-        gas_estimation_int = math.ceil(
-            gas_estimation_hex * multiplier
-        )
-        gas_estimation_hex = hex(gas_estimation_int)
+        tx_gas_hex = hex(self.bundle_transaction_gas(bundle_gas_limit))
 
         nonce = nonce_result["result"]
 
@@ -600,7 +594,7 @@ class BundlerManager:
 
         logging.info(
             f"Sending bundle with {num_of_user_operations} user operations, "
-            f"gas: {gas_estimation_hex}, "
+            f"gas: {tx_gas_hex}, "
             f"maxFeePerGas: {block_max_fee_per_gas_hex}, "
             f"maxPriorityFeePerGas: {block_max_priority_fee_per_gas_hex}"
         )
@@ -611,7 +605,7 @@ class BundlerManager:
                 "from": bundler_address,
                 "to": entrypoint,
                 "nonce": nonce,
-                "gas": gas_estimation_hex,
+                "gas": tx_gas_hex,
                 "data": call_data,
             }
 
@@ -638,7 +632,7 @@ class BundlerManager:
                 nonce_hex=nonce,
                 max_priority_fee_per_gas_hex=block_max_priority_fee_per_gas_hex,
                 max_fee_per_gas_hex=block_max_fee_per_gas_hex,
-                gas_limit_hex=gas_estimation_hex,
+                gas_limit_hex=tx_gas_hex,
                 destination=entrypoint,
                 value_hex="0x",
                 data=call_data,
@@ -1286,6 +1280,30 @@ class BundlerManager:
         if self.chain_id in (5031, 50312):  # Somnia
             bundle_gas_limit += 200_000 * len(user_operations)
 
+        if eip8037.enabled and bundle_gas_limit > eip8037.TX_GAS_LIMIT_CAP:
+            # Packing keeps bundles within the cap, so this means its
+            # estimate undershot the encoded calldata. Never send a bundle
+            # above the cap, its excess would fund a state-gas reservoir
+            # paid by the bundler (see gas/eip8037.py): shed the last
+            # operation and retry; it is reconsidered on the next tick.
+            # Returning nothing would re-select the same set every tick.
+            dropped = user_operations.pop()
+            logging.warning(
+                "bundle gas %s exceeds the EIP-8037 cap %s; retrying "
+                "without the last operation %s",
+                bundle_gas_limit, eip8037.TX_GAS_LIMIT_CAP,
+                dropped.user_operation_hash,
+            )
+            if len(user_operations) == 0:
+                return None, None, None, []
+            return await self.create_bundle_calldata_and_estimate_gas(
+                user_operations,
+                bundler,
+                entrypoint,
+                highest_verified_at_block,
+                recursion_depth
+            )
+
         # arbitrum One or arbitrum sepolia
         if self.chain_id == 42161 or self.chain_id == 421614:
             # see EntryPointMinBlockArb.sol
@@ -1311,6 +1329,10 @@ class BundlerManager:
             "to": "0xb01c6Ffdd1cb32c1007438D429cC070d129396D4",
             "data": call_data,
         }
+        if eip8037.enabled:
+            # the gas the transaction will carry: without it the node's default
+            # call gas hides state creation the real bundle has to pay for
+            params["gas"] = hex(self.bundle_transaction_gas(bundle_gas_limit))
         if (len(auth_list) > 0):
             params["authorizationList"] = auth_list
 
@@ -1452,6 +1474,20 @@ class BundlerManager:
             + str(result["error"])
         )
         return None, None, None, []
+
+    def bundle_transaction_gas(self, bundle_gas_limit: int) -> int:
+        """Gas the bundle transaction carries: the bundle gas limit times the
+        estimation multiplier (at least 1.5 on Somnia), clamped to 2**24 with
+        --eip8037 so the headroom never funds a state-gas reservoir. The
+        multiplier is headroom on top of the bundle gas limit, which packing
+        keeps within 2**24 on its own; near the cap it is cut short."""
+        multiplier = self.bundle_gas_estimation_multiplier
+        if self.chain_id in (5031, 50312):
+            multiplier = max(multiplier, 1.5)
+        gas = math.ceil(bundle_gas_limit * multiplier)
+        if eip8037.enabled:
+            gas = min(gas, eip8037.TX_GAS_LIMIT_CAP)
+        return gas
 
     async def handle_useroperation_banning(
         self,

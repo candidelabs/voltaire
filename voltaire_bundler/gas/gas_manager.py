@@ -9,6 +9,7 @@ from eth_abi import encode, decode
 from eth_utils import keccak
 
 from voltaire_bundler.custom_types import Address
+from voltaire_bundler.gas import eip8037
 from voltaire_bundler.gas.eip7702_auth_gas import Eip7702AuthGas
 from voltaire_bundler.gas.gas_price_cache import GasPriceCache
 from voltaire_bundler.user_operation.models import UserOperationType
@@ -258,6 +259,7 @@ class GasManager(ABC, Generic[UserOperationType]):
         calculated_preverification_gas = (
             base_preverification_gas + l1_gas
             + await self._eip7702_authorization_gas(user_operation)
+            + await self._zero_deposit_refund_gas(user_operation, entrypoint)
         )
 
         adjusted_preverification_gas = math.ceil(
@@ -270,6 +272,58 @@ class GasManager(ABC, Generic[UserOperationType]):
         )
 
         return adjusted_preverification_gas
+
+    async def _zero_deposit_refund_gas(
+        self, user_operation: UserOperationType, entrypoint: str
+    ) -> int:
+        """EIP-8037 state gas of the refund that re-creates a self-paying
+        sender's EntryPoint deposit slot (eip8037.ZERO_DEPOSIT_REFUND_GAS).
+
+        A sender with a zero deposit has the slot created by the prefund it
+        sends during validation and cleared again when the EntryPoint takes
+        the prefund, which the chain refills; the refund in _postExecution
+        then re-creates it after the EntryPoint has measured actualGas, so
+        the user isn't charged and the bundler pays. With a paymaster the
+        refund goes to the paymaster's deposit, which already covered the
+        prefund. Charged at estimation and checked at submission through
+        get_preverification_gas; a sender that can't be read is priced as
+        zero-deposit. 0 unless --eip8037."""
+        if (
+            not eip8037.enabled
+            or user_operation.paymaster_address_lowercase is not None
+        ):
+            return 0
+        deposit = await self._sender_deposit(
+            user_operation.sender_address, entrypoint
+        )
+        if deposit is None or deposit == 0:
+            return eip8037.ZERO_DEPOSIT_REFUND_GAS
+        return 0
+
+    async def _sender_deposit(
+        self, sender: str, entrypoint: str
+    ) -> int | None:
+        """The sender's EntryPoint deposit at the latest block, None if
+        the read failed."""
+        function_selector = "0x70a08231"  # balanceOf
+        call_data = function_selector + encode(["address"], [sender]).hex()
+        try:
+            result = await send_rpc_request_to_eth_client(
+                self.ethereum_node_urls, "eth_call",
+                [{"to": entrypoint, "data": call_data}, "latest"],
+                None, "result",
+            )
+            if "result" not in result:
+                raise ValueError(str(result.get("error")))
+            value = result["result"]
+            return int(value, 16) if value not in ("0x", "") else 0
+        except Exception as excp:
+            logging.warning(
+                "reading the EntryPoint deposit of %s failed (%s); pricing "
+                "the zero-deposit refund into preVerificationGas",
+                sender, excp,
+            )
+            return None
 
     async def _eip7702_authorization_gas(
         self, user_operation: UserOperationType
@@ -416,13 +470,17 @@ class GasManager(ABC, Generic[UserOperationType]):
     # the estimate, capped at max_verification_gas) and 3 bisection rounds.
     VERIFICATION_GAS_MAX_DOUBLINGS = 4
     VERIFICATION_GAS_BISECTION_ROUNDS = 3
-    # Chains whose gas accounting refills state-creation gas into the frame
-    # that undid the creation (EIP-8037, Glamsterdam) - the only thing that
-    # makes a gasleft() measurement of validation untrustworthy as a limit.
-    # The verify pass costs one eth_call per estimate, so it runs only here.
-    # Sepolia activated Glamsterdam on 2026-10-06; add mainnet and Hoodi
-    # when they follow.
-    STATE_GAS_REFILL_CHAIN_IDS = (11155111,)
+    # Most continuation calls one callGasLimit search may make. Each
+    # continuation that progresses runs at least one probe at
+    # min + (max - min) / 5, so the interval shrinks by a fifth or more per
+    # call: from 2**24 down to one unit is about 75 calls, and the 10%
+    # tolerance stops the search long before. Twice that, for safety.
+    MAX_CALL_GAS_SEARCH_CONTINUATIONS = 150
+    # The verify pass costs one eth_call per estimate, so it runs only with
+    # --eip8037: chains whose gas accounting refills state-creation gas into
+    # the frame that undid the creation (EIP-8037, Glamsterdam) are the only
+    # thing that makes a gasleft() measurement of validation untrustworthy
+    # as a limit.
 
     async def verify_verification_gas_limit(
         self,
@@ -438,7 +496,7 @@ class GasManager(ABC, Generic[UserOperationType]):
         The in-contract estimate is a gasleft() measurement taken while
         validation runs under max_verification_gas, so it is only as good
         as the chain's gas accounting lets it be. On EIP-8037 chains
-        (Glamsterdam: Sepolia since October 2026) state-creation gas is
+        (Glamsterdam, --eip8037) state-creation gas is
         refilled into the frame that undoes the creation, which makes any
         gasleft() difference spanning a create-then-reset undercount; the
         simulation contracts correct the EntryPoint deposit-slot case, but
@@ -448,10 +506,10 @@ class GasManager(ABC, Generic[UserOperationType]):
         the measurement missed surfaces here instead of on-chain as
         AA23/AA21. Common case: one extra eth_call that passes. On a
         shortfall the limit is doubled until validation fits, then
-        bisected back to within ~10%. On every other chain the estimate is
+        bisected back to within ~10%. Without the flag the estimate is
         returned untouched, with no extra call.
         """
-        if self.chain_id not in self.STATE_GAS_REFILL_CHAIN_IDS:
+        if not eip8037.enabled:
             return verification_gas_limit
         candidate = verification_gas_limit
         largest_failed = 0
