@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from eth_abi import encode
+from eth_abi import decode, encode
 
 from voltaire_bundler.gas import eip8037
 from voltaire_bundler.gas.gas_manager_v7v8v9 import GasManagerV7V8V9
@@ -509,3 +509,42 @@ async def test_zero_deposit_refund_is_in_the_quote_and_the_submit_check(
         op.pre_verification_gas = with_term
         await gas_manager.verify_preverification_gas_and_verification_gas_limit(
             op, ENTRYPOINT)
+
+
+# --------------------------------------------------- call gas search stall
+
+@pytest.mark.asyncio
+async def test_call_gas_search_stops_when_a_continuation_makes_no_progress(
+    eip8037_flag,
+):
+    """EstimateCallGasContinuation's numRounds is per call, so a
+    continuation whose first guess doesn't fit the capped call's gas
+    comes back with the bounds it was given; re-issuing it would loop
+    forever. With the flag the search also starts from a max the capped
+    simulation can run."""
+    eip8037_flag(True)
+    gas_manager = _gas_manager()
+    args_seen: list[tuple] = []
+    stuck = {"error": {"message": "execution reverted", "data": "0x22cf94e6"
+                       + encode(["uint256"] * 3, [14_000_000, 30_000_000, 1]).hex()}}
+
+    async def responder(nodes_urls, method, params, *args):
+        _, probe_args = decode(
+            ["(address,uint256,bytes,bytes,bytes32,uint256,bytes32,bytes,bytes)",
+             "(uint256,uint256,uint256,bool,bool)"],
+            bytes.fromhex(params[0]["data"][10:]))
+        args_seen.append(probe_args)
+        return stuck
+
+    with patch("voltaire_bundler.gas.gas_manager_v7v8v9."
+               "send_rpc_request_to_eth_client",
+               new_callable=AsyncMock, side_effect=responder):
+        with pytest.raises(ValueError):
+            await gas_manager.estimate_call_gas_and_verificationgas_limit(
+                _op(), ENTRYPOINT, {}, False)
+    # first probe at the capped max, then one continuation at the returned
+    # bounds; it coming back with the same bounds stops the search
+    assert [(a[0], a[1], a[3]) for a in args_seen] == [
+        (0, eip8037.TX_GAS_LIMIT_CAP, False),
+        (14_000_000, 30_000_000, True),
+    ]

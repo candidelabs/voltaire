@@ -211,7 +211,12 @@ class GasManagerV7V8V9(GasManager):
             max_gas = user_operation.call_gas_limit
         else:
             max_gas = self.max_call_data_gas
+            if eip8037.enabled:
+                # the simulation runs at the cap, so a guess above it can
+                # never run (and such a limit could never be bundled)
+                max_gas = min(max_gas, eip8037.TX_GAS_LIMIT_CAP)
         is_continious = False
+        previous_bounds: tuple[int, int] | None = None
         while True:
             (
                 solidity_error,
@@ -234,6 +239,17 @@ class GasManagerV7V8V9(GasManager):
                     break
                 min_gas = int(failed_op_params_res[0])
                 max_gas = int(failed_op_params_res[1])
+                if (min_gas, max_gas) == previous_bounds:
+                    # numRounds is per call: a continuation that made no
+                    # progress (its first guess didn't fit the call's gas)
+                    # would be re-issued unchanged forever
+                    logging.error(
+                        "callGasLimit search stalled at bounds (%s, %s) "
+                        "for sender %s",
+                        min_gas, max_gas, user_operation.sender_address,
+                    )
+                    break
+                previous_bounds = (min_gas, max_gas)
                 is_continious = True
             elif solidity_error[:10] == "0x59f233d2":  # EstimateCallGasRevertAtMax
                 error_message = failed_op_params_res[0]
