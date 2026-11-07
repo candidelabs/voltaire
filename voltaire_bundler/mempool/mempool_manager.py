@@ -16,6 +16,7 @@ from voltaire_bundler.user_operation.user_operation_handler import UserOperation
 from voltaire_bundler.validation.validation_manager import ValidationManager
 from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.user_operation import UserOperation
+from voltaire_bundler.gas import eip8037
 from voltaire_bundler.utils.eth_client_utils import send_rpc_request_to_eth_client
 
 from .sender_mempool import SenderMempool
@@ -210,12 +211,20 @@ class LocalMempoolManager():
         # Skip over-cap ops individually (don't truncate on the first one):
         # a single oversized op in the middle of fee-order candidates
         # shouldn't starve later smaller ops that still fit.
+        # --eip8037: the bundle's gas limit (incl. preVerificationGas and
+        # calldata) must also stay within 2**24 (see gas/eip8037.py).
         accumulated = 0
+        bundle_gas = eip8037.BUNDLE_OVERHEAD_GAS
         user_operations: list[UserOperation] = []
         for op in candidates:
             op_max = op.get_max_gas_without_pre_verification_gas()
             if accumulated + op_max > max_compined_bundle_user_operations_gas_limit:
                 continue
+            if eip8037.enabled:
+                op_bundle_gas = eip8037.operation_bundle_gas(op)
+                if bundle_gas + op_bundle_gas > eip8037.TX_GAS_LIMIT_CAP:
+                    continue
+                bundle_gas += op_bundle_gas
             accumulated += op_max
             user_operations.append(op)
 

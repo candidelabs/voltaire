@@ -28,6 +28,7 @@ from voltaire_bundler.user_operation.models import (
 from voltaire_bundler.validation.tracer_manager import TracerManager
 from .validation_manager import ValidationManager
 from voltaire_bundler.custom_types import Address
+from voltaire_bundler.gas import eip8037
 from voltaire_bundler.utils.eip7702 import format_hex_array_for_rlp_encode
 
 
@@ -288,6 +289,9 @@ class ValidationManagerV7V8V9(ValidationManager):
             block_number if block_number is not None else "latest",
             state_overrides
         ]
+        if eip8037.enabled:
+            # empty EIP-8037 state-gas reservoir, as in a real bundle
+            params[0]["gas"] = eip8037.TX_GAS_LIMIT_CAP_HEX
 
         result: Any = await send_rpc_request_to_eth_client(
             self.ethereum_node_urls, "eth_call", params
@@ -412,6 +416,9 @@ class ValidationManagerV7V8V9(ValidationManager):
                 "stateOverrides": state_overrides
             }
         ]
+        if eip8037.enabled:
+            # empty EIP-8037 state-gas reservoir, as in a real bundle
+            params[0]["gas"] = eip8037.TX_GAS_LIMIT_CAP_HEX
         res: Any = await send_rpc_request_to_eth_client(
             self.ethereum_node_debug_trace_call_urls, "debug_traceCall", params
         )

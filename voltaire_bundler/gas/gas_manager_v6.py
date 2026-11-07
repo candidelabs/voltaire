@@ -10,6 +10,7 @@ from voltaire_bundler.gas.gas_manager import \
     GasManager, calculate_deposit_slot_index, deep_union
 from voltaire_bundler.gas.somnia_gas_estimation import \
     SOMNIA_CHAIN_IDS, estimate_call_gas_somnia
+from voltaire_bundler.gas import eip8037
 from voltaire_bundler.gas.gas_price_cache import GasPriceCache
 from voltaire_bundler.custom_types import Address
 from voltaire_bundler.user_operation.models import FailedOp
@@ -255,6 +256,10 @@ class GasManagerV6(GasManager):
             "latest",
             deep_union(default_state_overrides, state_override_set_dict)
         ]
+
+        if eip8037.enabled:
+            # empty EIP-8037 state-gas reservoir, as in a real bundle
+            params[0]["gas"] = eip8037.TX_GAS_LIMIT_CAP_HEX
 
         result: Any = await send_rpc_request_to_eth_client(
             self.ethereum_node_urls, "eth_call", params, None, "error"
