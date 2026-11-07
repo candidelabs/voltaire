@@ -51,6 +51,7 @@ RPC_PATH = {
 
 def _make_user_operation(version: str, verification_gas_limit: str = "0x0",
                          call_gas_limit: str = "0x0"):
+    """A v0.6 or v0.7 operation with everything to estimate left at 0."""
     if version == "v6":
         return UserOperationV6({
             "sender": SENDER,
@@ -98,6 +99,7 @@ def eip8037_chain(monkeypatch):
 
 
 def _make_gas_manager(version: str):
+    """A v0.6 or v0.7 gas manager against the mock node."""
     cls = GasManagerV6 if version == "v6" else GasManagerV7V8V9
     return cls(
         ethereum_node_urls=["http://localhost:8545"],
@@ -116,6 +118,7 @@ def _make_gas_manager(version: str):
 
 
 def _simulation_result(verification_gas: int, call_gas: int, rounds: int) -> dict:
+    """A SimulationResult revert as the RPC returns it."""
     encoded = encode(["uint256", "uint256", "uint256"],
                      [verification_gas, call_gas, rounds])
     return {"error": {"message": "execution reverted",
@@ -123,6 +126,7 @@ def _simulation_result(verification_gas: int, call_gas: int, rounds: int) -> dic
 
 
 def _failed_op(reason: str) -> dict:
+    """A FailedOp(0, reason) revert as the RPC returns it."""
     encoded = encode(["uint256", "string"], [0, reason])
     return {"error": {"message": "execution reverted",
                       "data": FailedOp.SELECTOR + encoded.hex()}}
@@ -148,6 +152,7 @@ def _responder(version: str, estimated_vgl: int, required_vgl: int,
     calls: list[tuple[int, int, tuple]] = []
 
     async def responder(nodes_urls, method, params, *args):
+        """Decode the probe and answer per the responder's rules."""
         vgl, cgl, probe_args = _decode_call(version, params)
         calls.append((vgl, cgl, probe_args))
         is_check_once = probe_args[4]
@@ -223,6 +228,8 @@ async def test_shortfall_is_doubled_then_bisected(version):
 ])
 @pytest.mark.asyncio
 async def test_every_shortfall_code_triggers_a_raise(version, reason):
+    """Each VERIFICATION_GAS_SHORTFALL_CODES failure of the verify pass
+    raises the quoted limit rather than failing the estimation."""
     gas_manager = _make_gas_manager(version)
     responder, calls = _responder(
         version, estimated_vgl=60_000, required_vgl=100_000, verify_error=reason

@@ -12,7 +12,8 @@ import aiohttp
 
 from voltaire_bundler.gas import eip8037
 from voltaire_bundler.gas.eip7702_auth_gas import (
-    AUTHORITY_CLASSES, Eip7702AuthGas)
+    AUTHORITY_CLASSES, AUTHORITY_DELEGATED, AUTHORITY_EMPTY,
+    AUTHORITY_EXISTING, Eip7702AuthGas)
 from voltaire_bundler.gas.somnia_gas_estimation import SOMNIA_CHAIN_IDS
 from voltaire_bundler.gas.gas_price_cache import (
     GasPriceCache,
@@ -992,15 +993,28 @@ async def _init_eip7702_auth_gas(
     try:
         await eip7702_auth_gas.measure()
     except Exception as exc:
-        logging.error(
-            "EIP-7702 authorization gas measurement failed at startup "
-            "(%r); charging 25,000 per authorization until restart. On a "
-            "chain that prices delegation per EIP-8037 this undercharges "
-            "every first delegation and the bundler pays the difference "
-            "(an empty authority costs ~239,000 on Sepolia). Check that "
-            "the node applies authorizationList in eth_estimateGas with "
-            "state overrides.", exc,
-        )
+        if eip8037.enabled:
+            costs = eip7702_auth_gas.install_state_pricing_fallback()
+            logging.error(
+                "EIP-7702 authorization gas measurement failed at startup "
+                "(%r); charging the fallback table until restart: "
+                "empty authority %d, existing %d, delegated %d. Check that "
+                "the node applies authorizationList and its state gas in "
+                "eth_estimateGas with state overrides.", exc,
+                costs[AUTHORITY_EMPTY], costs[AUTHORITY_EXISTING],
+                costs[AUTHORITY_DELEGATED],
+            )
+        else:
+            logging.error(
+                "EIP-7702 authorization gas measurement failed at startup "
+                "(%r); charging 25,000 per authorization until restart. On "
+                "a chain that prices delegation per EIP-8037 this "
+                "undercharges every first delegation and the bundler pays "
+                "the difference (an empty authority costs ~239,000 on "
+                "Sepolia); run with --eip8037 there. Check that the node "
+                "applies authorizationList in eth_estimateGas with state "
+                "overrides.", exc,
+            )
     return eip7702_auth_gas
 
 

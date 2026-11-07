@@ -1501,6 +1501,17 @@ class BundlerManager:
                 f"useroperation: {user_operation.user_operation_hash}"
             )
             return
+        if reason.startswith("AA95"):
+            # "AA95 out of gas" is the EntryPoint finding less gas left
+            # than the operation's limits need: it is about the gas the
+            # bundle gave handleOps (a bundle packed close to the
+            # --eip8037 cap, the pre-check proxy's 1/64), never about the
+            # operation, which stays in the mempool for the next bundle
+            logging.warning(
+                "Not banning a useroperation the bundle ran out of gas for."
+                f"useroperation: {user_operation.user_operation_hash}"
+            )
+            return
 
         if entrypoint == self.local_mempool_manager_v9.entrypoint:
             mempool_manager = self.local_mempool_manager_v9

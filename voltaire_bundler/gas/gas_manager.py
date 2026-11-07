@@ -16,7 +16,7 @@ from voltaire_bundler.user_operation.models import UserOperationType
 from voltaire_bundler.bundle.exceptions import \
     ValidationException, ValidationExceptionCode
 from voltaire_bundler.utils.eth_client_utils import \
-    encode_handleops_calldata_v6, encode_handleops_calldata_v7v8v9, send_rpc_request_to_eth_client
+    encode_handleops_calldata_v7v8v9, send_rpc_request_to_eth_client
 
 
 def _min_accepting_tolerance(effective_fee: int, block_max_fee: int) -> int:

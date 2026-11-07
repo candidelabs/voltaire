@@ -30,6 +30,7 @@ NODE = ["http://localhost:8545"]
 def eip8037_flag(monkeypatch):
     """Set the module-level flag for one test only."""
     def set_flag(value: bool) -> None:
+        """Enable or disable --eip8037 handling for the rest of the test."""
         monkeypatch.setattr(eip8037, "enabled", value)
     set_flag(False)
     return set_flag
@@ -188,7 +189,8 @@ async def test_bundle_pre_check_simulates_with_the_transaction_gas(eip8037_flag)
         manager = _bundle_manager()
         seen: list[dict] = []
 
-        async def responder(nodes_urls, method, params, *args):
+        async def responder(nodes_urls, method, params, *args, seen=seen):
+            """Record the call object; the pre-check succeeds."""
             seen.append(params[0])
             return {"result": "0x"}
 
@@ -220,6 +222,7 @@ async def test_bundle_over_cap_sheds_the_last_operation_without_banning(
     seen: list[dict] = []
 
     async def responder(nodes_urls, method, params, *args):
+        """Record the call object; the pre-check succeeds."""
         seen.append(params[0])
         return {"result": "0x"}
 
@@ -258,7 +261,8 @@ async def test_validation_simulation_runs_at_the_cap_only_with_the_flag(
             MagicMock(), NODE, BUNDLER, CHAIN_ID, True, False, 0, 0, NODE)
         gases: list = []
 
-        async def responder(nodes_urls, method, params, *args):
+        async def responder(nodes_urls, method, params, *args, gases=gases):
+            """Record the call's gas field; validation succeeds."""
             gases.append(params[0].get("gas"))
             return {"result": "0x00"}
 
@@ -285,12 +289,14 @@ async def test_estimation_simulation_runs_at_the_cap_only_with_the_flag(
             GasPriceCache(NODE, CHAIN_ID, False, 10.0))
         gases: list = []
 
-        async def responder(nodes_urls, method, params, *args):
+        async def responder(nodes_urls, method, params, *args, gases=gases):
+            """Record the call's gas field; the simulation reports a result."""
             gases.append(params[0].get("gas"))
             return revert
 
-        # pvg is estimated too: the zero-deposit read must not be counted
         async def deposit(nodes_urls, method, params, *args):
+            """The zero-deposit read of the pvg estimate: a funded sender,
+            so it isn't counted above."""
             return {"result": hex(10**18)}
 
         with patch("voltaire_bundler.gas.gas_manager_v7v8v9."
@@ -433,6 +439,7 @@ def _deposit_responder(deposit_hex: str):
     calls: list = []
 
     async def responder(nodes_urls, method, params, *args):
+        """Answer with the deposit and record the call."""
         calls.append((method, params))
         return {"result": deposit_hex}
     return responder, calls
@@ -551,6 +558,7 @@ async def test_call_gas_search_stops_when_a_continuation_makes_no_progress(
                        + encode(["uint256"] * 3, [14_000_000, 30_000_000, 1]).hex()}}
 
     async def responder(nodes_urls, method, params, *args):
+        """Always revert with the same continuation bounds."""
         _, probe_args = decode(
             ["(address,uint256,bytes,bytes,bytes32,uint256,bytes32,bytes,bytes)",
              "(uint256,uint256,uint256,bool,bool)"],
@@ -585,6 +593,7 @@ async def test_call_gas_search_is_bounded_even_if_bounds_keep_changing(
     calls = 0
 
     async def responder(nodes_urls, method, params, *args):
+        """Revert with continuation bounds that alternate between two pairs."""
         nonlocal calls
         calls += 1
         bounds = [1_000_000, 2_000_000] if calls % 2 else [1_500_000, 2_500_000]
@@ -599,3 +608,25 @@ async def test_call_gas_search_is_bounded_even_if_bounds_keep_changing(
                 _op(), ENTRYPOINT, {}, False)
     # the first probe, then exactly MAX continuation calls
     assert calls == gas_manager.MAX_CALL_GAS_SEARCH_CONTINUATIONS + 1
+
+
+# ----------------------------------------------------------- AA95 ban
+
+@pytest.mark.asyncio
+async def test_an_out_of_gas_bundle_does_not_ban_the_operation():
+    """AA95 is the EntryPoint finding less gas than the operation's
+    limits need; that's the bundle's gas (packed near the cap, the
+    pre-check proxy's 1/64), not the operation's doing, so it is not
+    banned and no reputation lookups run."""
+    manager = _bundle_manager()
+    op = _op(300_000, 100_000, 50_000)
+    op.user_operation_hash = "0x" + "ab" * 32
+    op.validated_at_block_hex = "0x10"
+    with patch(BUNDLE_RPC, new_callable=AsyncMock) as rpc, \
+            patch("voltaire_bundler.bundle.bundle_manager."
+                  "get_user_operation_logs_for_block_range",
+                  new_callable=AsyncMock) as logs:
+        await manager.handle_useroperation_banning(
+            op, "AA95 out of gas", ENTRYPOINT)
+    rpc.assert_not_called()
+    logs.assert_not_called()

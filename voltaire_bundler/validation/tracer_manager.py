@@ -281,7 +281,10 @@ def validate_entity_banned_opcodes(
         "SELFDESTRUCT",
         "GAS",
         "BLOBHASH",
-        "BLOBBASEFEE"
+        "BLOBBASEFEE",
+        # EIP-7843 (Glamsterdam): the slot number is block environment
+        # like NUMBER and TIMESTAMP
+        "SLOTNUM",
     ]
 
     found_opcodes = opcodes.keys() & BANNED_OPCODES

@@ -39,7 +39,12 @@ When the node rejects the measurement call shape (no state overrides on
 ``eth_estimateGas``, no type-4 estimation), or accepts the tuple and
 ignores it when estimating (the estimate does not grow with the tuple,
 which no real 7702 chain allows), the table stays at 25,000 per class
-with one error at startup until the bundler is restarted. When a sender
+with one error at startup until the bundler is restarted - except with
+--eip8037, where 25,000 would lose ~210k on every first delegation:
+there the table is computed from the EIP-2780/8037 constants instead
+(``STATE_PRICING_FALLBACK_COSTS``), and a measurement that comes back below the
+new-account state gas for an empty authority is treated as failed too,
+since the node evidently isn't pricing state. When a sender
 cannot be classified at all, the most expensive class is assumed:
 the bundler must never pay a tuple out of pocket, an overpaid
 preVerificationGas is the lesser harm.
@@ -59,6 +64,7 @@ from eth_account import Account
 from eth_utils import keccak
 
 from voltaire_bundler.custom_types import Address
+from voltaire_bundler.gas import eip8037
 from voltaire_bundler.utils.eth_client_utils import (
     RpcRequestError,
     send_rpc_request_once,
@@ -72,6 +78,25 @@ AUTHORITY_CLASSES = (AUTHORITY_EMPTY, AUTHORITY_EXISTING, AUTHORITY_DELEGATED)
 # EIP-7702 PER_EMPTY_ACCOUNT_COST: the per-tuple intrinsic charge on chains
 # without EIP-8037, and the fallback when the measurement is unavailable.
 PER_EMPTY_ACCOUNT_COST = 25_000
+
+# Per-class fallback for a chain that prices state creation (--eip8037)
+# when the node can't serve the measurement: Sepolia measured
+# 238,738 / 52,843 / 17,164, rounded up. The EIP sums come out 1-2%
+# below that - EXECUTION_PER_AUTH_BASE_COST 7,816 (EIP-2780) + ACCOUNT_WRITE
+# 9,000 (EIP-8038) = 16,816 per tuple, + 23 x 1530 for the delegation
+# indicator (EIP-8037) = 52,006, + 120 x 1530 for the account = 235,606.
+STATE_PRICING_FALLBACK_COSTS = {
+    AUTHORITY_EMPTY: 245_000,
+    AUTHORITY_EXISTING: 55_000,
+    AUTHORITY_DELEGATED: 18_000,
+}
+
+# EIP-8037 STATE_BYTES_PER_NEW_ACCOUNT x CPSB = 120 x 1530: the state gas
+# of creating the authority's account, the least an empty authority's
+# tuple can cost on a chain that prices state creation. A measurement
+# below it on such a chain is not one.
+EIP8037_NEW_ACCOUNT_STATE_GAS = 120 * 1530
+
 
 # keccak256 of empty code, what eth_getProof reports for an account without
 # code; some clients report the zero hash for an account that does not
@@ -225,6 +250,13 @@ class Eip7702AuthGas:
         )
         return costs
 
+    def install_state_pricing_fallback(self) -> dict[str, int]:
+        """Replace the table with ``STATE_PRICING_FALLBACK_COSTS``; the
+        table still counts as unmeasured."""
+        self.costs = dict(STATE_PRICING_FALLBACK_COSTS)
+        self.measured = False
+        return self.costs
+
     async def _measure_class(self, cls: str) -> int:
         nonce, balance, code = _CLASS_OVERRIDES[cls]
         stand_in = Account.create()
@@ -266,6 +298,20 @@ class Eip7702AuthGas:
             self._rpc("eth_estimateGas", [tx_with_auth, "latest", overrides]),
         )
         difference = int(with_auth, 16) - int(without_auth, 16)
+        if (
+            eip8037.enabled
+            and cls == AUTHORITY_EMPTY
+            and difference < EIP8037_NEW_ACCOUNT_STATE_GAS
+        ):
+            # the chain prices state creation, so delegating from an empty
+            # authority creates its account at the least; a node that
+            # estimates less isn't applying state pricing (a pre-fork
+            # node, or one that applies the tuple without its state gas)
+            raise RuntimeError(
+                f"node doesn't price EIP-8037 state gas in eth_estimateGas: "
+                f"an empty authority's tuple estimated {difference} gas, "
+                f"below the {EIP8037_NEW_ACCOUNT_STATE_GAS} of its account"
+            )
         if difference <= 0:
             # The tuple is charged up front on every 7702 chain, so an
             # estimate that does not grow with it can only mean the node
