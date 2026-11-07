@@ -2,6 +2,7 @@
 (voltaire_bundler/gas/eip8037.py). Pure mock-RPC unit tests."""
 from __future__ import annotations
 
+import math
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -24,11 +25,17 @@ CHAIN_ID = 11155111
 NODE = ["http://localhost:8545"]
 
 
+MULTIPLIER = 1.1
+
+
 @pytest.fixture
 def eip8037_flag(monkeypatch):
-    """Set the module-level flag for one test only."""
-    def set_flag(value: bool) -> None:
-        monkeypatch.setattr(eip8037, "enabled", value)
+    """Configure the module for one test only (restored afterwards)."""
+    monkeypatch.setattr(eip8037, "enabled", False)
+    monkeypatch.setattr(eip8037, "BUNDLE_GAS_BUDGET", eip8037.TX_GAS_LIMIT_CAP)
+
+    def set_flag(value: bool, multiplier: float = MULTIPLIER) -> None:
+        eip8037.configure(value, multiplier)
     set_flag(False)
     return set_flag
 
@@ -75,14 +82,41 @@ def test_packing_estimate_bounds_the_bundle_gas_limit():
     assert estimate >= _bundle_formula(ops)
 
 
-def test_packing_skips_an_operation_that_would_exceed_the_cap():
+def test_packing_skips_an_operation_that_would_exceed_the_budget(eip8037_flag):
     """Three large operations fit the 15M limits-only budget, but only two
-    fit 2**24 once preVerificationGas and calldata count."""
-    big = [_op(3_000_000, 1_000_000, 2_000_000, sender=f"0x{i:040x}")
+    fit the EIP-8037 budget once preVerificationGas and calldata count."""
+    eip8037_flag(True)
+    big = [_op(3_000_000, 1_000_000, 1_500_000, sender=f"0x{i:040x}")
            for i in range(1, 4)]
     per_op = eip8037.operation_bundle_gas(big[0])
-    assert eip8037.BUNDLE_OVERHEAD_GAS + 2 * per_op <= eip8037.TX_GAS_LIMIT_CAP
-    assert eip8037.BUNDLE_OVERHEAD_GAS + 3 * per_op > eip8037.TX_GAS_LIMIT_CAP
+    assert eip8037.BUNDLE_OVERHEAD_GAS + 2 * per_op <= eip8037.BUNDLE_GAS_BUDGET
+    assert eip8037.BUNDLE_OVERHEAD_GAS + 3 * per_op > eip8037.BUNDLE_GAS_BUDGET
+
+
+def test_budget_keeps_the_full_multiplier_within_the_cap(eip8037_flag):
+    """A bundle packed right up to the budget still carries the whole
+    estimation multiplier without the clamp eating into it, so the pre-check
+    proxy's 1/64 and the EntryPoint overhead keep their headroom."""
+    for multiplier in (1.0, 1.1, 1.5):
+        eip8037_flag(True, multiplier)
+        assert eip8037.BUNDLE_GAS_BUDGET == int(
+            eip8037.TX_GAS_LIMIT_CAP / multiplier)
+        manager = _bundle_manager()
+        manager.bundle_gas_estimation_multiplier = multiplier
+        full = math.ceil(eip8037.BUNDLE_GAS_BUDGET * multiplier)
+        assert manager.bundle_transaction_gas(eip8037.BUNDLE_GAS_BUDGET) == full
+        assert full <= eip8037.TX_GAS_LIMIT_CAP
+        # one more unit of bundle gas and the clamp would kick in
+        assert manager.bundle_transaction_gas(
+            eip8037.BUNDLE_GAS_BUDGET + 1) <= eip8037.TX_GAS_LIMIT_CAP
+
+
+def test_configure_with_a_multiplier_below_one_uses_the_cap():
+    eip8037.configure(True, 0.5)
+    try:
+        assert eip8037.BUNDLE_GAS_BUDGET == eip8037.TX_GAS_LIMIT_CAP
+    finally:
+        eip8037.configure(False, 1.0)
 
 
 # ---------------------------------------------------------- bundle tx gas

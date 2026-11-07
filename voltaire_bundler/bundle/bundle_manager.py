@@ -1280,12 +1280,13 @@ class BundlerManager:
         if self.chain_id in (5031, 50312):  # Somnia
             bundle_gas_limit += 200_000 * len(user_operations)
 
-        if eip8037.enabled and bundle_gas_limit > eip8037.TX_GAS_LIMIT_CAP:
-            # Packing keeps bundles within the cap; never send one above it,
-            # its excess would fund a state-gas reservoir paid by the bundler.
+        if eip8037.enabled and bundle_gas_limit > eip8037.BUNDLE_GAS_BUDGET:
+            # Packing keeps bundles within the budget; above it the
+            # transaction gas would be clamped to the cap and lose the
+            # multiplier's headroom (see gas/eip8037.py).
             logging.error(
-                "bundle gas %s exceeds the EIP-8037 cap %s; not sending",
-                bundle_gas_limit, eip8037.TX_GAS_LIMIT_CAP,
+                "bundle gas %s exceeds the EIP-8037 budget %s; not sending",
+                bundle_gas_limit, eip8037.BUNDLE_GAS_BUDGET,
             )
             return None, None, None, []
 
@@ -1463,7 +1464,9 @@ class BundlerManager:
     def bundle_transaction_gas(self, bundle_gas_limit: int) -> int:
         """Gas the bundle transaction carries: the bundle gas limit times the
         estimation multiplier (at least 1.5 on Somnia), clamped to 2**24 with
-        --eip8037 so the headroom never funds a state-gas reservoir."""
+        --eip8037 so the headroom never funds a state-gas reservoir. Bundles
+        are packed against eip8037.BUNDLE_GAS_BUDGET, so the clamp is only a
+        safety net and the multiplier normally applies in full."""
         multiplier = self.bundle_gas_estimation_multiplier
         if self.chain_id in (5031, 50312):
             multiplier = max(multiplier, 1.5)

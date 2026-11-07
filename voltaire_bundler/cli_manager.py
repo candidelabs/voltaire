@@ -1018,7 +1018,7 @@ def print_eip7702_auth_gas(eip7702_auth_gas: Eip7702AuthGas) -> None:
 
 async def get_init_data(args: Namespace) -> InitData:
     init_logging(args)
-    eip8037.enabled = args.eip8037
+    eip8037.configure(args.eip8037, args.bundle_gas_estimation_multiplier)
     if args.disable_p2p is not None or os.getenv("VOLTAIRE_DISABLE_P2P") is not None:
         logging.warning(
             "--disable_p2p / VOLTAIRE_DISABLE_P2P is deprecated and has no "

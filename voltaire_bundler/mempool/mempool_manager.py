@@ -212,7 +212,8 @@ class LocalMempoolManager():
         # a single oversized op in the middle of fee-order candidates
         # shouldn't starve later smaller ops that still fit.
         # --eip8037: the bundle's gas limit (incl. preVerificationGas and
-        # calldata) must also stay within 2**24 (see gas/eip8037.py).
+        # calldata) must also stay within the budget that keeps the bundle
+        # transaction, multiplier included, under 2**24 (see gas/eip8037.py).
         accumulated = 0
         bundle_gas = eip8037.BUNDLE_OVERHEAD_GAS
         user_operations: list[UserOperation] = []
@@ -222,7 +223,7 @@ class LocalMempoolManager():
                 continue
             if eip8037.enabled:
                 op_bundle_gas = eip8037.operation_bundle_gas(op)
-                if bundle_gas + op_bundle_gas > eip8037.TX_GAS_LIMIT_CAP:
+                if bundle_gas + op_bundle_gas > eip8037.BUNDLE_GAS_BUDGET:
                     continue
                 bundle_gas += op_bundle_gas
             accumulated += op_max

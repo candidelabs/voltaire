@@ -10,19 +10,42 @@ that pays for state creation before the frame's own gas. Two consequences:
   leaves the reservoir empty, as in a real bundle.
 * A bundle above 2**24 funds a reservoir that pays its operations' state
   creation, which the bundler pays for. Bundles are packed to stay within
-  2**24 and the transaction gas is clamped to it.
+  the budget below and the transaction gas is clamped to 2**24.
+
+The bundle transaction carries the bundle gas limit times the estimation
+multiplier (--bundle_gas_estimation_multiplier), headroom for the
+EntryPoint's own overhead and for the 1/64 the pre-check proxy retains.
+Clamping alone would eat that headroom for bundles near the cap, so bundles
+are packed against BUNDLE_GAS_BUDGET = 2**24 / multiplier: the multiplier
+then always applies in full and the clamp is only a safety net.
 
 Don't enable it on chains whose operations legitimately exceed 2**24
 (e.g. Somnia).
 """
+import math
 from typing import Any
 
-# Set once at startup from --eip8037 (see cli_manager.get_init_data).
+# Set once at startup by configure() (see cli_manager.get_init_data).
 enabled: bool = False
 
 # EIP-7825 per-transaction gas cap; gas above it is the state-gas reservoir.
 TX_GAS_LIMIT_CAP = 2**24
 TX_GAS_LIMIT_CAP_HEX = hex(TX_GAS_LIMIT_CAP)
+
+# Largest bundle gas limit that still carries the full estimation multiplier
+# within the cap; set by configure().
+BUNDLE_GAS_BUDGET = TX_GAS_LIMIT_CAP
+
+
+def configure(is_enabled: bool, bundle_gas_estimation_multiplier: float) -> None:
+    """Enable or disable the handling and derive the packing budget from
+    the bundle gas estimation multiplier (>= 1.0)."""
+    global enabled, BUNDLE_GAS_BUDGET
+    enabled = is_enabled
+    BUNDLE_GAS_BUDGET = math.floor(
+        TX_GAS_LIMIT_CAP / max(bundle_gas_estimation_multiplier, 1.0)
+    )
+
 
 # Gas the bundle manager adds to a bundle beyond its operations: 50k overhead
 # plus the 21k base transaction, with some slack for the handleOps head.
