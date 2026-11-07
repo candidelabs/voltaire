@@ -1281,14 +1281,28 @@ class BundlerManager:
             bundle_gas_limit += 200_000 * len(user_operations)
 
         if eip8037.enabled and bundle_gas_limit > eip8037.BUNDLE_GAS_BUDGET:
-            # Packing keeps bundles within the budget; above it the
+            # Packing keeps bundles within the budget, so this means its
+            # estimate undershot the encoded calldata. Above the budget the
             # transaction gas would be clamped to the cap and lose the
-            # multiplier's headroom (see gas/eip8037.py).
-            logging.error(
-                "bundle gas %s exceeds the EIP-8037 budget %s; not sending",
+            # multiplier's headroom (see gas/eip8037.py), so shed the last
+            # operation and retry; it is reconsidered on the next tick.
+            # Returning nothing would re-select the same set every tick.
+            dropped = user_operations.pop()
+            logging.warning(
+                "bundle gas %s exceeds the EIP-8037 budget %s; retrying "
+                "without the last operation %s",
                 bundle_gas_limit, eip8037.BUNDLE_GAS_BUDGET,
+                dropped.user_operation_hash,
             )
-            return None, None, None, []
+            if len(user_operations) == 0:
+                return None, None, None, []
+            return await self.create_bundle_calldata_and_estimate_gas(
+                user_operations,
+                bundler,
+                entrypoint,
+                highest_verified_at_block,
+                recursion_depth
+            )
 
         # arbitrum One or arbitrum sepolia
         if self.chain_id == 42161 or self.chain_id == 421614:

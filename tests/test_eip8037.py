@@ -172,6 +172,47 @@ async def test_bundle_pre_check_simulates_with_the_transaction_gas(eip8037_flag)
             assert "gas" not in seen[0]
 
 
+@pytest.mark.asyncio
+async def test_bundle_over_budget_sheds_the_last_operation_without_banning(
+    eip8037_flag,
+):
+    """If the packing estimate ever undershoots, the pre-send check drops
+    the last operation and retries instead of dead-ending (which would
+    re-select the same bundle every tick), and doesn't treat it as a
+    third-validation failure."""
+    eip8037_flag(True)
+    manager = _bundle_manager()
+    ops = [_op(300_000, 100_000, 50_000, sender=f"0x{i:040x}")
+           for i in range(1, 4)]
+    for i, op in enumerate(ops):
+        op.user_operation_hash = f"0x{i:064x}"
+    seen: list[dict] = []
+
+    async def responder(nodes_urls, method, params, *args):
+        seen.append(params[0])
+        return {"result": "0x"}
+
+    # a budget that fits two of the three operations
+    two = _bundle_formula(ops[:2])
+    three = _bundle_formula(ops)
+    with patch.object(eip8037, "BUNDLE_GAS_BUDGET", (two + three) // 2), \
+            patch(BUNDLE_RPC, new_callable=AsyncMock, side_effect=responder):
+        call_data, bundle_gas_limit, _, _ = \
+            await manager.create_bundle_calldata_and_estimate_gas(
+                ops, BUNDLER, ENTRYPOINT, 0)
+    assert bundle_gas_limit == two
+    assert [op.user_operation_hash for op in ops] == ["0x" + "0" * 64,
+                                                      "0x" + "0" * 63 + "1"]
+    assert len(seen) == 1  # the over-budget set never hit the node
+    assert manager.user_operations_to_ban == {}
+
+    # nothing left: no bundle, no error
+    with patch.object(eip8037, "BUNDLE_GAS_BUDGET", 1), \
+            patch(BUNDLE_RPC, new_callable=AsyncMock, side_effect=responder):
+        assert await manager.create_bundle_calldata_and_estimate_gas(
+            [ops[0]], BUNDLER, ENTRYPOINT, 0) == (None, None, None, [])
+
+
 # -------------------------------------------------------------- simulations
 
 @pytest.mark.asyncio
