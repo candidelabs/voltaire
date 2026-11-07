@@ -470,6 +470,12 @@ class GasManager(ABC, Generic[UserOperationType]):
     # the estimate, capped at max_verification_gas) and 3 bisection rounds.
     VERIFICATION_GAS_MAX_DOUBLINGS = 4
     VERIFICATION_GAS_BISECTION_ROUNDS = 3
+    # Most continuation calls one callGasLimit search may make. Each
+    # continuation that progresses runs at least one probe at
+    # min + (max - min) / 5, so the interval shrinks by a fifth or more per
+    # call: from 2**24 down to one unit is about 75 calls, and the 10%
+    # tolerance stops the search long before. Twice that, for safety.
+    MAX_CALL_GAS_SEARCH_CONTINUATIONS = 150
     # The verify pass costs one eth_call per estimate, so it runs only with
     # --eip8037: chains whose gas accounting refills state-creation gas into
     # the frame that undid the creation (EIP-8037, Glamsterdam) are the only

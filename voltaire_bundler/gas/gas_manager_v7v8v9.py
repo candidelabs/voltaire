@@ -217,6 +217,7 @@ class GasManagerV7V8V9(GasManager):
                 max_gas = min(max_gas, eip8037.TX_GAS_LIMIT_CAP)
         is_continious = False
         previous_bounds: tuple[int, int] | None = None
+        continuations = 0
         while True:
             (
                 solidity_error,
@@ -239,14 +240,21 @@ class GasManagerV7V8V9(GasManager):
                     break
                 min_gas = int(failed_op_params_res[0])
                 max_gas = int(failed_op_params_res[1])
-                if (min_gas, max_gas) == previous_bounds:
+                continuations += 1
+                if (
+                    (min_gas, max_gas) == previous_bounds
+                    or continuations > self.MAX_CALL_GAS_SEARCH_CONTINUATIONS
+                ):
                     # numRounds is per call: a continuation that made no
                     # progress (its first guess didn't fit the call's gas)
-                    # would be re-issued unchanged forever
+                    # would be re-issued unchanged forever. The count bounds
+                    # the search against bounds that don't narrow as the
+                    # simulation contract's do.
                     logging.error(
                         "callGasLimit search stalled at bounds (%s, %s) "
-                        "for sender %s",
-                        min_gas, max_gas, user_operation.sender_address,
+                        "after %s continuations for sender %s",
+                        min_gas, max_gas, continuations,
+                        user_operation.sender_address,
                     )
                     break
                 previous_bounds = (min_gas, max_gas)

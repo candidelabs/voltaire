@@ -36,6 +36,7 @@ def eip8037_flag(monkeypatch):
 
 
 def _op(vgl=0, cgl=0, pvg=0, sender=SENDER, call_data="0x"):
+    """A v0.7 operation with the given gas limits (hex-encoded request)."""
     return UserOperationV7V8V9({
         "sender": sender, "nonce": "0x0", "callData": call_data,
         "callGasLimit": hex(cgl), "verificationGasLimit": hex(vgl),
@@ -49,6 +50,7 @@ def _op(vgl=0, cgl=0, pvg=0, sender=SENDER, call_data="0x"):
 
 def _op_v6(vgl=0, cgl=0, pvg=0, sender=SENDER, call_data="0x",
            init_code="0x", paymaster_and_data="0x"):
+    """A v0.6 operation with the given gas limits and packed fields."""
     return UserOperationV6({
         "sender": sender, "nonce": "0x0", "initCode": init_code,
         "callData": call_data, "callGasLimit": hex(cgl),
@@ -148,6 +150,7 @@ def test_multiplier_is_headroom_and_never_shrinks_what_is_accepted(
 # ---------------------------------------------------------- bundle tx gas
 
 def _bundle_manager() -> BundlerManager:
+    """A BundlerManager with just the state the bundle gas paths read."""
     manager = object.__new__(BundlerManager)
     manager.chain_id = CHAIN_ID
     manager.bundle_gas_estimation_multiplier = 1.1
@@ -161,6 +164,8 @@ def _bundle_manager() -> BundlerManager:
 
 
 def test_transaction_gas_is_clamped_to_the_cap_only_with_the_flag(eip8037_flag):
+    """bundle_transaction_gas applies the multiplier in full without the
+    flag and clamps the result to 2**24 with it."""
     manager = _bundle_manager()
     eip8037_flag(False)
     assert manager.bundle_transaction_gas(16_000_000) == 17_600_000
@@ -269,6 +274,8 @@ async def test_validation_simulation_runs_at_the_cap_only_with_the_flag(
 async def test_estimation_simulation_runs_at_the_cap_only_with_the_flag(
     eip8037_flag,
 ):
+    """Every simulateHandleOpMod eth_call of an estimation carries 2**24
+    gas with the flag and no gas field without it."""
     revert = {"error": {"message": "execution reverted", "data": "0xdeb13018"
                         + encode(["uint256"] * 3, [60_000, 20_000, 3]).hex()}}
     for flag, expected in [(True, eip8037.TX_GAS_LIMIT_CAP_HEX), (False, None)]:
@@ -299,7 +306,8 @@ async def test_estimation_simulation_runs_at_the_cap_only_with_the_flag(
 
 # ------------------------------------------------------------ per-op fit
 
-def _endpoint(gas_manager) -> "ExecutionEndpoint":
+def _endpoint(gas_manager):
+    """An ExecutionEndpoint wired for v0.7 estimation and submission only."""
     from voltaire_bundler.execution_endpoint import ExecutionEndpoint
     endpoint = object.__new__(ExecutionEndpoint)
     endpoint.chain_id = CHAIN_ID
@@ -314,6 +322,7 @@ def _endpoint(gas_manager) -> "ExecutionEndpoint":
 
 
 def _op_json(vgl, cgl, pvg, call_data="0x"):
+    """A v0.7 operation as an RPC request dict."""
     return {
         "sender": SENDER, "nonce": "0x0", "callData": call_data,
         "callGasLimit": hex(cgl), "verificationGasLimit": hex(vgl),
@@ -326,6 +335,8 @@ def _op_json(vgl, cgl, pvg, call_data="0x"):
 
 
 def test_check_operation_fits_is_a_no_op_unless_enabled(eip8037_flag):
+    """check_operation_fits does nothing without the flag, rejects an
+    operation over the cap with it, and accepts one exactly at the limit."""
     from voltaire_bundler.bundle.exceptions import ValidationException
     too_big = _op(10_000_000, 5_000_000, 2_000_000)
     assert eip8037.operation_bundle_gas(too_big) > eip8037.TX_GAS_LIMIT_CAP
@@ -366,6 +377,8 @@ async def test_send_user_operation_rejects_an_operation_that_cannot_be_bundled(
 
 @pytest.mark.asyncio
 async def test_estimation_rejects_a_quote_that_cannot_be_bundled(eip8037_flag):
+    """A quote whose limits plus preVerificationGas and calldata exceed
+    the cap is an error with the flag, and returned as-is without it."""
     from voltaire_bundler.bundle.exceptions import ValidationException
     quote = (hex(5_000_000), hex(3_000_000), hex(9_000_000))
     gas_manager = SimpleNamespace(
@@ -392,6 +405,7 @@ async def test_estimation_rejects_a_quote_that_cannot_be_bundled(eip8037_flag):
 
 @pytest.mark.asyncio
 async def test_cli_refuses_the_flag_on_somnia(monkeypatch):
+    """--eip8037 with a Somnia chain id is a parser error."""
     from voltaire_bundler.cli_manager import parse_args
     from voltaire_bundler.gas.somnia_gas_estimation import SOMNIA_CHAIN_IDS
     monkeypatch.delenv("VOLTAIRE_EIP8037", raising=False)
@@ -407,12 +421,15 @@ GAS_MANAGER_RPC = "voltaire_bundler.gas.gas_manager.send_rpc_request_to_eth_clie
 
 
 def _gas_manager() -> GasManagerV7V8V9:
+    """A v0.7 gas manager against the mock node."""
     return GasManagerV7V8V9(
         NODE, CHAIN_ID, BUNDLER, False, 10_000_000, 30_000_000,
         GasPriceCache(NODE, CHAIN_ID, False, 10.0))
 
 
 def _deposit_responder(deposit_hex: str):
+    """A GasManager RPC mock answering every call with ``deposit_hex``,
+    recording the calls it saw."""
     calls: list = []
 
     async def responder(nodes_urls, method, params, *args):
@@ -425,6 +442,9 @@ def _deposit_responder(deposit_hex: str):
 async def test_zero_deposit_refund_is_charged_only_when_it_creates_a_slot(
     eip8037_flag,
 ):
+    """The slot is charged with the flag for a self-paying sender whose
+    deposit is zero (or reads as empty), not for a funded sender, not with
+    a paymaster (no read either), and never without the flag."""
     gas_manager = _gas_manager()
     op = _op(300_000, 90_000, 50_000)
 
@@ -470,6 +490,8 @@ async def test_zero_deposit_refund_is_charged_only_when_it_creates_a_slot(
 
 @pytest.mark.asyncio
 async def test_unreadable_deposit_is_priced_as_zero(eip8037_flag, caplog):
+    """An RPC error or exception reading the deposit prices the slot in,
+    with a warning."""
     eip8037_flag(True)
     gas_manager = _gas_manager()
     op = _op(300_000, 90_000, 50_000)
@@ -548,3 +570,32 @@ async def test_call_gas_search_stops_when_a_continuation_makes_no_progress(
         (0, eip8037.TX_GAS_LIMIT_CAP, False),
         (14_000_000, 30_000_000, True),
     ]
+
+
+@pytest.mark.asyncio
+async def test_call_gas_search_is_bounded_even_if_bounds_keep_changing(
+    eip8037_flag,
+):
+    """The simulation contract only ever narrows the bounds, so a search
+    ends in well under MAX_CALL_GAS_SEARCH_CONTINUATIONS calls; a node
+    that returns bounds that don't narrow (alternating here) must still
+    stop there instead of looping."""
+    eip8037_flag(True)
+    gas_manager = _gas_manager()
+    calls = 0
+
+    async def responder(nodes_urls, method, params, *args):
+        nonlocal calls
+        calls += 1
+        bounds = [1_000_000, 2_000_000] if calls % 2 else [1_500_000, 2_500_000]
+        return {"error": {"message": "execution reverted", "data": "0x22cf94e6"
+                          + encode(["uint256"] * 3, bounds + [1]).hex()}}
+
+    with patch("voltaire_bundler.gas.gas_manager_v7v8v9."
+               "send_rpc_request_to_eth_client",
+               new_callable=AsyncMock, side_effect=responder):
+        with pytest.raises(ValueError):
+            await gas_manager.estimate_call_gas_and_verificationgas_limit(
+                _op(), ENTRYPOINT, {}, False)
+    # the first probe, then exactly MAX continuation calls
+    assert calls == gas_manager.MAX_CALL_GAS_SEARCH_CONTINUATIONS + 1
