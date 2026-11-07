@@ -1,54 +1,40 @@
 """--eip8037: state-gas handling for chains that price state creation per
 EIP-8037 (Glamsterdam).
 
-Transaction gas above the EIP-7825 cap (2**24) funds a state-gas reservoir
-that pays for state creation before the frame's own gas. Two consequences:
+EIP-8037 relaxes the EIP-7825 per-transaction gas cap (2**24): a
+transaction may carry more, but the gas above the cap is a state-gas
+reservoir that pays for state creation before the frame's own gas. Two
+consequences for a bundler:
 
 * A simulation eth_call without a "gas" field runs under the node's default
   cap (~50M), so the reservoir hides state creation from the limits being
   estimated or validated. Those simulations run at 2**24 instead, which
   leaves the reservoir empty, as in a real bundle.
 * A bundle above 2**24 funds a reservoir that pays its operations' state
-  creation, which the bundler pays for. Bundles are packed to stay within
-  the budget below and the transaction gas is clamped to 2**24.
-
-The bundle transaction carries the bundle gas limit times the estimation
-multiplier (--bundle_gas_estimation_multiplier), headroom for the
-EntryPoint's own overhead and for the 1/64 the pre-check proxy retains.
-Clamping alone would eat that headroom for bundles near the cap, so bundles
-are packed against BUNDLE_GAS_BUDGET = 2**24 / multiplier: the multiplier
-then always applies in full and the clamp is only a safety net.
+  creation; the operations' frames then report less gas, the users are
+  charged less and the bundler pays the difference. So the bundle gas
+  limit (the operations' limits incl. preVerificationGas, plus calldata
+  and overhead) is kept within 2**24: operations that could never fit are
+  rejected at estimation and submission, bundles are packed within it, and
+  the transaction gas, normally the bundle gas limit times
+  --bundle_gas_estimation_multiplier, is clamped to it. The multiplier is
+  headroom on top of the limit, so it never reduces what is accepted; near
+  the cap it is simply cut short.
 
 Don't enable it on chains whose operations legitimately exceed 2**24
 (e.g. Somnia).
 """
-import math
 from typing import Any
 
 from voltaire_bundler.bundle.exceptions import (
     ValidationException, ValidationExceptionCode)
 
-# Set once at startup by configure() (see cli_manager.get_init_data).
+# Set once at startup from --eip8037 (see cli_manager.get_init_data).
 enabled: bool = False
 
 # EIP-7825 per-transaction gas cap; gas above it is the state-gas reservoir.
 TX_GAS_LIMIT_CAP = 2**24
 TX_GAS_LIMIT_CAP_HEX = hex(TX_GAS_LIMIT_CAP)
-
-# Largest bundle gas limit that still carries the full estimation multiplier
-# within the cap; set by configure().
-BUNDLE_GAS_BUDGET = TX_GAS_LIMIT_CAP
-
-
-def configure(is_enabled: bool, bundle_gas_estimation_multiplier: float) -> None:
-    """Enable or disable the handling and derive the packing budget from
-    the bundle gas estimation multiplier (>= 1.0)."""
-    global enabled, BUNDLE_GAS_BUDGET
-    enabled = is_enabled
-    BUNDLE_GAS_BUDGET = math.floor(
-        TX_GAS_LIMIT_CAP / max(bundle_gas_estimation_multiplier, 1.0)
-    )
-
 
 # Gas the bundle manager adds to a bundle beyond its operations: 50k overhead
 # plus the 21k base transaction, with some slack for the handleOps head.
@@ -69,12 +55,12 @@ _DYNAMIC_FIELDS = (
 def operation_bundle_gas_limit() -> int:
     """Largest operation_bundle_gas() a single operation may have and still
     fit a bundle on its own."""
-    return BUNDLE_GAS_BUDGET - BUNDLE_OVERHEAD_GAS
+    return TX_GAS_LIMIT_CAP - BUNDLE_OVERHEAD_GAS
 
 
 def check_operation_fits(user_operation: Any) -> None:
     """Raise ValidationException (InvalidFields) if the operation can never
-    be bundled within the budget, so it is rejected at estimation and
+    be bundled within the cap, so it is rejected at estimation and
     submission instead of sitting in the mempool unbundled. No-op unless
     enabled."""
     if not enabled:

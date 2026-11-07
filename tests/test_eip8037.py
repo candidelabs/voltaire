@@ -26,17 +26,11 @@ CHAIN_ID = 11155111
 NODE = ["http://localhost:8545"]
 
 
-MULTIPLIER = 1.1
-
-
 @pytest.fixture
 def eip8037_flag(monkeypatch):
-    """Configure the module for one test only (restored afterwards)."""
-    monkeypatch.setattr(eip8037, "enabled", False)
-    monkeypatch.setattr(eip8037, "BUNDLE_GAS_BUDGET", eip8037.TX_GAS_LIMIT_CAP)
-
-    def set_flag(value: bool, multiplier: float = MULTIPLIER) -> None:
-        eip8037.configure(value, multiplier)
+    """Set the module-level flag for one test only."""
+    def set_flag(value: bool) -> None:
+        monkeypatch.setattr(eip8037, "enabled", value)
     set_flag(False)
     return set_flag
 
@@ -121,41 +115,34 @@ def test_packing_estimate_bounds_the_bundle_gas_limit():
         assert estimate >= _bundle_formula(ops)
 
 
-def test_packing_skips_an_operation_that_would_exceed_the_budget(eip8037_flag):
+def test_packing_skips_an_operation_that_would_exceed_the_cap():
     """Three large operations fit the 15M limits-only budget, but only two
-    fit the EIP-8037 budget once preVerificationGas and calldata count."""
-    eip8037_flag(True)
-    big = [_op(3_000_000, 1_000_000, 1_500_000, sender=f"0x{i:040x}")
+    fit 2**24 once preVerificationGas and calldata count."""
+    big = [_op(3_000_000, 1_000_000, 2_000_000, sender=f"0x{i:040x}")
            for i in range(1, 4)]
     per_op = eip8037.operation_bundle_gas(big[0])
-    assert eip8037.BUNDLE_OVERHEAD_GAS + 2 * per_op <= eip8037.BUNDLE_GAS_BUDGET
-    assert eip8037.BUNDLE_OVERHEAD_GAS + 3 * per_op > eip8037.BUNDLE_GAS_BUDGET
+    assert eip8037.BUNDLE_OVERHEAD_GAS + 2 * per_op <= eip8037.TX_GAS_LIMIT_CAP
+    assert eip8037.BUNDLE_OVERHEAD_GAS + 3 * per_op > eip8037.TX_GAS_LIMIT_CAP
 
 
-def test_budget_keeps_the_full_multiplier_within_the_cap(eip8037_flag):
-    """A bundle packed right up to the budget still carries the whole
-    estimation multiplier without the clamp eating into it, so the pre-check
-    proxy's 1/64 and the EntryPoint overhead keep their headroom."""
+def test_multiplier_is_headroom_and_never_shrinks_what_is_accepted(
+    eip8037_flag,
+):
+    """The estimation multiplier adds gas on top of the bundle gas limit;
+    with --eip8037 that headroom is cut short at 2**24, but the limit the
+    bundler accepts and packs is the cap itself, whatever the multiplier."""
+    eip8037_flag(True)
+    at_cap = eip8037.TX_GAS_LIMIT_CAP - eip8037.BUNDLE_OVERHEAD_GAS
     for multiplier in (1.0, 1.1, 1.5):
-        eip8037_flag(True, multiplier)
-        assert eip8037.BUNDLE_GAS_BUDGET == int(
-            eip8037.TX_GAS_LIMIT_CAP / multiplier)
         manager = _bundle_manager()
         manager.bundle_gas_estimation_multiplier = multiplier
-        full = math.ceil(eip8037.BUNDLE_GAS_BUDGET * multiplier)
-        assert manager.bundle_transaction_gas(eip8037.BUNDLE_GAS_BUDGET) == full
-        assert full <= eip8037.TX_GAS_LIMIT_CAP
-        # one more unit of bundle gas and the clamp would kick in
+        assert eip8037.operation_bundle_gas_limit() == at_cap
+        # full headroom while it fits under the cap ...
+        assert manager.bundle_transaction_gas(1_000_000) == math.ceil(
+            1_000_000 * multiplier)
+        # ... cut short, not refused, for a bundle packed to the cap
         assert manager.bundle_transaction_gas(
-            eip8037.BUNDLE_GAS_BUDGET + 1) <= eip8037.TX_GAS_LIMIT_CAP
-
-
-def test_configure_with_a_multiplier_below_one_uses_the_cap():
-    eip8037.configure(True, 0.5)
-    try:
-        assert eip8037.BUNDLE_GAS_BUDGET == eip8037.TX_GAS_LIMIT_CAP
-    finally:
-        eip8037.configure(False, 1.0)
+            eip8037.TX_GAS_LIMIT_CAP) == eip8037.TX_GAS_LIMIT_CAP
 
 
 # ---------------------------------------------------------- bundle tx gas
@@ -212,7 +199,7 @@ async def test_bundle_pre_check_simulates_with_the_transaction_gas(eip8037_flag)
 
 
 @pytest.mark.asyncio
-async def test_bundle_over_budget_sheds_the_last_operation_without_banning(
+async def test_bundle_over_cap_sheds_the_last_operation_without_banning(
     eip8037_flag,
 ):
     """If the packing estimate ever undershoots, the pre-send check drops
@@ -231,10 +218,10 @@ async def test_bundle_over_budget_sheds_the_last_operation_without_banning(
         seen.append(params[0])
         return {"result": "0x"}
 
-    # a budget that fits two of the three operations
+    # a cap that fits two of the three operations
     two = _bundle_formula(ops[:2])
     three = _bundle_formula(ops)
-    with patch.object(eip8037, "BUNDLE_GAS_BUDGET", (two + three) // 2), \
+    with patch.object(eip8037, "TX_GAS_LIMIT_CAP", (two + three) // 2), \
             patch(BUNDLE_RPC, new_callable=AsyncMock, side_effect=responder):
         call_data, bundle_gas_limit, _, _ = \
             await manager.create_bundle_calldata_and_estimate_gas(
@@ -242,11 +229,11 @@ async def test_bundle_over_budget_sheds_the_last_operation_without_banning(
     assert bundle_gas_limit == two
     assert [op.user_operation_hash for op in ops] == ["0x" + "0" * 64,
                                                       "0x" + "0" * 63 + "1"]
-    assert len(seen) == 1  # the over-budget set never hit the node
+    assert len(seen) == 1  # the over-cap set never hit the node
     assert manager.user_operations_to_ban == {}
 
     # nothing left: no bundle, no error
-    with patch.object(eip8037, "BUNDLE_GAS_BUDGET", 1), \
+    with patch.object(eip8037, "TX_GAS_LIMIT_CAP", 1), \
             patch(BUNDLE_RPC, new_callable=AsyncMock, side_effect=responder):
         assert await manager.create_bundle_calldata_and_estimate_gas(
             [ops[0]], BUNDLER, ENTRYPOINT, 0) == (None, None, None, [])
@@ -352,9 +339,9 @@ def test_check_operation_fits_is_a_no_op_unless_enabled(eip8037_flag):
 async def test_send_user_operation_rejects_an_operation_that_cannot_be_bundled(
     eip8037_flag,
 ):
-    """Under 15M of gas limits (the submit-time check), but over the budget
-    once preVerificationGas and calldata count: reject instead of leaving
-    it in the mempool forever."""
+    """Under 15M of gas limits (the submit-time check), but over 2**24 once
+    preVerificationGas and calldata count: reject instead of leaving it in
+    the mempool forever."""
     from voltaire_bundler.bundle.exceptions import ValidationException
     endpoint = _endpoint(None)
     big = _op_json(9_000_000, 5_000_000, 3_000_000)

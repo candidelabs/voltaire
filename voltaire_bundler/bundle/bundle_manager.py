@@ -1280,18 +1280,18 @@ class BundlerManager:
         if self.chain_id in (5031, 50312):  # Somnia
             bundle_gas_limit += 200_000 * len(user_operations)
 
-        if eip8037.enabled and bundle_gas_limit > eip8037.BUNDLE_GAS_BUDGET:
-            # Packing keeps bundles within the budget, so this means its
-            # estimate undershot the encoded calldata. Above the budget the
-            # transaction gas would be clamped to the cap and lose the
-            # multiplier's headroom (see gas/eip8037.py), so shed the last
+        if eip8037.enabled and bundle_gas_limit > eip8037.TX_GAS_LIMIT_CAP:
+            # Packing keeps bundles within the cap, so this means its
+            # estimate undershot the encoded calldata. Never send a bundle
+            # above the cap, its excess would fund a state-gas reservoir
+            # paid by the bundler (see gas/eip8037.py): shed the last
             # operation and retry; it is reconsidered on the next tick.
             # Returning nothing would re-select the same set every tick.
             dropped = user_operations.pop()
             logging.warning(
-                "bundle gas %s exceeds the EIP-8037 budget %s; retrying "
+                "bundle gas %s exceeds the EIP-8037 cap %s; retrying "
                 "without the last operation %s",
-                bundle_gas_limit, eip8037.BUNDLE_GAS_BUDGET,
+                bundle_gas_limit, eip8037.TX_GAS_LIMIT_CAP,
                 dropped.user_operation_hash,
             )
             if len(user_operations) == 0:
@@ -1478,9 +1478,9 @@ class BundlerManager:
     def bundle_transaction_gas(self, bundle_gas_limit: int) -> int:
         """Gas the bundle transaction carries: the bundle gas limit times the
         estimation multiplier (at least 1.5 on Somnia), clamped to 2**24 with
-        --eip8037 so the headroom never funds a state-gas reservoir. Bundles
-        are packed against eip8037.BUNDLE_GAS_BUDGET, so the clamp is only a
-        safety net and the multiplier normally applies in full."""
+        --eip8037 so the headroom never funds a state-gas reservoir. The
+        multiplier is headroom on top of the bundle gas limit, which packing
+        keeps within 2**24 on its own; near the cap it is cut short."""
         multiplier = self.bundle_gas_estimation_multiplier
         if self.chain_id in (5031, 50312):
             multiplier = max(multiplier, 1.5)
