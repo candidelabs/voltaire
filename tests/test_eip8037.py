@@ -13,6 +13,7 @@ from voltaire_bundler.gas import eip8037
 from voltaire_bundler.gas.gas_manager_v7v8v9 import GasManagerV7V8V9
 from voltaire_bundler.gas.gas_price_cache import GasPriceCache
 from voltaire_bundler.bundle.bundle_manager import BundlerManager
+from voltaire_bundler.user_operation.user_operation_v6 import UserOperationV6
 from voltaire_bundler.user_operation.user_operation_v7v8v9 import \
     UserOperationV7V8V9
 from voltaire_bundler.validation.validation_manager_v7v8v9 import \
@@ -52,15 +53,31 @@ def _op(vgl=0, cgl=0, pvg=0, sender=SENDER, call_data="0x"):
     })
 
 
+def _op_v6(vgl=0, cgl=0, pvg=0, sender=SENDER, call_data="0x",
+           init_code="0x", paymaster_and_data="0x"):
+    return UserOperationV6({
+        "sender": sender, "nonce": "0x0", "initCode": init_code,
+        "callData": call_data, "callGasLimit": hex(cgl),
+        "verificationGasLimit": hex(vgl), "preVerificationGas": hex(pvg),
+        "maxFeePerGas": "0x1e", "maxPriorityFeePerGas": "0x3",
+        "paymasterAndData": paymaster_and_data,
+        "signature": "0x" + "11" * 65,
+    })
+
+
 def _bundle_formula(ops) -> int:
     """What BundlerManager.create_bundle_calldata_and_estimate_gas sets as
     the bundle gas limit (mirrors that code, for the bundler above)."""
     from voltaire_bundler.bundle.bundle_manager import \
         calculate_bundle_calldata_init_gas
-    from voltaire_bundler.utils.eth_client_utils import \
-        encode_handleops_calldata_v7v8v9
-    call_data = encode_handleops_calldata_v7v8v9(
-        [op.to_list() for op in ops], BUNDLER)
+    from voltaire_bundler.utils.eth_client_utils import (
+        encode_handleops_calldata_v6, encode_handleops_calldata_v7v8v9)
+    if isinstance(ops[0], UserOperationV6):
+        call_data = encode_handleops_calldata_v6(
+            [op.to_list() for op in ops], BUNDLER)
+    else:
+        call_data = encode_handleops_calldata_v7v8v9(
+            [op.to_list() for op in ops], BUNDLER)
     return (sum(op.get_max_gas_with_pre_verification_gas() for op in ops)
             + 50_000 + calculate_bundle_calldata_init_gas(call_data))
 
@@ -71,15 +88,37 @@ def test_packing_estimate_bounds_the_bundle_gas_limit():
     """Packing sums operation_bundle_gas + BUNDLE_OVERHEAD_GAS and only
     selects within 2**24, so that sum must never undershoot the gas limit
     the bundle manager sets."""
-    ops = [
+    paymaster = "0x" + "99" * 20
+    v7 = [
         _op(1_469_122, 154_352, 50_468, call_data="0x" + "ab" * 3000),
         _op(300_000, 100_000, 50_000, sender="0x" + "12" * 20,
             call_data="0x" + "00" * 500),
         _op(70_000, 21_000, 45_000, sender="0x" + "34" * 20),
     ]
-    estimate = eip8037.BUNDLE_OVERHEAD_GAS + sum(
-        eip8037.operation_bundle_gas(op) for op in ops)
-    assert estimate >= _bundle_formula(ops)
+    # the packed paymasterAndData / initCode prefixes (paymaster address
+    # and gas limits, factory address) aren't dynamic fields, so they're
+    # covered by the per-operation encoding allowance
+    with_paymaster = _op(200_000, 90_000, 48_000, sender="0x" + "56" * 20)
+    with_paymaster.paymaster = paymaster
+    with_paymaster.paymaster_verification_gas_limit = 60_000
+    with_paymaster.paymaster_post_op_gas_limit = 20_000
+    with_paymaster.paymaster_data = b"\xcd" * 100
+    with_paymaster.factory = "0x" + "77" * 20
+    with_paymaster.factory_data = b"\xef" * 64
+    with_paymaster._set_factory_and_paymaster_address()
+    v7.append(with_paymaster)
+    # v0.6 has the widest ABI head (11 words per operation)
+    v6 = [
+        _op_v6(1_469_122, 154_352, 50_468, call_data="0x" + "ab" * 3000),
+        _op_v6(300_000, 100_000, 50_000, sender="0x" + "12" * 20,
+               init_code="0x" + "77" * 20 + "ef" * 64,
+               paymaster_and_data=paymaster + "cd" * 100),
+        _op_v6(70_000, 21_000, 45_000, sender="0x" + "34" * 20),
+    ]
+    for ops in (v7, v7[:1], [with_paymaster], v6, v6[1:2]):
+        estimate = eip8037.BUNDLE_OVERHEAD_GAS + sum(
+            eip8037.operation_bundle_gas(op) for op in ops)
+        assert estimate >= _bundle_formula(ops)
 
 
 def test_packing_skips_an_operation_that_would_exceed_the_budget(eip8037_flag):
