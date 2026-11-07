@@ -13,6 +13,7 @@ import aiohttp
 from voltaire_bundler.gas import eip8037
 from voltaire_bundler.gas.eip7702_auth_gas import (
     AUTHORITY_CLASSES, Eip7702AuthGas)
+from voltaire_bundler.gas.somnia_gas_estimation import SOMNIA_CHAIN_IDS
 from voltaire_bundler.gas.gas_price_cache import (
     GasPriceCache,
     DEFAULT_REFRESH_INTERVAL_SECONDS,
@@ -773,6 +774,11 @@ async def parse_args(cmd_args: [str]) -> InitData:
         argument_parser.error("You can only specify either --ethereum_node_debug_trace_call_url or --unsafe but not both at the same time")
     if args.legacy_mode and args.eip7702:
         argument_parser.error("You can only specify either --is_legacy_mode or --eip7702 but not both at the same time")
+    if args.eip8037 and args.chain_id in SOMNIA_CHAIN_IDS:
+        argument_parser.error(
+            "--eip8037 can't be enabled on Somnia: its operations legitimately "
+            "exceed the 2**24 gas the flag keeps simulations and bundles within"
+        )
     init_data = await get_init_data(args)
     return init_data
 

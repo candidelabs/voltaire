@@ -312,3 +312,16 @@ async def test_estimation_rejects_a_quote_that_cannot_be_bundled(eip8037_flag):
     assert await endpoint._event_rpc_estimateUserOperationGas(request) == {
         "callGasLimit": small[0], "preVerificationGas": small[1],
         "verificationGasLimit": small[2]}
+
+
+# -------------------------------------------------------------------- cli
+
+@pytest.mark.asyncio
+async def test_cli_refuses_the_flag_on_somnia(monkeypatch):
+    from voltaire_bundler.cli_manager import parse_args
+    from voltaire_bundler.gas.somnia_gas_estimation import SOMNIA_CHAIN_IDS
+    monkeypatch.delenv("VOLTAIRE_EIP8037", raising=False)
+    base = ["--bundler_secret", "0x" + "11" * 32, "--unsafe"]
+    for chain_id in SOMNIA_CHAIN_IDS:
+        with pytest.raises(SystemExit):
+            await parse_args(base + ["--chain_id", str(chain_id), "--eip8037"])
