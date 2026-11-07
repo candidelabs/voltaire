@@ -608,3 +608,25 @@ async def test_call_gas_search_is_bounded_even_if_bounds_keep_changing(
                 _op(), ENTRYPOINT, {}, False)
     # the first probe, then exactly MAX continuation calls
     assert calls == gas_manager.MAX_CALL_GAS_SEARCH_CONTINUATIONS + 1
+
+
+# ----------------------------------------------------------- AA95 ban
+
+@pytest.mark.asyncio
+async def test_an_out_of_gas_bundle_does_not_ban_the_operation():
+    """AA95 is the EntryPoint finding less gas than the operation's
+    limits need; that's the bundle's gas (packed near the cap, the
+    pre-check proxy's 1/64), not the operation's doing, so it is not
+    banned and no reputation lookups run."""
+    manager = _bundle_manager()
+    op = _op(300_000, 100_000, 50_000)
+    op.user_operation_hash = "0x" + "ab" * 32
+    op.validated_at_block_hex = "0x10"
+    with patch(BUNDLE_RPC, new_callable=AsyncMock) as rpc, \
+            patch("voltaire_bundler.bundle.bundle_manager."
+                  "get_user_operation_logs_for_block_range",
+                  new_callable=AsyncMock) as logs:
+        await manager.handle_useroperation_banning(
+            op, "AA95 out of gas", ENTRYPOINT)
+    rpc.assert_not_called()
+    logs.assert_not_called()
