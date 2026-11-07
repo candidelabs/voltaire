@@ -583,3 +583,66 @@ async def test_validation_consumes_the_state_left_by_the_submit(monkeypatch):
     code = await manager.verify_authorization_and_get_code(user_operation)
     assert code == "0xef0100" + "11" * 20
     assert [c[1] for c in node.calls] == ["eth_getProof"]  # fresh read
+
+
+# ------------------------------------------- EIP-8037 fallback table
+
+def test_fallback_costs_cover_the_sepolia_measurement():
+    """The fallback exists for never underpaying a tuple on an EIP-8037
+    chain, so each class is at or above what Sepolia measured, and not
+    far above it."""
+    from voltaire_bundler.gas.eip7702_auth_gas import STATE_PRICING_FALLBACK_COSTS
+    for cls, measured in SEPOLIA_COSTS.items():
+        assert measured <= STATE_PRICING_FALLBACK_COSTS[cls] <= measured * 1.06
+
+
+@pytest.mark.asyncio
+async def test_measurement_failure_installs_the_computed_table_with_eip8037(
+    monkeypatch, caplog,
+):
+    """With --eip8037 a failed measurement installs the computed table
+    instead of 25,000, and says so."""
+    from voltaire_bundler.cli_manager import _init_eip7702_auth_gas
+    from voltaire_bundler.gas import eip8037
+    from voltaire_bundler.gas.eip7702_auth_gas import STATE_PRICING_FALLBACK_COSTS
+
+    monkeypatch.setattr(eip8037, "enabled", True)
+    _table(FakeNode(costs={cls: 0 for cls in SEPOLIA_COSTS}), monkeypatch)
+    caplog.set_level("ERROR")
+
+    table = await _init_eip7702_auth_gas(True, ["http://a"], BUNDLER, CHAIN_ID)
+
+    assert table is not None and not table.measured
+    assert table.costs == STATE_PRICING_FALLBACK_COSTS
+    message = [r for r in caplog.records if r.levelname == "ERROR"][0].getMessage()
+    assert "fallback" in message
+    assert str(STATE_PRICING_FALLBACK_COSTS[AUTHORITY_EMPTY]) in message
+    assert "25,000" not in message
+
+
+@pytest.mark.asyncio
+async def test_a_node_without_state_pricing_fails_the_measurement_with_eip8037(
+    monkeypatch,
+):
+    """On an EIP-8037 chain an empty authority's tuple creates its account
+    (183,600 of state gas at the least); a node that measures the pre-fork
+    25,000 isn't pricing state, and a table built from it would lose that
+    on every first delegation. Without the flag 25,000 per class is a
+    valid measurement."""
+    from voltaire_bundler.gas import eip8037
+
+    pre_fork = {cls: PER_EMPTY_ACCOUNT_COST for cls in SEPOLIA_COSTS}
+    node = FakeNode(costs=pre_fork)
+
+    table = _table(node, monkeypatch)
+    assert await table.measure() == pre_fork
+
+    monkeypatch.setattr(eip8037, "enabled", True)
+    table = _table(node, monkeypatch)
+    with pytest.raises(RuntimeError, match="doesn't price EIP-8037 state gas"):
+        await table.measure()
+    assert not table.measured
+
+    # a real EIP-8037 measurement still goes through
+    table = _table(FakeNode(), monkeypatch)
+    assert await table.measure() == SEPOLIA_COSTS
