@@ -282,9 +282,16 @@ async def test_estimation_simulation_runs_at_the_cap_only_with_the_flag(
             gases.append(params[0].get("gas"))
             return revert
 
+        # pvg is estimated too: the zero-deposit read must not be counted
+        async def deposit(nodes_urls, method, params, *args):
+            return {"result": hex(10**18)}
+
         with patch("voltaire_bundler.gas.gas_manager_v7v8v9."
                    "send_rpc_request_to_eth_client",
-                   new_callable=AsyncMock, side_effect=responder):
+                   new_callable=AsyncMock, side_effect=responder), \
+                patch("voltaire_bundler.gas.gas_manager."
+                      "send_rpc_request_to_eth_client",
+                      new_callable=AsyncMock, side_effect=deposit):
             await gas_manager.estimate_user_operation_gas(
                 _op(), ENTRYPOINT, {})
         assert gases and all(gas == expected for gas in gases)
@@ -392,3 +399,113 @@ async def test_cli_refuses_the_flag_on_somnia(monkeypatch):
     for chain_id in SOMNIA_CHAIN_IDS:
         with pytest.raises(SystemExit):
             await parse_args(base + ["--chain_id", str(chain_id), "--eip8037"])
+
+
+# ------------------------------------------------- zero-deposit refund
+
+GAS_MANAGER_RPC = "voltaire_bundler.gas.gas_manager.send_rpc_request_to_eth_client"
+
+
+def _gas_manager() -> GasManagerV7V8V9:
+    return GasManagerV7V8V9(
+        NODE, CHAIN_ID, BUNDLER, False, 10_000_000, 30_000_000,
+        GasPriceCache(NODE, CHAIN_ID, False, 10.0))
+
+
+def _deposit_responder(deposit_hex: str):
+    calls: list = []
+
+    async def responder(nodes_urls, method, params, *args):
+        calls.append((method, params))
+        return {"result": deposit_hex}
+    return responder, calls
+
+
+@pytest.mark.asyncio
+async def test_zero_deposit_refund_is_charged_only_when_it_creates_a_slot(
+    eip8037_flag,
+):
+    gas_manager = _gas_manager()
+    op = _op(300_000, 90_000, 50_000)
+
+    # flag off: no read, nothing charged
+    responder, calls = _deposit_responder("0x0")
+    with patch(GAS_MANAGER_RPC, new_callable=AsyncMock, side_effect=responder):
+        assert await gas_manager._zero_deposit_refund_gas(op, ENTRYPOINT) == 0
+    assert calls == []
+
+    eip8037_flag(True)
+    # zero deposit: the refund creates the slot
+    responder, calls = _deposit_responder("0x0")
+    with patch(GAS_MANAGER_RPC, new_callable=AsyncMock, side_effect=responder):
+        assert await gas_manager._zero_deposit_refund_gas(op, ENTRYPOINT) == \
+            eip8037.ZERO_DEPOSIT_REFUND_GAS
+    (method, params), = calls
+    assert method == "eth_call"
+    assert params[0]["to"] == ENTRYPOINT
+    assert params[0]["data"] == "0x70a08231" + encode(["address"], [SENDER]).hex()
+    assert params[1] == "latest"
+
+    # an empty return value is a zero deposit too
+    responder, _ = _deposit_responder("0x")
+    with patch(GAS_MANAGER_RPC, new_callable=AsyncMock, side_effect=responder):
+        assert await gas_manager._zero_deposit_refund_gas(op, ENTRYPOINT) == \
+            eip8037.ZERO_DEPOSIT_REFUND_GAS
+
+    # funded deposit: the refund writes an existing slot
+    responder, _ = _deposit_responder(hex(10**15))
+    with patch(GAS_MANAGER_RPC, new_callable=AsyncMock, side_effect=responder):
+        assert await gas_manager._zero_deposit_refund_gas(op, ENTRYPOINT) == 0
+
+    # paymaster: the refund goes to its deposit, which covered the prefund
+    with_paymaster = _op(300_000, 90_000, 50_000)
+    with_paymaster.paymaster = "0x" + "99" * 20
+    with_paymaster._set_factory_and_paymaster_address()
+    responder, calls = _deposit_responder("0x0")
+    with patch(GAS_MANAGER_RPC, new_callable=AsyncMock, side_effect=responder):
+        assert await gas_manager._zero_deposit_refund_gas(
+            with_paymaster, ENTRYPOINT) == 0
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_unreadable_deposit_is_priced_as_zero(eip8037_flag, caplog):
+    eip8037_flag(True)
+    gas_manager = _gas_manager()
+    op = _op(300_000, 90_000, 50_000)
+    for response in ({"error": {"message": "boom"}}, RuntimeError("down")):
+        with patch(GAS_MANAGER_RPC, new_callable=AsyncMock,
+                   side_effect=[response]):
+            assert await gas_manager._zero_deposit_refund_gas(
+                op, ENTRYPOINT) == eip8037.ZERO_DEPOSIT_REFUND_GAS
+    assert "pricing the zero-deposit refund" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_zero_deposit_refund_is_in_the_quote_and_the_submit_check(
+    eip8037_flag,
+):
+    """Both go through get_preverification_gas: the estimate carries the
+    slot's state gas, and an operation submitted with a preVerificationGas
+    that omits it is rejected rather than costing the bundler the slot."""
+    from voltaire_bundler.bundle.exceptions import ValidationException
+    gas_manager = _gas_manager()
+    op = _op(300_000, 90_000, 50_000)
+    responder, _ = _deposit_responder("0x0")
+
+    with patch(GAS_MANAGER_RPC, new_callable=AsyncMock, side_effect=responder):
+        eip8037_flag(False)
+        without = await gas_manager.get_preverification_gas(op, ENTRYPOINT)
+        eip8037_flag(True)
+        with_term = await gas_manager.get_preverification_gas(op, ENTRYPOINT)
+    assert with_term == without + eip8037.ZERO_DEPOSIT_REFUND_GAS
+
+    op.pre_verification_gas = without
+    with patch(GAS_MANAGER_RPC, new_callable=AsyncMock, side_effect=responder):
+        with pytest.raises(ValidationException) as excinfo:
+            await gas_manager.verify_preverification_gas_and_verification_gas_limit(
+                op, ENTRYPOINT)
+        assert "preVerificationGas is too low" in excinfo.value.message
+        op.pre_verification_gas = with_term
+        await gas_manager.verify_preverification_gas_and_verification_gas_limit(
+            op, ENTRYPOINT)

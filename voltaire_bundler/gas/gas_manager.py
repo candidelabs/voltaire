@@ -9,6 +9,7 @@ from eth_abi import encode, decode
 from eth_utils import keccak
 
 from voltaire_bundler.custom_types import Address
+from voltaire_bundler.gas import eip8037
 from voltaire_bundler.gas.eip7702_auth_gas import Eip7702AuthGas
 from voltaire_bundler.gas.gas_price_cache import GasPriceCache
 from voltaire_bundler.user_operation.models import UserOperationType
@@ -258,6 +259,7 @@ class GasManager(ABC, Generic[UserOperationType]):
         calculated_preverification_gas = (
             base_preverification_gas + l1_gas
             + await self._eip7702_authorization_gas(user_operation)
+            + await self._zero_deposit_refund_gas(user_operation, entrypoint)
         )
 
         adjusted_preverification_gas = math.ceil(
@@ -270,6 +272,58 @@ class GasManager(ABC, Generic[UserOperationType]):
         )
 
         return adjusted_preverification_gas
+
+    async def _zero_deposit_refund_gas(
+        self, user_operation: UserOperationType, entrypoint: str
+    ) -> int:
+        """EIP-8037 state gas of the refund that re-creates a self-paying
+        sender's EntryPoint deposit slot (eip8037.ZERO_DEPOSIT_REFUND_GAS).
+
+        A sender with a zero deposit has the slot created by the prefund it
+        sends during validation and cleared again when the EntryPoint takes
+        the prefund, which the chain refills; the refund in _postExecution
+        then re-creates it after the EntryPoint has measured actualGas, so
+        the user isn't charged and the bundler pays. With a paymaster the
+        refund goes to the paymaster's deposit, which already covered the
+        prefund. Charged at estimation and checked at submission through
+        get_preverification_gas; a sender that can't be read is priced as
+        zero-deposit. 0 unless --eip8037."""
+        if (
+            not eip8037.enabled
+            or user_operation.paymaster_address_lowercase is not None
+        ):
+            return 0
+        deposit = await self._sender_deposit(
+            user_operation.sender_address, entrypoint
+        )
+        if deposit is None or deposit == 0:
+            return eip8037.ZERO_DEPOSIT_REFUND_GAS
+        return 0
+
+    async def _sender_deposit(
+        self, sender: str, entrypoint: str
+    ) -> int | None:
+        """The sender's EntryPoint deposit at the latest block, None if
+        the read failed."""
+        function_selector = "0x70a08231"  # balanceOf
+        call_data = function_selector + encode(["address"], [sender]).hex()
+        try:
+            result = await send_rpc_request_to_eth_client(
+                self.ethereum_node_urls, "eth_call",
+                [{"to": entrypoint, "data": call_data}, "latest"],
+                None, "result",
+            )
+            if "result" not in result:
+                raise ValueError(str(result.get("error")))
+            value = result["result"]
+            return int(value, 16) if value not in ("0x", "") else 0
+        except Exception as excp:
+            logging.warning(
+                "reading the EntryPoint deposit of %s failed (%s); pricing "
+                "the zero-deposit refund into preVerificationGas",
+                sender, excp,
+            )
+            return None
 
     async def _eip7702_authorization_gas(
         self, user_operation: UserOperationType

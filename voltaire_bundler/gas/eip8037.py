@@ -36,6 +36,14 @@ enabled: bool = False
 TX_GAS_LIMIT_CAP = 2**24
 TX_GAS_LIMIT_CAP_HEX = hex(TX_GAS_LIMIT_CAP)
 
+# State gas of one new storage slot: 64 state bytes at 1530 gas each. A
+# self-paying sender whose EntryPoint deposit is zero has the slot created
+# by its prefund and cleared again during validation (refilled), then
+# re-created by the refund in _postExecution after the EntryPoint stopped
+# metering, so only preVerificationGas can charge for it (see
+# GasManager._zero_deposit_refund_gas).
+ZERO_DEPOSIT_REFUND_GAS = 97_920
+
 # Gas the bundle manager adds to a bundle beyond its operations: 50k overhead
 # plus the 21k base transaction, with some slack for the handleOps head.
 BUNDLE_OVERHEAD_GAS = 75_000
