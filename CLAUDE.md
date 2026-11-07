@@ -62,6 +62,7 @@ poetry run python3 -m voltaire_bundler \
 - `--disable_v6`: Skip v0.6 EntryPoint
 - `--disable_entrypoints_code_check`: Skip checking if all EntryPoints are deployed
 - `--eip7702`: Enable EIP-7702 authorization tuple support (required for 7702 accounts)
+- `--eip7623`: On by default: preVerificationGas and the bundle gas limit cover the EIP-7623 calldata floor (Ethereum since Pectra; see `gas/calldata_floor.py`). Pass `--eip7623 false` on chains without the floor (e.g. Arbitrum) to stop overcharging calldata-heavy ops. `--eip8037` implies the EIP-7976 floor
 - `--eip8037`: Chain prices state creation per EIP-8037 (Glamsterdam): simulations run at 2**24 gas and bundles are kept within 2**24 gas (see `gas/eip8037.py`). Don't enable on Somnia
 - `--bundle_interval N`: Seconds between bundle submission attempts (default: 2)
 

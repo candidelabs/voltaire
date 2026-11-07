@@ -363,17 +363,27 @@ class GasManagerV6(GasManager):
 
         return error_selector, error_params_decoded
 
-    def calc_base_preverification_gas(self, user_operation: UserOperationV6) -> int:
+    def packed_for_preverification_gas(
+        self, user_operation: UserOperationV6
+    ) -> bytes:
+        """The operation ABI-encoded as it will be in handleOps' calldata,
+        with a stand-in preVerificationGas and, if the caller supplied
+        none, a dummy 65-byte signature."""
         user_operation_list = user_operation.to_list()
 
         user_operation_list[6] = 21000
 
         # set a dummy signature only if the user didn't supply any
         if len(user_operation_list[10]) < 65:
-            user_operation_list[10] = (
-                b"\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01"  # signature
-            )
+            user_operation_list[10] = b"\x01" * 65  # signature
 
+        return pack_user_operation(user_operation_list, False)
+
+    def execution_gas_limit(self, user_operation: UserOperationV6) -> int:
+        """The operation's gas limits for execution after validation."""
+        return user_operation.call_gas_limit
+
+    def calc_base_preverification_gas(self, user_operation: UserOperationV6) -> int:
         fixed = 21000
         if self.chain_id in SOMNIA_CHAIN_IDS:
             per_user_operation = 18300 + 200_000
@@ -385,8 +395,7 @@ class GasManagerV6(GasManager):
         bundle_size = 1
         # sigSize = 65
 
-        packed = pack_user_operation(
-                user_operation_list, False)
+        packed = self.packed_for_preverification_gas(user_operation)
         packed_length = len(packed)
         zero_byte_count = packed.count(b"\x00")
         non_zero_byte_count = packed_length - zero_byte_count

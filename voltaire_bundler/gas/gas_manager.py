@@ -9,7 +9,7 @@ from eth_abi import encode, decode
 from eth_utils import keccak
 
 from voltaire_bundler.custom_types import Address
-from voltaire_bundler.gas import eip8037
+from voltaire_bundler.gas import calldata_floor, eip8037
 from voltaire_bundler.gas.eip7702_auth_gas import Eip7702AuthGas
 from voltaire_bundler.gas.gas_price_cache import GasPriceCache
 from voltaire_bundler.user_operation.models import UserOperationType
@@ -256,10 +256,20 @@ class GasManager(ABC, Generic[UserOperationType]):
                     f"useroperation hash: {user_operation.user_operation_hash}"
                 )
 
-        calculated_preverification_gas = (
-            base_preverification_gas + l1_gas
+        # gas the bundle really uses for the operation; the L1 data fee
+        # of a rollup is not (it is a fee charged in gas units)
+        gas_used_preverification_gas = (
+            base_preverification_gas
             + await self._eip7702_authorization_gas(user_operation)
             + await self._zero_deposit_refund_gas(user_operation, entrypoint)
+        )
+        calculated_preverification_gas = (
+            gas_used_preverification_gas + l1_gas
+            + calldata_floor.pre_verification_gas_top_up(
+                self.packed_for_preverification_gas(user_operation),
+                gas_used_preverification_gas,
+                self.execution_gas_limit(user_operation),
+            )
         )
 
         adjusted_preverification_gas = math.ceil(
@@ -437,6 +447,16 @@ class GasManager(ABC, Generic[UserOperationType]):
 
     @abstractmethod
     def calc_base_preverification_gas(self, user_operation: UserOperationType) -> int:
+        pass
+
+    @abstractmethod
+    def packed_for_preverification_gas(
+        self, user_operation: UserOperationType
+    ) -> bytes:
+        pass
+
+    @abstractmethod
+    def execution_gas_limit(self, user_operation: UserOperationType) -> int:
         pass
 
     @abstractmethod
