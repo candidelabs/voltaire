@@ -25,6 +25,7 @@ from voltaire_bundler.user_operation.user_operation_handler_v7v8v9 import \
     UserOperationHandlerV7V8V9
 from voltaire_bundler.user_operation.user_operation_handler import \
     fell_user_operation_optional_parameters_for_estimateUserOperationGas
+from voltaire_bundler.gas import eip8037
 from voltaire_bundler.gas.eip7702_auth_gas import Eip7702AuthGas
 from voltaire_bundler.gas.gas_price_cache import \
     GasPriceCache, GasPriceUnavailableError
@@ -439,6 +440,14 @@ class ExecutionEndpoint(Endpoint):
                 "Unsupported entrypoint",
             )
 
+        if eip8037.enabled:
+            # quote only what can be bundled: fill in the estimate and check
+            # the operation fits a bundle within the transaction gas cap
+            user_operation.call_gas_limit = int(call_gas_limit_hex, 16)
+            user_operation.pre_verification_gas = int(preverification_gas_hex, 16)
+            user_operation.verification_gas_limit = int(verification_gas_hex, 16)
+            eip8037.check_operation_fits(user_operation)
+
         return estimated_gas_json
 
     async def _event_rpc_sendUserOperation(self, req_arguments: list) -> str:
@@ -493,6 +502,7 @@ class ExecutionEndpoint(Endpoint):
                 f"UserOperation max gas {max_gas} "
                 f"is larger than {MAX_GAS_PER_USER_OPERATION}",
             )
+        eip8037.check_operation_fits(user_operation)
 
         user_operation_hash = await local_mempool.add_user_operation(
             user_operation

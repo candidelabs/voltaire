@@ -221,3 +221,94 @@ async def test_estimation_simulation_runs_at_the_cap_only_with_the_flag(
             await gas_manager.estimate_user_operation_gas(
                 _op(), ENTRYPOINT, {})
         assert gases and all(gas == expected for gas in gases)
+
+
+# ------------------------------------------------------------ per-op fit
+
+def _endpoint(gas_manager) -> "ExecutionEndpoint":
+    from voltaire_bundler.execution_endpoint import ExecutionEndpoint
+    endpoint = object.__new__(ExecutionEndpoint)
+    endpoint.chain_id = CHAIN_ID
+    endpoint.is_eip7702 = False
+    endpoint.user_operation_handler_v7v8v9 = SimpleNamespace(
+        gas_manager=gas_manager)
+    endpoint.user_operation_handler_v6 = None
+    endpoint.local_mempool_manager_v7 = SimpleNamespace(
+        add_user_operation=AsyncMock(return_value="0x" + "ab" * 32))
+    endpoint.local_mempool_manager_v6 = None
+    return endpoint
+
+
+def _op_json(vgl, cgl, pvg, call_data="0x"):
+    return {
+        "sender": SENDER, "nonce": "0x0", "callData": call_data,
+        "callGasLimit": hex(cgl), "verificationGasLimit": hex(vgl),
+        "preVerificationGas": hex(pvg), "maxFeePerGas": "0x1e",
+        "maxPriorityFeePerGas": "0x3", "signature": "0x" + "11" * 65,
+        "factory": None, "factoryData": None, "paymaster": None,
+        "paymasterVerificationGasLimit": None, "paymasterPostOpGasLimit": None,
+        "paymasterData": None,
+    }
+
+
+def test_check_operation_fits_is_a_no_op_unless_enabled(eip8037_flag):
+    from voltaire_bundler.bundle.exceptions import ValidationException
+    too_big = _op(10_000_000, 5_000_000, 2_000_000)
+    assert eip8037.operation_bundle_gas(too_big) > eip8037.TX_GAS_LIMIT_CAP
+    eip8037.check_operation_fits(too_big)  # disabled: nothing happens
+    eip8037_flag(True)
+    with pytest.raises(ValidationException) as excinfo:
+        eip8037.check_operation_fits(too_big)
+    assert "EIP-7825" in excinfo.value.message
+    # the largest operation that fits a bundle on its own
+    limit = eip8037.operation_bundle_gas_limit()
+    fits = _op(0, 0, limit - eip8037.PER_OPERATION_ENCODING_GAS
+               - eip8037.CALLDATA_GAS_PER_BYTE * 65)
+    assert eip8037.operation_bundle_gas(fits) == limit
+    eip8037.check_operation_fits(fits)
+
+
+@pytest.mark.asyncio
+async def test_send_user_operation_rejects_an_operation_that_cannot_be_bundled(
+    eip8037_flag,
+):
+    """Under 15M of gas limits (the submit-time check), but over the budget
+    once preVerificationGas and calldata count: reject instead of leaving
+    it in the mempool forever."""
+    from voltaire_bundler.bundle.exceptions import ValidationException
+    endpoint = _endpoint(None)
+    big = _op_json(9_000_000, 5_000_000, 3_000_000)
+    eip8037_flag(True)
+    with pytest.raises(ValidationException) as excinfo:
+        await endpoint._event_rpc_sendUserOperation([big, ENTRYPOINT])
+    assert "bundle gas" in excinfo.value.message
+    endpoint.local_mempool_manager_v7.add_user_operation.assert_not_called()
+    # without the flag the same operation goes through to the mempool
+    eip8037_flag(False)
+    assert await endpoint._event_rpc_sendUserOperation(
+        [big, ENTRYPOINT]) == "0x" + "ab" * 32
+    endpoint.local_mempool_manager_v7.add_user_operation.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_estimation_rejects_a_quote_that_cannot_be_bundled(eip8037_flag):
+    from voltaire_bundler.bundle.exceptions import ValidationException
+    quote = (hex(5_000_000), hex(3_000_000), hex(9_000_000))
+    gas_manager = SimpleNamespace(
+        estimate_user_operation_gas=AsyncMock(return_value=quote))
+    endpoint = _endpoint(gas_manager)
+    request = [_op_json(0, 0, 0), ENTRYPOINT, None]
+    eip8037_flag(False)
+    assert await endpoint._event_rpc_estimateUserOperationGas(request) == {
+        "callGasLimit": quote[0], "preVerificationGas": quote[1],
+        "verificationGasLimit": quote[2]}
+    eip8037_flag(True)
+    with pytest.raises(ValidationException) as excinfo:
+        await endpoint._event_rpc_estimateUserOperationGas(request)
+    assert "bundle gas" in excinfo.value.message
+    # a quote that fits is returned unchanged
+    small = (hex(100_000), hex(50_000), hex(200_000))
+    gas_manager.estimate_user_operation_gas = AsyncMock(return_value=small)
+    assert await endpoint._event_rpc_estimateUserOperationGas(request) == {
+        "callGasLimit": small[0], "preVerificationGas": small[1],
+        "verificationGasLimit": small[2]}

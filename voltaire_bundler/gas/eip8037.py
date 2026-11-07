@@ -25,6 +25,9 @@ Don't enable it on chains whose operations legitimately exceed 2**24
 import math
 from typing import Any
 
+from voltaire_bundler.bundle.exceptions import (
+    ValidationException, ValidationExceptionCode)
+
 # Set once at startup by configure() (see cli_manager.get_init_data).
 enabled: bool = False
 
@@ -61,6 +64,30 @@ _DYNAMIC_FIELDS = (
     "init_code", "factory_data", "call_data",
     "paymaster_and_data", "paymaster_data", "signature",
 )
+
+
+def operation_bundle_gas_limit() -> int:
+    """Largest operation_bundle_gas() a single operation may have and still
+    fit a bundle on its own."""
+    return BUNDLE_GAS_BUDGET - BUNDLE_OVERHEAD_GAS
+
+
+def check_operation_fits(user_operation: Any) -> None:
+    """Raise ValidationException (InvalidFields) if the operation can never
+    be bundled within the budget, so it is rejected at estimation and
+    submission instead of sitting in the mempool unbundled. No-op unless
+    enabled."""
+    if not enabled:
+        return
+    gas = operation_bundle_gas(user_operation)
+    limit = operation_bundle_gas_limit()
+    if gas > limit:
+        raise ValidationException(
+            ValidationExceptionCode.InvalidFields,
+            f"UserOperation bundle gas {gas} (gas limits, preVerificationGas "
+            f"and calldata) is larger than {limit}, the most a bundle can "
+            f"carry within the EIP-7825 transaction gas cap",
+        )
 
 
 def operation_bundle_gas(user_operation: Any) -> int:
