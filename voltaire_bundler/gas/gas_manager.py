@@ -470,13 +470,11 @@ class GasManager(ABC, Generic[UserOperationType]):
     # the estimate, capped at max_verification_gas) and 3 bisection rounds.
     VERIFICATION_GAS_MAX_DOUBLINGS = 4
     VERIFICATION_GAS_BISECTION_ROUNDS = 3
-    # Chains whose gas accounting refills state-creation gas into the frame
-    # that undid the creation (EIP-8037, Glamsterdam) - the only thing that
-    # makes a gasleft() measurement of validation untrustworthy as a limit.
-    # The verify pass costs one eth_call per estimate, so it runs only here.
-    # Sepolia activated Glamsterdam on 2026-10-06; add mainnet and Hoodi
-    # when they follow.
-    STATE_GAS_REFILL_CHAIN_IDS = (11155111,)
+    # The verify pass costs one eth_call per estimate, so it runs only with
+    # --eip8037: chains whose gas accounting refills state-creation gas into
+    # the frame that undid the creation (EIP-8037, Glamsterdam) are the only
+    # thing that makes a gasleft() measurement of validation untrustworthy
+    # as a limit.
 
     async def verify_verification_gas_limit(
         self,
@@ -492,7 +490,7 @@ class GasManager(ABC, Generic[UserOperationType]):
         The in-contract estimate is a gasleft() measurement taken while
         validation runs under max_verification_gas, so it is only as good
         as the chain's gas accounting lets it be. On EIP-8037 chains
-        (Glamsterdam: Sepolia since October 2026) state-creation gas is
+        (Glamsterdam, --eip8037) state-creation gas is
         refilled into the frame that undoes the creation, which makes any
         gasleft() difference spanning a create-then-reset undercount; the
         simulation contracts correct the EntryPoint deposit-slot case, but
@@ -502,10 +500,10 @@ class GasManager(ABC, Generic[UserOperationType]):
         the measurement missed surfaces here instead of on-chain as
         AA23/AA21. Common case: one extra eth_call that passes. On a
         shortfall the limit is doubled until validation fits, then
-        bisected back to within ~10%. On every other chain the estimate is
+        bisected back to within ~10%. Without the flag the estimate is
         returned untouched, with no extra call.
         """
-        if self.chain_id not in self.STATE_GAS_REFILL_CHAIN_IDS:
+        if not eip8037.enabled:
             return verification_gas_limit
         candidate = verification_gas_limit
         largest_failed = 0
