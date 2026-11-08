@@ -10,7 +10,7 @@ from eth_account import Account
 from eth_abi import encode
 
 from voltaire_bundler.cli_manager import ConditionalRpc
-from voltaire_bundler.gas import eip8037
+from voltaire_bundler.gas import calldata_floor, eip8037
 from voltaire_bundler.gas.gas_price_cache import \
     GasPriceCache, GasPriceUnavailableError
 from voltaire_bundler.user_operation.models import \
@@ -1279,6 +1279,10 @@ class BundlerManager:
         bundle_gas_limit += 50_000 + bundle_calldata_init_gas
         if self.chain_id in (5031, 50312):  # Somnia
             bundle_gas_limit += 200_000 * len(user_operations)
+        # EIP-7623/7976: a transaction below its calldata floor is invalid
+        bundle_gas_limit = calldata_floor.bundle_gas_limit(
+            bundle_gas_limit, bytes.fromhex(call_data[2:])
+        )
 
         if eip8037.enabled and bundle_gas_limit > eip8037.TX_GAS_LIMIT_CAP:
             # Packing keeps bundles within the cap, so this means its

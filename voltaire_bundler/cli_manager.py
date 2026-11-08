@@ -10,7 +10,7 @@ from importlib.metadata import version
 
 import aiohttp
 
-from voltaire_bundler.gas import eip8037
+from voltaire_bundler.gas import calldata_floor, eip8037
 from voltaire_bundler.gas.eip7702_auth_gas import (
     AUTHORITY_CLASSES, AUTHORITY_DELEGATED, AUTHORITY_EMPTY,
     AUTHORITY_EXISTING, Eip7702AuthGas)
@@ -710,6 +710,22 @@ def initialize_argument_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
+        "--eip7623",
+        type=str_to_bool,
+        help=(
+            "price calldata with the EIP-7623 floor (Ethereum since Pectra): "
+            "preVerificationGas and the bundle gas limit cover it. On by "
+            "default; pass false on a chain without the floor (e.g. Arbitrum) "
+            "to stop overcharging calldata-heavy operations. --eip8037 "
+            "implies the EIP-7976 floor of Glamsterdam either way"
+        ),
+        nargs="?",
+        const=True,
+        default=_get_env_or_default(
+            "VOLTAIRE_EIP7623", True, lambda v: str_to_bool(v)),
+    )
+
+    parser.add_argument(
         "--eip8037",
         type=str_to_bool,
         help=(
@@ -1039,6 +1055,7 @@ def print_eip7702_auth_gas(eip7702_auth_gas: Eip7702AuthGas) -> None:
 async def get_init_data(args: Namespace) -> InitData:
     init_logging(args)
     eip8037.enabled = args.eip8037
+    calldata_floor.enabled = args.eip7623
     if args.disable_p2p is not None or os.getenv("VOLTAIRE_DISABLE_P2P") is not None:
         logging.warning(
             "--disable_p2p / VOLTAIRE_DISABLE_P2P is deprecated and has no "
